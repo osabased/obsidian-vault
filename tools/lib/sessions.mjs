@@ -56,6 +56,7 @@ export function spawnPass(id) {
 function prune(id) {
   fs.rmSync(registry(id), { force: true });
   fs.rmSync(passFiles(id).state, { force: true });
+  // No hook writes 'captured' markers; this clears the ones still in .state/.
   for (const kind of ['gate', 'excerpts', 'captured']) fs.rmSync(vaultPath('.state', kind, id), { recursive: true, force: true });
 }
 

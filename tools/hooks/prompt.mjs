@@ -1,22 +1,9 @@
-import crypto from 'node:crypto';
-import { runHook, config, domainsFor, safeId, logError, appendJsonl, inboxFile } from '../lib/vault.mjs';
-import { capturable, normText } from '../lib/capture.mjs';
+import { runHook, config, domainsFor, safeId, logError } from '../lib/vault.mjs';
 import { readLedger, clip, cmp, byKey, escapeRegExp } from '../lib/rules.mjs';
 import { parseCommands, runCommands } from '../lib/commands.mjs';
 import { touchSession, maybeSweep, mark, marked } from '../lib/sessions.mjs';
 
 const ruleLine = (k, r) => `- ${k}: ${clip(r.text, config().delivery.maxRuleChars)}`;
-
-function capture(input, session) {
-  const at = new Date().toISOString();
-  const rows = capturable(input.prompt)
-    .filter(c => mark('captured', session.session, normText(c.text)))
-    .map(c => ({
-      id: `c-${crypto.randomBytes(4).toString('hex')}`, at, source: 'regex', kinds: c.kinds, text: c.text,
-      session: session.session, transcript: session.transcript, cwd: session.cwd, domain: session.domain,
-    }));
-  appendJsonl(inboxFile(), rows);
-}
 
 function late(session, scope, ledger) {
   const lines = Object.entries(ledger.rules).sort(byKey)
@@ -55,7 +42,6 @@ runHook('prompt', input => {
   const doms = domainsFor(input.cwd).map(d => d.domain);
   const session = doms.length ? touchSession(input) : null;
   try { maybeSweep(safeId(input.session_id)); } catch (e) { logError('sweep', e); }
-  if (session) capture(input, session);
   const scope = ['global', ...doms];
   const ledger = readLedger();
   const context = [session ? late(session, scope, ledger) : '', excerpts(input, scope, ledger)].filter(Boolean).join('\n\n');

@@ -6,7 +6,7 @@ import { spawnSync } from 'node:child_process';
 import { config, statePath, readJsonSafe, writeJson, appendJsonl, appendLine, inboxRows, inboxFile, pickRows, picksFile, plural, tryLock, unlock } from './lib/vault.mjs';
 import { registry, passFiles, lockStaleMs } from './lib/sessions.mjs';
 import { loadNotes, clip, domainTitle } from './lib/rules.mjs';
-import { stripInjected, normText } from './lib/capture.mjs';
+import { stripInjected, capturable, normText } from './lib/capture.mjs';
 import { parseCommands } from './lib/commands.mjs';
 
 const MAX_CHUNKS = 4;
@@ -128,14 +128,18 @@ const askedIn = (blocks, asks) => {
   for (const b of blocks) if (b?.type === 'tool_use' && b.name === 'AskUserQuestion') asks.set(b.id, b.input?.questions);
 };
 
+const stampOf = e => {
+  const stamp = new Date(e.timestamp ?? NaN);
+  return Number.isNaN(stamp.getTime()) ? new Date().toISOString() : stamp.toISOString();
+};
+
 function picksIn(buf, entry) {
   const rows = [];
   const asks = new Map();
   for (const { e, blocks } of entries(buf)) {
     if (e.type === 'assistant') askedIn(blocks, asks);
     if (e.type !== 'user' || !e.toolUseResult?.answers) continue;
-    const stamp = new Date(e.timestamp ?? NaN);
-    const at = Number.isNaN(stamp.getTime()) ? new Date().toISOString() : stamp.toISOString();
+    const at = stampOf(e);
     for (const b of blocks) {
       if (b?.type !== 'tool_result') continue;
       for (const { spec, question, pick, notes } of answersIn(b, e.toolUseResult, asks)) {
@@ -162,6 +166,30 @@ function logPicks(entry) {
   const rows = picksIn(buf, entry).filter(p => !logged.has(pickKey(p)) && logged.add(pickKey(p)));
   appendJsonl(picksFile(), rows);
   return rows.length;
+}
+
+const claim = (seen, n) => {
+  if (!n || seen.some(s => s.includes(n) || n.includes(s))) return false;
+  seen.push(n);
+  return true;
+};
+
+function patternRows(buf, entry, seen) {
+  const rows = [];
+  for (const { e, blocks } of entries(buf)) {
+    const at = stampOf(e);
+    for (const b of userBlocks(e, blocks)) {
+      if (b?.type !== 'text' || !typed(b.text)) continue;
+      for (const c of capturable(b.text)) {
+        if (!claim(seen, normText(c.text))) continue;
+        rows.push({
+          id: `c-${crypto.randomBytes(4).toString('hex')}`, at, source: 'regex', kinds: c.kinds, text: c.text,
+          session: entry.session, transcript: entry.transcript, cwd: entry.cwd, domain: entry.domain,
+        });
+      }
+    }
+  }
+  return rows;
 }
 
 function render(buf, start, agent) {
@@ -292,8 +320,7 @@ function keep(candidates, chunk, seen, entry) {
   for (const c of candidates) {
     const quote = unquote(c?.quote);
     const n = normText(quote);
-    if (!n || !said.includes(n) || seen.some(s => s.includes(n) || n.includes(s))) continue;
-    seen.push(n);
+    if (!n || !said.includes(n) || !claim(seen, n)) continue;
     rows.push({
       id: `p-${crypto.randomBytes(4).toString('hex')}`, at, source: 'pass', kind: c.kind, text: quote,
       do: c.do, not: c.not, because: c.because, topic: c.topic, existing: c.existing,
@@ -328,6 +355,10 @@ function run(id, entry) {
   try {
     const picked = logPicks(entry);
     if (picked) passLog(`${id} logged ${plural(picked, 'pick')}`);
+    const seen = inboxRows().filter(r => r.session === entry.session).map(r => normText(r.text ?? '')).filter(Boolean);
+    const caught = patternRows(got.buf, entry, seen);
+    appendJsonl(inboxFile(), caught);
+    if (caught.length) passLog(`${id} captured ${plural(caught.length, 'sentence')} by pattern`);
     const save = s => writeJson(state, { ...s, picks: true });
     const { items, end, agent } = render(got.buf, got.start, got.restarted ? '' : prev.agent ?? '');
     if (!items.length) {
@@ -335,7 +366,6 @@ function run(id, entry) {
       return 0;
     }
     const chunks = pack(items, config().pass.maxInputChars);
-    const seen = inboxRows().filter(r => r.session === entry.session).map(r => normText(r.text ?? '')).filter(Boolean);
     for (const [i, chunk] of chunks.slice(0, MAX_CHUNKS).entries()) {
       const { candidates, cost } = ask(promptFor(chunk, entry));
       const rows = keep(candidates, chunk, seen, entry);
