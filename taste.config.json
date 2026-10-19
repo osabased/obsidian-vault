@@ -1,0 +1,26 @@
+{
+  "domains": {
+    "roblox-ui": {
+      "title": "Roblox game UI",
+      "projects": ["C:/Users/Lowle/OneDrive/Desktop/roblox-ui"],
+      "topics": ["layout", "color", "typography", "motion", "components", "feedback", "code"]
+    }
+  },
+  "delivery": {
+    "maxRulesPerEdit": 3,
+    "maxRuleChars": 300,
+    "maxBlockChars": 1200,
+    "maxPromptExcerpts": 3,
+    "activeMaxLines": 60,
+    "activeMaxBytes": 4096
+  },
+  "pass": {
+    "command": "C:/Users/Lowle/.local/bin/claude.exe",
+    "model": "sonnet",
+    "effort": "low",
+    "idleHours": 4,
+    "sweepEveryMinutes": 30,
+    "maxInputChars": 60000,
+    "timeoutSeconds": 300
+  }
+}

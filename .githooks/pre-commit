@@ -1,0 +1,2 @@
+#!/bin/sh
+node tools/build.mjs && git add active.md index.md && exec node tools/lint.mjs --fail-on error
