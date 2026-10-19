@@ -27,7 +27,7 @@ These keep the hooks safe to run in every session. Follow them when you change a
 - Code that two entry points share goes in `tools/lib/`; the rest stays in its entry point.
 - Command-line scripts: usage errors exit 2, failures exit 1.
 - Comments only for a non-obvious why. No docstrings, banner comments or TODOs.
-- In transcripts, the user's words are the text of user entries whose `turnOrigin` and `origin.kind` are each absent or "human", the prompts of `queued_command` attachments with `origin.kind` "human" (messages sent mid-turn), and the answers in AskUserQuestion results. Briefs, task notifications and peer messages are not. Read transcripts through `userBlocks()` in `session-pass.mjs`.
+- In transcripts, the user's words are the text of user entries whose `turnOrigin` and `origin.kind` are each absent or "human", the prompts of `queued_command` attachments with `origin.kind` "human" (messages sent mid-turn), and, in AskUserQuestion results, answers typed instead of picking an option and notes on answers. Briefs, task notifications and peer messages are not, and neither is a picked option, which is the agent's wording and goes to `raw/picks/`. Read transcripts through `userBlocks()` and `answered()` in `session-pass.mjs`.
 - No test-only code. Tests change behavior through `taste.config.json`, for example a `pass.command` array.
 
 ## What lint enforces
