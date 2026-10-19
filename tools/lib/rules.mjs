@@ -1,0 +1,239 @@
+import fs from 'node:fs';
+import path from 'node:path';
+import { parse } from './frontmatter.mjs';
+import { validGlob } from './glob.mjs';
+import { config, vaultPath, readJson, writeJson, writeText, shortHash, toPosix } from './vault.mjs';
+
+export const LIST_FIELDS = ['applies_to', 'triggers', 'keywords', 'replaces'];
+export const KEY_RE = /^[a-z0-9-]+\/[a-z0-9-]+$/;
+const KEBAB = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
+const HEAD = [
+  '# Taste rules (confirmed by the user)',
+  "Follow these unless the user's current request or the project's own instructions say otherwise. If an edit is refused with taste rules, apply them and retry the edit.",
+];
+
+export const cmp = (a, b) => (a < b ? -1 : a > b ? 1 : 0);
+export const byKey = ([a], [b]) => cmp(a, b);
+
+export function toKey(ref) {
+  let s = String(ref).trim().replace(/^`+|`+$/g, '').trim().replace(/\.+$/, '');
+  const link = s.match(/^\[\[([^\]|#]+)[^\]]*\]\]$/);
+  if (link) s = link[1];
+  return s.trim().replace(/\\/g, '/').replace(/^\.?\/?wiki\//i, '').replace(/\.md$/i, '').toLowerCase();
+}
+
+export function tryRegex(source) {
+  try { return new RegExp(source); } catch { return null; }
+}
+
+export const escapeRegExp = s => String(s).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+
+const asList = v => (v === null || v === undefined ? [] : Array.isArray(v) ? v.map(String) : null);
+
+function field(lead, name) {
+  const m = lead.match(new RegExp(`^[ \\t]*(?:\\*\\*)?${name}(?::\\*\\*|\\*\\*:|:)[ \\t]*(.*)$`, 'm'));
+  return m ? m[1].trim() : '';
+}
+
+export function parseNote(text, rel) {
+  const { data, body, ok } = parse(text);
+  const parts = rel.replace(/^wiki\//i, '').replace(/\.md$/i, '').split('/');
+  const lead = body.split(/^## /m)[0];
+  const note = {
+    rel,
+    key: parts.join('/'),
+    domain: parts.length > 1 ? parts[0] : '',
+    slug: parts.at(-1),
+    depth: parts.length,
+    ok,
+    data,
+    body,
+    type: data.type,
+    status: data.status,
+    always: data.always === true,
+    do: field(lead, 'Do'),
+    not: field(lead, 'Not'),
+    because: field(lead, 'Because'),
+  };
+  for (const f of LIST_FIELDS) note[f] = asList(data[f]);
+  if (note.replaces) note.replaces = note.replaces.map(toKey);
+  return note;
+}
+
+const sentence = s => (/[.!?…]$/.test(s) ? s : `${s}.`);
+
+export const ruleText = n => [`Do: ${sentence(n.do)}`, `Not: ${sentence(n.not)}`, ...(n.because ? [`Because: ${sentence(n.because)}`] : [])].join(' ');
+
+export const clip = (s, max) => (s.length <= max ? s : `${s.slice(0, max - 1).trimEnd()}…`);
+
+export const noteHash = n => shortHash(JSON.stringify({
+  domain: n.domain, do: n.do, not: n.not, because: n.because,
+  applies_to: n.applies_to ?? [], triggers: n.triggers ?? [], keywords: n.keywords ?? [], always: n.always,
+}));
+
+export function noteErrors(n) {
+  if (!n.ok) return ['no frontmatter'];
+  const errs = [];
+  if (!KEBAB.test(n.slug) || (n.domain && !KEBAB.test(n.domain))) errs.push('file and folder names must be lowercase-kebab-case');
+  if (n.type !== 'rule' && n.type !== 'page') errs.push('type must be rule or page');
+  if (n.domain && n.data.domain !== undefined && n.data.domain !== n.domain) errs.push(`domain is ${n.data.domain} but the note is in wiki/${n.domain}/`);
+  if (n.type !== 'rule') return errs;
+  if (n.data.domain === undefined) errs.push('no domain');
+  if (!['provisional', 'confirmed', 'outdated'].includes(n.status)) errs.push('status must be provisional, confirmed or outdated');
+  if (!['stated', 'inferred'].includes(n.data.basis)) errs.push('basis must be stated or inferred');
+  if (!n.do) errs.push('no **Do:** line');
+  if (!n.not) errs.push('no **Not:** line');
+  for (const f of LIST_FIELDS) if (n[f] === null) errs.push(`${f} must be a list`);
+  for (const g of n.applies_to ?? []) if (!validGlob(g)) errs.push(`bad glob in applies_to: ${g}`);
+  for (const t of n.triggers ?? []) if (!tryRegex(t)) errs.push(`bad regex in triggers: ${t}`);
+  if (n.data.always !== undefined && n.data.always !== null && typeof n.data.always !== 'boolean') errs.push('always must be true or false');
+  return errs;
+}
+
+export function loadNotes() {
+  const root = vaultPath('wiki');
+  const notes = [];
+  const walk = dir => {
+    let entries = [];
+    try { entries = fs.readdirSync(dir, { withFileTypes: true }); } catch {}
+    for (const e of entries) {
+      if (e.name.startsWith('.')) continue;
+      const full = path.join(dir, e.name);
+      if (e.isDirectory()) walk(full);
+      else if (e.isFile() && /\.md$/i.test(e.name)) notes.push(parseNote(fs.readFileSync(full, 'utf8'), `wiki/${path.relative(root, full).replace(/\\/g, '/')}`));
+    }
+  };
+  walk(root);
+  return notes.sort((a, b) => cmp(a.key, b.key));
+}
+
+export function readNote(key) {
+  if (!KEY_RE.test(key)) return null;
+  try {
+    return parseNote(fs.readFileSync(`${vaultPath('wiki', ...key.split('/'))}.md`, 'utf8'), `wiki/${key}.md`);
+  } catch (e) {
+    if (e.code === 'ENOENT') return null;
+    throw e;
+  }
+}
+
+export function readLedger() {
+  const l = readJson(vaultPath('confirmed.json'), {});
+  return { version: 1, ...l, rules: l.rules ?? {}, retired: l.retired ?? {} };
+}
+
+export const writeLedger = ledger => writeJson(vaultPath('confirmed.json'), ledger);
+
+export function domainOrder(domains) {
+  const known = Object.keys(config().domains);
+  const rank = d => (d === 'global' ? -1 : known.includes(d) ? known.indexOf(d) : known.length);
+  return [...new Set(domains)].sort((a, b) => rank(a) - rank(b) || cmp(a, b));
+}
+
+export const domainTitle = d => (d === 'global' ? 'Every project' : config().domains[d]?.title ?? 'not in taste.config.json');
+
+const isRule = line => line.startsWith('- ');
+const alwaysEntries = ledger => Object.entries(ledger.rules).filter(([, r]) => r.always).sort(byKey);
+
+function alwaysLines(ledger, domains) {
+  const { maxRuleChars } = config().delivery;
+  const entries = alwaysEntries(ledger);
+  const lines = [];
+  for (const d of domainOrder(domains)) {
+    const mine = entries.filter(([, r]) => r.domain === d);
+    if (mine.length) lines.push('', `## ${d}`, ...mine.map(([k, r]) => `- ${k}: ${clip(r.text, maxRuleChars)}`));
+  }
+  return lines;
+}
+
+export function alwaysSize(ledger, domains) {
+  const lines = alwaysLines(ledger, domains);
+  if (!lines.length) return { lines: 0, bytes: 0 };
+  const all = [...HEAD, ...lines];
+  return { lines: all.length, bytes: Buffer.byteLength(all.join('\n')) };
+}
+
+export function alwaysContext(domains, ledger = readLedger()) {
+  const lines = alwaysLines(ledger, domains);
+  if (!lines.length) return '';
+  const { activeMaxLines, activeMaxBytes } = config().delivery;
+  const fits = xs => xs.length <= activeMaxLines && Buffer.byteLength(xs.join('\n')) <= activeMaxBytes;
+  if (fits([...HEAD, ...lines])) return [...HEAD, ...lines].join('\n');
+  const total = lines.filter(isRule).length;
+  const tail = shown => ['', `(${total - shown} more didn't fit. See ${toPosix(vaultPath('active.md'))}.)`];
+  const out = [...HEAD];
+  let shown = 0;
+  for (const line of lines) {
+    const next = shown + (isRule(line) ? 1 : 0);
+    if (!fits([...out, line, ...tail(next)])) break;
+    out.push(line);
+    shown = next;
+  }
+  while (out.length > HEAD.length && !isRule(out.at(-1))) out.pop();
+  return [...out, ...tail(shown)].join('\n');
+}
+
+export function renderActive(ledger) {
+  const { maxRuleChars } = config().delivery;
+  const out = [
+    '# Always-on rules',
+    '',
+    "Generated by tools/build.mjs from confirmed.json. Do not edit. Sessions load these at start: global rules in every project, the others in their domain's projects.",
+  ];
+  const entries = alwaysEntries(ledger);
+  if (!entries.length) out.push('', 'None confirmed yet.');
+  for (const d of domainOrder(entries.map(([, r]) => r.domain))) {
+    out.push('', `## ${d} · ${domainTitle(d)}`, '', ...entries.filter(([, r]) => r.domain === d).map(([k, r]) => `- ${k}: ${clip(r.text, maxRuleChars)}`));
+  }
+  return `${out.join('\n')}\n`;
+}
+
+function indexLine(n, ledger) {
+  const link = `[[wiki/${n.key}|${n.slug}]]`;
+  if (n.type === 'page') return `- ${link} · page`;
+  const entry = ledger.rules[n.key];
+  const changed = entry && entry.hash !== noteHash(n) ? ' · changed since confirmed' : '';
+  return `- ${link} · ${n.status ?? 'no status'}${changed} · Do: ${clip(n.do || '(missing)', 100)}`;
+}
+
+export function renderIndex(notes, ledger) {
+  const { domains } = config();
+  const out = ['# Index', '', 'Generated by tools/build.mjs from the notes in wiki/. Do not edit.'];
+  const nested = notes.filter(n => n.depth > 1);
+  const sections = domainOrder([...Object.keys(domains), ...nested.map(n => n.domain)])
+    .map(d => [d, `## ${d} · ${domainTitle(d)}`, nested.filter(n => n.domain === d)]);
+  const top = notes.filter(n => n.depth === 1);
+  if (top.length) sections.push(['', '## (top level)', top]);
+  for (const [d, head, mine] of sections) {
+    out.push('', head);
+    if (!mine.length) {
+      out.push('', 'No notes yet.');
+      continue;
+    }
+    const topics = domains[d]?.topics ?? [];
+    const groups = new Map();
+    for (const n of mine) {
+      const g = n.type === 'page' ? 'pages' : (typeof n.data.topic === 'string' && n.data.topic) || 'no topic';
+      groups.set(g, [...(groups.get(g) ?? []), n]);
+    }
+    const rank = g => (topics.includes(g) ? topics.indexOf(g) : topics.length);
+    for (const g of [...groups.keys()].sort((a, b) => rank(a) - rank(b) || cmp(a, b))) {
+      out.push('', `### ${g}`, '', ...groups.get(g).map(n => indexLine(n, ledger)));
+    }
+  }
+  return `${out.join('\n')}\n`;
+}
+
+export function build({ check = false } = {}) {
+  const ledger = readLedger();
+  const files = { 'active.md': renderActive(ledger), 'index.md': renderIndex(loadNotes(), ledger) };
+  const stale = [];
+  for (const [name, text] of Object.entries(files)) {
+    let current = '';
+    try { current = fs.readFileSync(vaultPath(name), 'utf8').replace(/\r\n/g, '\n'); } catch {}
+    if (current === text) continue;
+    stale.push(name);
+    if (!check) writeText(vaultPath(name), text);
+  }
+  return stale;
+}
