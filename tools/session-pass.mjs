@@ -215,24 +215,36 @@ function pack(items, max) {
   return chunks;
 }
 
+// The pass outlives the session that started it, so its claude runs on its own login. It drops the variables
+// a session hands its children, such as host-managed auth and the desktop app's messaging socket.
+const childEnv = () => ({
+  ...Object.fromEntries(Object.entries(process.env).filter(([k]) => !/^(CLAUDE|AI_AGENT$|BAGGAGE$)/i.test(k))),
+  AGENT_TASTE_PASS: '1',
+});
+
 function ask(text) {
   const { command, model, effort, timeoutSeconds } = config().pass;
   const [exe, ...prefix] = Array.isArray(command) ? command : [command];
+  const name = path.basename(exe);
   const args = [
     ...prefix, '-p', '--safe-mode', '--model', model, '--effort', effort, '--tools', '',
     '--no-session-persistence', '--output-format', 'json', '--json-schema', JSON.stringify(SCHEMA),
   ];
   const r = spawnSync(exe, args, {
     input: text, encoding: 'utf8', cwd: os.tmpdir(), windowsHide: true, timeout: timeoutSeconds * 1000,
-    maxBuffer: 16 << 20, env: { ...process.env, AGENT_TASTE_PASS: '1' },
+    maxBuffer: 16 << 20, env: childEnv(),
   });
   if (r.error) throw r.error;
-  if (r.status !== 0) throw new Error(`${path.basename(exe)} exited with ${r.status ?? r.signal}: ${clip(oneLine(r.stderr || r.stdout), 300)}`);
-  let out;
-  try { out = JSON.parse(r.stdout); } catch { throw new Error(`${path.basename(exe)} printed no JSON: ${clip(oneLine(r.stdout), 300)}`); }
-  if (out?.is_error) throw new Error(`${path.basename(exe)} reported ${out.subtype ?? 'an error'}`);
-  const candidates = out?.structured_output?.candidates;
-  if (!Array.isArray(candidates)) throw new Error(`${path.basename(exe)} returned no structured_output.candidates`);
+  let out = null;
+  try { out = JSON.parse(r.stdout); } catch {}
+  // A failed run still prints its result JSON. Its `result` says why, and its `subtype` can read "success".
+  if (r.status !== 0 || out?.is_error) {
+    const why = filled(out?.result) ?? (r.stderr || r.stdout);
+    throw new Error(`${name} ${r.status !== 0 ? `exited with ${r.status ?? r.signal}` : 'reported an error'}: ${clip(oneLine(why), 300) || 'no output'}`);
+  }
+  if (!out) throw new Error(`${name} printed no JSON: ${clip(oneLine(r.stdout), 300)}`);
+  const candidates = out.structured_output?.candidates;
+  if (!Array.isArray(candidates)) throw new Error(`${name} returned no structured_output.candidates`);
   return { candidates, cost: Number(out.total_cost_usd) || 0 };
 }
 
