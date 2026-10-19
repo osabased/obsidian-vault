@@ -26,7 +26,7 @@ const SCHEMA = {
         additionalProperties: false,
         properties: {
           quote: { type: 'string' },
-          kind: { type: 'string', enum: ['preference', 'correction', 'choice'] },
+          kind: { type: 'string', enum: ['preference', 'correction'] },
           do: { type: 'string' },
           not: { type: 'string' },
           because: { type: 'string' },
@@ -89,20 +89,29 @@ function answersIn(block, result, asks) {
     const answer = filled(Array.isArray(raw) ? raw.join(', ') : raw == null ? '' : String(raw));
     const pick = answer && !answer.trim().startsWith('[User did not answer') ? answer : null;
     const notes = filled(result.annotations?.[question]?.notes);
-    return pick || notes ? [{ spec, question, pick, notes }] : [];
+    return pick || notes ? [{ spec, question, raw, pick, notes }] : [];
   });
 }
 
+// The app fills in markers such as "[No preference]" as answers; they aren't the user's words.
+const isPicked = (part, labels) => labels.includes(part) || /^\[[^\]]*\]$/.test(part);
+
+// Picked options are logged to raw/picks/, so the model sees them for context but may quote only what the
+// user typed. A multi-select answer is a list, with anything typed under Other as its own element.
 function answered(block, result, asks) {
   const lines = [];
   const said = [];
-  for (const { spec, question, pick, notes } of answersIn(block, result, asks)) {
-    const labels = (spec.options ?? []).map(o => o?.label).filter(Boolean);
+  for (const { spec, question, raw, pick, notes } of answersIn(block, result, asks)) {
+    const labels = (spec.options ?? []).map(o => oneLine(o?.label)).filter(Boolean);
     lines.push(`[QUESTION] ${oneLine(question)}${labels.length ? ` Options: ${labels.join(' | ')}` : ''}`);
-    for (const [tag, text] of [['ANSWER', pick], ['NOTES', notes]]) {
+    const parts = pick ? (Array.isArray(raw) ? raw : [raw]).map(p => oneLine(p)).filter(Boolean) : [];
+    const picked = parts.filter(p => isPicked(p, labels));
+    if (picked.length) lines.push(`[PICKED] ${picked.join(', ')}`);
+    const written = parts.filter(p => !isPicked(p, labels)).map(p => ['ANSWER', p]);
+    for (const [tag, text] of [...written, ['NOTES', oneLine(notes)]]) {
       if (!text) continue;
-      lines.push(`[${tag}] ${oneLine(text)}`);
-      said.push(oneLine(text));
+      lines.push(`[${tag}] ${text}`);
+      said.push(text);
     }
   }
   return { lines, said };
@@ -168,28 +177,38 @@ function logPicks(entry) {
   return rows.length;
 }
 
-const claim = (seen, n) => {
-  if (!n || seen.some(s => s.includes(n) || n.includes(s))) return false;
+// Words count as taken only when every text they could come from already holds a row containing them, so words said
+// again go in once without a short quote holding back a longer sentence, or a long one a shorter sentence said
+// elsewhere.
+const claim = (seen, n, from) => {
+  if (!n || from.every(t => seen.some(s => s.includes(n) && t.includes(s)))) return false;
   seen.push(n);
   return true;
 };
 
-function patternRows(buf, entry, seen) {
-  const rows = [];
-  for (const { e, blocks } of entries(buf)) {
+const count = (texts, n) => texts.reduce((k, t) => k + t.split(n).length - 1, 0);
+
+function patternRows(buf, start, entry) {
+  const found = [];
+  for (const { e, blocks, pos } of entries(buf)) {
     const at = stampOf(e);
     for (const b of userBlocks(e, blocks)) {
-      if (b?.type !== 'text' || !typed(b.text)) continue;
+      const t = b?.type === 'text' ? typed(b.text) : null;
+      if (!t) continue;
+      const from = t.said.map(normText);
       for (const c of capturable(b.text)) {
-        if (!claim(seen, normText(c.text))) continue;
-        rows.push({
-          id: `c-${crypto.randomBytes(4).toString('hex')}`, at, source: 'regex', kinds: c.kinds, text: c.text,
-          session: entry.session, transcript: entry.transcript, cwd: entry.cwd, domain: entry.domain,
+        found.push({
+          end: start + pos,
+          from,
+          row: {
+            id: `c-${crypto.randomBytes(4).toString('hex')}`, at, source: 'regex', kinds: c.kinds, text: c.text,
+            session: entry.session, transcript: entry.transcript, cwd: entry.cwd, domain: entry.domain,
+          },
         });
       }
     }
   }
-  return rows;
+  return found;
 }
 
 function render(buf, start, agent) {
@@ -287,13 +306,13 @@ function promptFor(chunk, entry) {
     `Read the conversation below between a user and a coding agent and pick out the user's lasting preferences about ${subject}: how they want things built, how things should look and feel, and what to avoid, stated so that they would still hold in a later session.`,
     ...(topics.length ? [`The topics for this domain are ${topics.join(', ')}.`] : []),
     '',
-    'Each line of the conversation starts with a tag. USER lines are what the user typed. AGENT lines are the end of the agent\'s message just before, for context only. QUESTION lines are questions the agent asked, with their options; ANSWER lines are what the user picked or wrote; NOTES lines are notes the user added to an answer. Tool output is left out.',
+    'Each line of the conversation starts with a tag. USER lines are what the user typed. AGENT lines are the end of the agent\'s message just before, for context only. QUESTION lines are questions the agent asked, with their options; PICKED lines are the options the user picked, for context only; ANSWER lines are answers the user typed instead of picking an option; NOTES lines are notes the user added to an answer. Tool output is left out.',
     '',
     'Leave out instructions for the task at hand that say nothing about later work, questions, bare agreement such as "yes" or "go ahead", and anything the agent proposed that the user didn\'t take up.',
     '',
     'For each lasting preference, fill in:',
     '- quote: the user\'s exact words, copied character for character from one USER, ANSWER or NOTES line. Never paraphrase or join pieces of different lines.',
-    '- kind: preference for a stated liking, correction when the user pushes back on what the agent did, choice when the user picks between options.',
+    '- kind: preference for a stated liking, correction when the user pushes back on what the agent did.',
     '- do: what to do, phrased as a rule.',
     '- not: what to avoid, phrased as a rule.',
     '- because: the reason, only when the user gave one. Never invent a reason; leave it empty otherwise.',
@@ -313,21 +332,26 @@ function promptFor(chunk, entry) {
 
 const unquote = s => String(s ?? '').trim().replace(/^["“”]+/, '').replace(/["“”]+$/, '').trim();
 
-function keep(candidates, chunk, seen, entry) {
-  const said = normText(chunk.said.join('\n'));
+function keep(candidates, chunk, quoted, entry) {
+  const said = chunk.said.map(normText);
   const at = new Date().toISOString();
   const rows = [];
+  const once = [];
   for (const c of candidates) {
     const quote = unquote(c?.quote);
     const n = normText(quote);
-    if (!n || !said.includes(n) || !claim(seen, n)) continue;
+    const from = n ? said.filter(t => t.includes(n)) : [];
+    if (!from.length) continue;
+    // Words found only once in the part were quoted from the sentence that holds them, so it needs no pattern row.
+    if (count(from, n) === 1) once.push(n);
+    if (!claim(quoted, n, from)) continue;
     rows.push({
       id: `p-${crypto.randomBytes(4).toString('hex')}`, at, source: 'pass', kind: c.kind, text: quote,
       do: c.do, not: c.not, because: c.because, topic: c.topic, existing: c.existing,
       session: entry.session, transcript: entry.transcript, cwd: entry.cwd, domain: entry.domain,
     });
   }
-  return rows;
+  return { rows, once };
 }
 
 function readNew(file, offset) {
@@ -352,14 +376,32 @@ function run(id, entry) {
   // Without new lines there is nothing to pick up, so the sweep doesn't reread idle transcripts;
   // `picks` marks state written since picks were logged, so older sessions get one full read.
   if (!got || (!got.buf.length && prev.picks)) return 0;
+  const texts = rows => rows.map(r => normText(r.text ?? '')).filter(Boolean);
+  const mine = inboxRows().filter(r => r.session === entry.session);
+  const seen = texts(mine);
+  // Only the model's rows draft a rule, so a pattern row for the same words doesn't hold one back.
+  const quoted = texts(mine.filter(r => r.source === 'pass'));
+  // Pattern rows wait until the model has read their part and go in only for sentences it didn't quote, either in
+  // full or in words found nowhere else in that part. When its call fails they go in at once, and the retry can
+  // still add the model's rows next to them.
+  let pending = patternRows(got.buf, got.start, entry);
+  const flush = (upTo, once = []) => {
+    const due = pending.filter(p => p.end <= upTo);
+    pending = pending.filter(p => p.end > upTo);
+    const caught = due.filter(p => {
+      const n = normText(p.row.text);
+      return !once.some(q => n.includes(q)) && claim(seen, n, p.from);
+    }).map(p => p.row);
+    appendJsonl(inboxFile(), caught);
+    if (caught.length) passLog(`${id} captured ${plural(caught.length, 'sentence')} by pattern`);
+  };
+  const save = (s, once) => {
+    flush(s.offset, once);
+    writeJson(state, { ...s, picks: true });
+  };
   try {
     const picked = logPicks(entry);
     if (picked) passLog(`${id} logged ${plural(picked, 'pick')}`);
-    const seen = inboxRows().filter(r => r.session === entry.session).map(r => normText(r.text ?? '')).filter(Boolean);
-    const caught = patternRows(got.buf, entry, seen);
-    appendJsonl(inboxFile(), caught);
-    if (caught.length) passLog(`${id} captured ${plural(caught.length, 'sentence')} by pattern`);
-    const save = s => writeJson(state, { ...s, picks: true });
     const { items, end, agent } = render(got.buf, got.start, got.restarted ? '' : prev.agent ?? '');
     if (!items.length) {
       save({ offset: end, agent });
@@ -368,14 +410,16 @@ function run(id, entry) {
     const chunks = pack(items, config().pass.maxInputChars);
     for (const [i, chunk] of chunks.slice(0, MAX_CHUNKS).entries()) {
       const { candidates, cost } = ask(promptFor(chunk, entry));
-      const rows = keep(candidates, chunk, seen, entry);
+      const { rows, once } = keep(candidates, chunk, quoted, entry);
       appendJsonl(inboxFile(), rows);
-      const last = i === chunks.length - 1;
-      save({ offset: last ? end : chunk.end, agent: last ? agent : '' });
+      seen.push(...texts(rows));
       passLog(`${id} kept ${rows.length} of ${candidates.length} candidates, $${cost.toFixed(4)}`);
+      const last = i === chunks.length - 1;
+      save({ offset: last ? end : chunk.end, agent: last ? agent : '' }, once);
     }
     return 0;
   } catch (e) {
+    flush(Infinity);
     passLog(`${id} failed: ${e.message}`);
     return 1;
   }
