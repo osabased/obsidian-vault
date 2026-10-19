@@ -1,11 +1,11 @@
 # Agent taste vault
 
-The user's taste, kept as a small wiki so Claude Code can apply it. Hooks in `tools/hooks/` capture preferences from sessions and deliver confirmed rules back to the agent. The user reads and edits the notes in Obsidian.
+The user's taste, kept as a small wiki so Claude Code can apply it. A background pass started by the hooks in `tools/hooks/` captures preferences from sessions, and the hooks deliver confirmed rules back to the agent. The user reads and edits the notes in Obsidian.
 
 ## Layout
 
 - `raw/` holds sources and is append-only.
-  - `raw/inbox/<date>.jsonl`: preferences captured from sessions, written by the hooks.
+  - `raw/inbox/<date>.jsonl`: preferences captured from sessions, written by the session pass.
   - `raw/picks/<date>.jsonl`: every question the agent asked in a domain session and the user answered, word for word: the question, its options, the pick and any notes. Written by the session pass, without the model.
   - `raw/decisions.jsonl`: review decisions, written by `tools/review.mjs`.
   - `raw/judgments/`: the user's picks between design options, verbatim and dated ("B over A because…"). You may add a new file here when the user makes a pick. Unlike `raw/picks/`, which logs every answered question automatically, these are picks you record by hand, usually with the user's reason.
