@@ -1,7 +1,8 @@
 import fs from 'node:fs';
-import { vaultPath, appendJsonl, inboxRows, pickRows, pendingRows, decisionsFile, plural, today, appendLog, toPosix } from './lib/vault.mjs';
+import { vaultPath, appendJsonl, inboxRows, pickRows, pendingRows, decisionsFile, plural, today, clock, appendLog, toPosix } from './lib/vault.mjs';
 import { KEY_RE, readNote, readLedger, noteHash, ruleText, loadNotes, clip, byKey } from './lib/rules.mjs';
 import { lint, tally } from './lib/lint.mjs';
+import { lastPass } from './lib/sessions.mjs';
 
 const USAGE = [
   'usage: node tools/review.mjs pending [--domain <domain>]',
@@ -157,9 +158,14 @@ function hookHealth() {
   const errors = (readLines(errorsFile) ?? []).filter(l => ISO.test(l));
   if (errors.length) out.push(`${plural(errors.length, 'hook error')} in ${toPosix(errorsFile)}`, `  newest: ${clip(errors.at(-1), 300)}`);
   else out.push('No hook errors.');
-  const passes = readLines(vaultPath('.state', 'passes.log'));
-  const last = passes?.filter(l => l.trim()).at(-1);
-  if (last) out.push(`Last pass: ${last}`);
+  const pass = lastPass();
+  if (!pass) out.push('No passes yet.');
+  else if (pass.failed === undefined) out.push(`Last pass: succeeded at ${clock(new Date(pass.at))} · ${pass.kept} · session ${short(pass.id)}`);
+  else out.push(
+    `Last pass: failed at ${clock(new Date(pass.at))} · session ${short(pass.id)}`,
+    `  reason: ${clip(pass.failed, 300)}`,
+    `  rerun: node tools/session-pass.mjs ${pass.id}`,
+  );
   return out;
 }
 
