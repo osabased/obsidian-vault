@@ -9,6 +9,16 @@ export const registry = id => statePath('sessions', `${id}.json`);
 export const passFiles = id => ({ state: statePath('passes', `${id}.json`), lock: statePath('passes', `${id}.lock`) });
 export const lockStaleMs = () => (config().pass.timeoutSeconds * 4 + 60) * 1000;
 
+const PASS_END = /^(\d{4}-\d{2}-\d{2}T[\d:.]+Z) ([A-Za-z0-9_-]{1,100}) (kept \d.*|failed: (.*))/;
+
+// A pass logs picks and pattern captures along the way; only its kept or failed line says how it ended.
+export function lastPass() {
+  let log = '';
+  try { log = fs.readFileSync(vaultPath('.state', 'passes.log'), 'utf8'); } catch {}
+  const [, at, id, kept, failed] = log.split(/\r?\n/).map(l => PASS_END.exec(l)).findLast(Boolean) ?? [];
+  return at ? { at, id, kept: failed === undefined ? kept : undefined, failed } : null;
+}
+
 // `loaded` records when each domain's always-on rules went into the session's context, so rules
 // confirmed later, or domains the session moves into, are delivered with the next prompt.
 export function touchSession(input, { loaded = [] } = {}) {

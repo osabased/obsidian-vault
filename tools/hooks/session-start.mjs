@@ -1,16 +1,12 @@
-import fs from 'node:fs';
-import { runHook, domainsFor, vaultRel, vaultPath, pendingRows, plural, clock } from '../lib/vault.mjs';
+import { runHook, domainsFor, vaultRel, pendingRows, plural, clock } from '../lib/vault.mjs';
 import { alwaysContext, clip } from '../lib/rules.mjs';
-import { touchSession, clearMarkers } from '../lib/sessions.mjs';
+import { touchSession, clearMarkers, lastPass } from '../lib/sessions.mjs';
 
-const PASS_END = /^(\d{4}-\d{2}-\d{2}T[\d:.]+Z) ([A-Za-z0-9_-]{1,100}) (?:kept \d|failed: (.*))/;
 const LOGIN = /OAuth|authenticat|\/login|not logged in/i;
 
 // Only the newest pass counts: one that succeeds after a failure shows the cause is gone, and the sweep retries the failed session.
 function passNote() {
-  let log = '';
-  try { log = fs.readFileSync(vaultPath('.state', 'passes.log'), 'utf8'); } catch {}
-  const [, at, id, why] = log.split(/\r?\n/).map(l => PASS_END.exec(l)).findLast(Boolean) ?? [];
+  const { at, id, failed: why } = lastPass() ?? {};
   if (why === undefined) return '';
   return [
     `The taste vault's last session pass failed at ${clock(new Date(at))} with "${clip(why, 200)}".`,
