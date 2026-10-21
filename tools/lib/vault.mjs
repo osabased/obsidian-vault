@@ -123,6 +123,7 @@ function datedRows(folder) {
 
 export const inboxRows = () => datedRows('inbox');
 export const pickRows = () => datedRows('picks');
+export const proposalRows = () => inboxRows().filter(r => r.source === 'agent');
 
 export const decisionsFile = () => vaultPath('raw', 'decisions.jsonl');
 

@@ -8,10 +8,9 @@ import { registry, passFiles, lockStaleMs } from './lib/sessions.mjs';
 import { loadNotes, clip, domainTitle } from './lib/rules.mjs';
 import { stripInjected, capturable, normText } from './lib/capture.mjs';
 import { parseCommands } from './lib/commands.mjs';
+import { NOT_TYPED, entries, queuedPrompt } from './lib/transcript.mjs';
 
 const MAX_CHUNKS = 4;
-const SKIPPED_ENTRY = ['isMeta', 'isSidechain', 'isCompactSummary', 'isVisibleInTranscriptOnly'];
-const NOT_TYPED = ['<', '[Request interrupted by user', 'This session is being continued', 'Caveat:'];
 
 const SCHEMA = {
   type: 'object',
@@ -59,13 +58,6 @@ const isUnmarkedOrHuman = v => v == null || v === 'human';
 // by turnOrigin and origin. An entry with neither still counts, so a transcript written without them
 // doesn't silence the pass.
 const userWords = e => isUnmarkedOrHuman(e.turnOrigin) && isUnmarkedOrHuman(e.origin?.kind);
-
-// A message the user sends mid-turn is a queued_command attachment, not a user entry. One without an
-// origin can be another session's report, so only an explicit human origin counts.
-const queuedPrompt = e => {
-  const a = e.type === 'attachment' ? e.attachment : null;
-  return a?.type === 'queued_command' && a.origin?.kind === 'human' && typeof a.prompt === 'string' ? a.prompt : null;
-};
 
 // Answers to questions come back in tool results and are the user's whoever started the turn.
 const userBlocks = (e, blocks) => {
@@ -115,22 +107,6 @@ function answered(block, result, asks) {
     }
   }
   return { lines, said };
-}
-
-function* entries(buf) {
-  let pos = 0;
-  while (pos < buf.length) {
-    const nl = buf.indexOf(10, pos);
-    const stop = nl < 0 ? buf.length : nl;
-    const text = buf.toString('utf8', pos, stop);
-    pos = stop + 1;
-    let e;
-    try { e = JSON.parse(text); } catch { continue; }
-    if (!e || typeof e !== 'object' || SKIPPED_ENTRY.some(f => e[f])) continue;
-    const content = e.message?.content;
-    const blocks = typeof content === 'string' ? [{ type: 'text', text: content }] : Array.isArray(content) ? content : [];
-    yield { e, blocks, pos };
-  }
 }
 
 const askedIn = (blocks, asks) => {

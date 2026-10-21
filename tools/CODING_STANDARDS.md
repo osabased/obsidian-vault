@@ -17,7 +17,7 @@ These keep the hooks safe to run in every session. Follow them when you change a
 ## State
 
 - Write files with `writeText` or `writeJson` (temp file, then rename). Append rows with `appendJsonl`, one call per batch.
-- Rows in `raw/inbox/` and `raw/picks/` go in dated files (`inboxFile()`, `picksFile()`), carry a prefixed id (`c-`, `p-`, `q-`), and are resolved by id in `raw/decisions.jsonl`, never edited. Readers treat a missing folder as empty.
+- Rows in `raw/inbox/` and `raw/picks/` go in dated files (`inboxFile()`, `picksFile()`), carry a prefixed id (`c-`, `p-`, `q-`, and `a-` for proposals), and are resolved by id in `raw/decisions.jsonl`, never edited. Readers treat a missing folder as empty.
 - `raw/` is append-only. `.state/` belongs to the hooks: use the helpers in `lib/sessions.mjs` for sessions, markers and pass state.
 - Only `lib/commands.mjs` writes `confirmed.json`, under `withLock`, and before it saves any note.
 - The hooks enforce the wording and hash recorded in the ledger, never the live note.
@@ -27,7 +27,7 @@ These keep the hooks safe to run in every session. Follow them when you change a
 - Code that two entry points share goes in `tools/lib/`; the rest stays in its entry point.
 - Command-line scripts: usage errors exit 2, failures exit 1.
 - Comments only for a non-obvious why. No docstrings, banner comments or TODOs.
-- In transcripts, the user's words are the text of user entries whose `turnOrigin` and `origin.kind` are each absent or "human", the prompts of `queued_command` attachments with `origin.kind` "human" (messages sent mid-turn), and, in AskUserQuestion results, answers typed instead of picking an option and notes on answers. Briefs, task notifications and peer messages are not, and neither is a picked option, which is the agent's wording and goes to `raw/picks/`. Read transcripts through `userBlocks()` and `answered()` in `session-pass.mjs`.
+- In transcripts, the user's words are the text of user entries whose `turnOrigin` and `origin.kind` are each absent or "human", the prompts of `queued_command` attachments with `origin.kind` "human" (messages sent mid-turn), and, in AskUserQuestion results, answers typed instead of picking an option and notes on answers. Briefs, task notifications and peer messages are not, and neither is a picked option, which is the agent's wording and goes to `raw/picks/`. Read transcripts through `userBlocks()` and `answered()` in `session-pass.mjs`. Where only words the user certainly typed may count (commands and proposals), use `typedMessages()` in `lib/transcript.mjs`, which also skips user entries that carry no origin at all: slash-command echoes are unmarked, and a brief can produce them. For a slash command the user typed, it keeps only the text of `<command-args>`.
 - No test-only code. Tests change behavior through `taste.config.json`, for example a `pass.command` array.
 
 ## What lint enforces
