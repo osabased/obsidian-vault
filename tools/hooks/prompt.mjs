@@ -30,9 +30,11 @@ function excerpts(input, scope, ledger) {
 runHook('prompt', input => {
   const cmds = parseCommands(input.prompt);
   // Blocking keeps the command away from the model; Claude Code shows the reason to the user instead.
+  // A bare confirm or drop with no proposal to answer goes on to the model as an ordinary prompt.
   if (cmds) {
     try {
-      return { decision: 'block', reason: runCommands(cmds, input) };
+      const reply = runCommands(cmds, input);
+      if (reply !== null) return { decision: 'block', reason: reply };
     } catch (e) {
       logError('prompt', e);
       return { decision: 'block', reason: `The taste hooks hit an error and may not have recorded that: ${e.message}` };

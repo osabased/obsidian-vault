@@ -1,14 +1,20 @@
 import fs from 'node:fs';
 import { setKey } from './frontmatter.mjs';
 import { stripInjected } from './capture.mjs';
-import { KEY_RE, toKey, parseNote, noteErrors, noteHash, ruleText, readLedger, writeLedger, build } from './rules.mjs';
-import { config, vaultPath, writeText, appendLog, statePath, withLock } from './vault.mjs';
+import { typedMessages } from './transcript.mjs';
+import { KEY_RE, toKey, parseNote, noteErrors, noteHash, ruleText, readLedger, readNote, writeLedger, build } from './rules.mjs';
+import { config, vaultPath, writeText, appendLog, statePath, withLock, proposalRows } from './vault.mjs';
+
+const BARE = /^(?:(`?)(confirm|drop)\1[.!]?|(confirm|drop):)$/i;
+const NOT_TYPED_YET = "Not recorded: the taste hooks take confirm:, retire: and drop: only in a session where you've already typed a message. Send any message, then type it again.";
 
 export function parseCommands(prompt) {
   const lines = stripInjected(prompt).split(/\r?\n/).map(l => l.trim()).filter(Boolean);
+  const bare = lines.length === 1 ? lines[0].match(BARE) : null;
+  if (bare) return [{ op: (bare[2] ?? bare[3]).toLowerCase(), key: null }];
   const cmds = [];
   for (const line of lines) {
-    const m = line.match(/^(confirm|retire):\s*(.+)$/i);
+    const m = line.match(/^(confirm|retire|drop):\s*(.+)$/i);
     if (!m) return null;
     for (const ref of m[2].split(',')) if (ref.trim()) cmds.push({ op: m[1].toLowerCase(), key: toKey(ref) });
   }
@@ -134,11 +140,40 @@ function retire(key, ctx) {
   return n ? `Not retired: ${key} is already outdated.` : `Not retired: ${key} has no note and isn't confirmed.`;
 }
 
-export function runCommands(cmds, input) {
+function drop(key, ctx) {
+  if (!KEY_RE.test(key)) return `Not dropped: ${key} — use <domain>/<slug>, like roblox-ui/strict-mode.`;
+  const n = ctx.ws.get(key);
+  if (!n) return `Not dropped: ${key} — no note at wiki/${key}.md.`;
+  if (ctx.ledger.rules[key]) return `Not dropped: ${key} is confirmed. Type retire: ${key} to stop enforcing it.`;
+  if (n.status === 'outdated') return `Not dropped: ${key} is already outdated.`;
+  ctx.ws.set(key, 'status', 'outdated');
+  ctx.log.push(`dropped ${key}`);
+  return `Dropped ${key}. Its note stays in the vault, marked outdated, so it isn't offered again.`;
+}
+
+const OPS = { confirm, retire, drop };
+
+// A bare confirm or drop answers a proposal made since the user's last message; older ones need their key.
+function fresh(session, typed) {
+  const since = typed.at(-1).at;
+  const keys = new Set(proposalRows().filter(r => r.session === session && r.at > since).map(r => r.note));
+  return [...keys].filter(k => readNote(k)?.status === 'provisional');
+}
+
+function resolveBare(op, session, typed) {
+  const keys = typed.length ? fresh(session, typed) : [];
+  if (keys.length > 1) return `Not recorded: ${keys.join(', ')} were all proposed since your last message. Type ${op}: with the ones you mean.`;
+  return keys.length ? [{ op, key: keys[0] }] : null;
+}
+
+export function runCommands(parsed, input) {
+  const session = String(input.session_id ?? '');
+  const typed = typedMessages(input.transcript_path);
+  const cmds = parsed[0].key === null ? resolveBare(parsed[0].op, session, typed) : typed.length ? parsed : NOT_TYPED_YET;
+  if (!Array.isArray(cmds)) return cmds;
   return withLock(statePath('ledger.lock'), () => {
-    const session = String(input.session_id ?? '');
     const ctx = { ledger: readLedger(), ws: workspace(), changed: false, log: [], now: new Date().toISOString(), session };
-    const replies = cmds.map(c => (c.op === 'confirm' ? confirm : retire)(c.key, ctx));
+    const replies = cmds.map(c => OPS[c.op](c.key, ctx));
     // The ledger is what the hooks enforce, so it goes first; a note that fails to save only shows up as a lint warning.
     if (ctx.changed) writeLedger(ctx.ledger);
     const saved = ctx.ws.save();
