@@ -33,7 +33,8 @@ function convert(glob) {
   return out;
 }
 
-export const globToRegExp = glob => new RegExp(`^${convert(String(glob).replace(/\\/g, '/').replace(/^\.?\//, ''))}$`, 'i');
+export const normGlob = glob => String(glob).replace(/\\/g, '/').replace(/^\.?\//, '');
+export const globToRegExp = glob => new RegExp(`^${convert(normGlob(glob))}$`, 'i');
 
 export function validGlob(glob) {
   if (typeof glob !== 'string' || !glob.trim()) return false;

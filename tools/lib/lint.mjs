@@ -2,7 +2,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { isBuiltin } from 'node:module';
 import { config, vaultPath, plural, today } from './vault.mjs';
-import { loadNotes, readLedger, noteErrors, noteHash, ruleText, ruleTextParts, alwaysSize, build, validDay } from './rules.mjs';
+import { loadNotes, readLedger, noteErrors, replaceProblem, noteHash, ruleText, ruleTextParts, alwaysSize, build, validDay } from './rules.mjs';
 
 export const tally = found => {
   const errors = found.filter(f => f.level === 'error').length;
@@ -32,6 +32,10 @@ export function lint() {
     for (const t of n.replaces ?? []) {
       if (t === n.key) add('error', n.rel, 'replaces itself');
       else if (!keys.has(t) && !rules[t] && !retired[t]) add('error', n.rel, `replaces ${t}, which has no note`);
+      else {
+        const wrong = replaceProblem(n, t);
+        if (wrong) add('error', n.rel, wrong);
+      }
     }
     if (entry && n.status !== 'confirmed') add('warn', n.rel, `confirmed in confirmed.json but its status is ${n.status}`);
     if (entry && entry.hash !== noteHash(n)) add('warn', n.rel, 'changed since confirmed; the hooks still enforce the confirmed wording until you confirm it again');

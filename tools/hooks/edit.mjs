@@ -2,7 +2,7 @@ import fs from 'node:fs';
 import { runHook, config, domainsFor, inside, vaultRel, toPosix, cwdOf, FILE_TOOLS, SHELL_TOOLS, WRITEISH, toolCommand, toolFile } from '../lib/vault.mjs';
 import { readLedger, parseNote, noteHash, clip, tryRegex, cmp } from '../lib/rules.mjs';
 import { bestMatch, specificity, bySpecificity } from '../lib/glob.mjs';
-import { mark, marked } from '../lib/sessions.mjs';
+import { marked, markDelivered } from '../lib/sessions.mjs';
 
 const LEDGER = 'confirmed.json is the ledger of the rules the user confirmed. Only the hooks write it, when the user confirms or retires a rule in chat. Reading it is fine.';
 const ONLY_USER = 'Only the user confirms, retires or drops rules, in their own chat. Ask them to.';
@@ -108,7 +108,7 @@ function gate(input, file, cwd) {
     if (shown.length && [head, ...shown.map(s => s.line), line, foot].join('\n').length > maxBlockChars) break;
     shown.push({ ...hit, line });
   }
-  for (const s of shown) mark('gate', sid, s.id);
+  for (const s of shown) markDelivered('gate', sid, s.id, s.key, s.r.hash);
   return [head, ...shown.map(s => s.line), foot].join('\n');
 }
 

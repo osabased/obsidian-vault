@@ -66,7 +66,7 @@ updated: 2026-10-19
 - `applies_to`: globs relative to the project root. `**` crosses folders, `*` doesn't, `{a,b}` picks one. Matching ignores case and worktree folders.
 - `triggers`: optional regexes tested against the new text of an edit. When present, the rule applies only if one matches.
 - `keywords`: optional words or phrases that bring the rule up from a prompt.
-- `replaces`: keys of rules this one supersedes, like `roblox-ui/old-slug`. Confirming this note retires them.
+- `replaces`: keys of rules this one supersedes, like `roblox-ui/old-slug`, from its own domain; a global rule may replace any. Confirming this note retires them.
 - Single-quote globs and regexes so Obsidian reads them as text.
 - `**Do:**` and `**Not:**` are required, one line each. Pair every "never X" with an "instead Y". `**Because:**` gives the user's reason; leave it empty rather than invent one. Keep the three lines under 300 characters together, counting the "As of" date a knowledge rule is delivered with.
 - `## Evidence` has one line per source: date, kind (`stated`, `choice` or `correction`), the first 8 characters of the session id, the user's exact words, and the capture, pick or proposal id. A `failure` line gives the file, the error as a tool printed it and `fixed by:` the fix; a `source` line gives the URL or `raw/refs/` file, `dated` its date, `summary` when the quote comes from a WebFetch summary rather than the page, and its exact words.
@@ -78,7 +78,7 @@ The vault holds one-line Do/Not rules. Procedures, how-tos and project facts bel
 
 ## Operations
 
-- **Propose**: in domain sessions the start hook tells you how to propose a rule with `tools/propose.mjs` when the user corrects you, or when a failure or a dated source shows a fact your training gets wrong. `node tools/propose.mjs --help` lists the fields. It writes a provisional note, and you end your reply with the lines it prints. The user answers with a bare `confirm` or `drop`, which takes the proposal made since their last message, or later with `confirm: <key>` or `drop: <key>`. `drop:` marks a provisional note outdated so it isn't offered again; confirmed rules need `retire:`. The hooks take these commands only in a session where the user has typed a message.
+- **Propose**: in domain sessions the start hook tells you how to propose a rule with `tools/propose.mjs` when the user corrects you, or when a failure or a dated source shows a fact your training gets wrong. `node tools/propose.mjs --help` lists the fields. When the rule may repeat ones the user confirmed, it lists them and refuses once; you propose again with the key of the one it repeats in `replaces`, or `replaces: []`. It writes a provisional note, and you end your reply with the lines it prints. The user answers with a bare `confirm` or `drop`, which takes the proposal made since their last message, or later with `confirm: <key>` or `drop: <key>`. `drop:` marks a provisional note outdated so it isn't offered again; confirmed rules need `retire:`. The hooks take these commands only in a session where the user has typed a message.
 - **Review**: the user runs `/taste-review` in this folder to turn captures into notes.
 - **Query**: when asked what the user prefers, read `index.md`, then the notes. Confirmed rules are the user's taste; provisional ones are candidates. Say which is which.
 - **Lint**: `node tools/lint.mjs` checks notes, the ledger and the generated files. The pre-commit hook rebuilds the generated files and runs it.

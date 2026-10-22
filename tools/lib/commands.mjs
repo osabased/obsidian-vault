@@ -2,7 +2,7 @@ import fs from 'node:fs';
 import { setKey } from './frontmatter.mjs';
 import { stripInjected } from './capture.mjs';
 import { typedMessages } from './transcript.mjs';
-import { KEY_RE, toKey, parseNote, noteErrors, noteHash, ruleText, readLedger, readNote, writeLedger, build } from './rules.mjs';
+import { KEY_RE, toKey, parseNote, noteErrors, replaceProblem, noteHash, ruleText, readLedger, readNote, writeLedger, build } from './rules.mjs';
 import { config, vaultPath, writeText, appendLog, statePath, withLock, proposalRows } from './vault.mjs';
 
 const BARE = /^(?:(`?)(confirm|drop)\1[.!]?|(confirm|drop):)$/i;
@@ -75,6 +75,8 @@ function problem(n, ctx) {
   for (const t of n.replaces) {
     if (t === n.key) return 'it replaces itself';
     if (!ctx.ws.get(t) && !ctx.ledger.rules[t] && !ctx.ledger.retired[t]) return `it replaces ${t}, which has no note`;
+    const wrong = replaceProblem(n, t);
+    if (wrong) return wrong;
   }
   return null;
 }

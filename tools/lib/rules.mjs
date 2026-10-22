@@ -31,6 +31,7 @@ export function tryRegex(source) {
 }
 
 export const escapeRegExp = s => String(s).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+export const mentions = (word, text) => new RegExp(`(?<!\\w)${escapeRegExp(word)}(?!\\w)`, 'i').test(text);
 
 const asList = v => (v === null || v === undefined ? [] : Array.isArray(v) ? v.map(String) : null);
 
@@ -111,6 +112,13 @@ export function noteErrors(n) {
   return errs;
 }
 
+// A domain rule reaches only its domain's sessions, so it can't stand in for a rule that reaches others.
+export function replaceProblem(n, t) {
+  const d = t.split('/')[0];
+  if (n.domain === 'global' || d === n.domain) return null;
+  return `a ${n.domain} rule can't replace ${t}, which ${d === 'global' ? 'applies in every project' : `is a ${d} rule`}`;
+}
+
 export function loadNotes() {
   const root = vaultPath('wiki');
   const notes = [];
@@ -160,28 +168,30 @@ function alwaysLines(ledger, domains) {
   const { maxRuleChars } = config().delivery;
   const entries = alwaysEntries(ledger);
   const lines = [];
+  const keys = [];
   for (const d of domainOrder(domains)) {
     const mine = entries.filter(([, r]) => r.domain === d);
-    if (mine.length) lines.push('', `## ${d}`, ...mine.map(([k, r]) => `- ${k}: ${clip(r.text, maxRuleChars)}`));
+    if (!mine.length) continue;
+    lines.push('', `## ${d}`, ...mine.map(([k, r]) => `- ${k}: ${clip(r.text, maxRuleChars)}`));
+    keys.push(...mine.map(([k]) => k));
   }
-  return lines;
+  return { lines, keys };
 }
 
 export function alwaysSize(ledger, domains) {
-  const lines = alwaysLines(ledger, domains);
+  const { lines } = alwaysLines(ledger, domains);
   if (!lines.length) return { lines: 0, bytes: 0 };
   const all = [...HEAD, ...lines];
   return { lines: all.length, bytes: Buffer.byteLength(all.join('\n')) };
 }
 
 export function alwaysContext(domains, ledger = readLedger()) {
-  const lines = alwaysLines(ledger, domains);
-  if (!lines.length) return '';
+  const { lines, keys } = alwaysLines(ledger, domains);
+  if (!lines.length) return { text: '', keys: [] };
   const { activeMaxLines, activeMaxBytes } = config().delivery;
   const fits = xs => xs.length <= activeMaxLines && Buffer.byteLength(xs.join('\n')) <= activeMaxBytes;
-  if (fits([...HEAD, ...lines])) return [...HEAD, ...lines].join('\n');
-  const total = lines.filter(isRule).length;
-  const tail = shown => ['', `(${total - shown} more didn't fit. See ${toPosix(vaultPath('active.md'))}.)`];
+  if (fits([...HEAD, ...lines])) return { text: [...HEAD, ...lines].join('\n'), keys };
+  const tail = shown => ['', `(${keys.length - shown} more didn't fit. See ${toPosix(vaultPath('active.md'))}.)`];
   const out = [...HEAD];
   let shown = 0;
   for (const line of lines) {
@@ -191,7 +201,7 @@ export function alwaysContext(domains, ledger = readLedger()) {
     shown = next;
   }
   while (out.length > HEAD.length && !isRule(out.at(-1))) out.pop();
-  return [...out, ...tail(shown)].join('\n');
+  return { text: [...out, ...tail(shown)].join('\n'), keys: keys.slice(0, shown) };
 }
 
 export function renderActive(ledger) {
