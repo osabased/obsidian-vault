@@ -7,7 +7,7 @@ The user's taste, kept as a small wiki so Claude Code can apply it. The agent pr
 - `raw/` holds sources and is append-only.
   - `raw/inbox/<date>.jsonl`: rules the agent proposed in session (`source: agent`, `a-` ids), written by `tools/propose.mjs`. Older rows, with `c-` and `p-` ids, are preferences captured from sessions before proposals existed.
   - `raw/picks/<date>.jsonl`: questions the agent asked in domain sessions and the user's answers, word for word, with `q-` ids, captured alongside those older rows.
-  - `raw/decisions.jsonl`: what became of each inbox and pick row, by id. `tools/propose.mjs` records the note each proposal wrote; older rows are review decisions.
+  - `raw/decisions.jsonl`: what became of each inbox and pick row, by id. `tools/propose.mjs` records the note it wrote for each proposal; older rows are review decisions.
   - `raw/judgments/`: the user's picks between design options, verbatim and dated ("B over A because…"), usually with the user's reason. You may add a new file here when the user makes a pick.
   - `raw/refs/`: references the user collects. You may add new files here.
 - `wiki/<domain>/<slug>.md`: one rule per note. Domains and their project folders are in `taste.config.json`. Rules in `wiki/global/` apply in every project.
