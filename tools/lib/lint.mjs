@@ -28,7 +28,7 @@ export function lint() {
     if (n.type !== 'rule') continue;
 
     const entry = rules[n.key];
-    if (n.status === 'confirmed' && !entry) add('error', n.rel, "status is confirmed but the user hasn't confirmed it; only `confirm:` in chat sets it");
+    if (n.status === 'confirmed' && !entry) add('error', n.rel, "status is confirmed but the user hasn't confirmed it; only the user's confirm in chat sets it");
     for (const t of n.replaces ?? []) {
       if (t === n.key) add('error', n.rel, 'replaces itself');
       else if (!keys.has(t) && !rules[t] && !retired[t]) add('error', n.rel, `replaces ${t}, which has no note`);

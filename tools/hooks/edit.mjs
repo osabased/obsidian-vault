@@ -67,7 +67,7 @@ function vaultGuard(tool, ti, file, cwd) {
   if (low === '.state' || low.startsWith('.state/')) return ".state/ is the hooks' own bookkeeping. Leave it to them.";
   if (low.startsWith('raw/')) {
     if (fs.existsSync(toPosix(file, cwd))) return `raw/ is append-only: ${rel} already exists and can't be changed. Put new material in a new file under raw/refs/ or raw/judgments/.`;
-    if (!/^raw\/(?:refs|judgments)\/./.test(low)) return 'raw/ is append-only. New files go under raw/refs/ or raw/judgments/; the hooks, tools/review.mjs and tools/propose.mjs write the rest.';
+    if (!/^raw\/(?:refs|judgments)\/./.test(low)) return 'raw/ is append-only. New files go under raw/refs/ or raw/judgments/; tools/propose.mjs writes the rest.';
     return null;
   }
   return /^wiki\/.+\.md$/.test(low) ? noteGuard(tool, ti, toPosix(file, cwd), low) : null;

@@ -17,7 +17,7 @@ These keep the hooks safe to run in every session. Follow them when you change a
 ## State
 
 - Write files with `writeText` or `writeJson` (temp file, then rename). Append rows with `appendJsonl`, one call per batch.
-- Proposals go in dated files in `raw/inbox/` (`inboxFile()`) with an `a-` id, and are resolved by id in `raw/decisions.jsonl`, never edited. Older rows in `raw/inbox/` and `raw/picks/` carry `c-`, `p-` and `q-` ids. Readers treat a missing folder as empty.
+- Proposals go in dated files in `raw/inbox/` (`inboxFile()`) with an `a-` id, and `propose.mjs` records the note it wrote for each in `raw/decisions.jsonl`. Rows are never edited. Older rows in `raw/inbox/` and `raw/picks/` carry `c-`, `p-` and `q-` ids. Readers treat a missing folder as empty.
 - `raw/` is append-only. `.state/` belongs to the hooks: use the helpers in `lib/sessions.mjs` for sessions and markers.
 - Only `lib/commands.mjs` writes `confirmed.json`, under `withLock`, and before it saves any note.
 - The hooks enforce the wording and hash recorded in the ledger, never the live note.
