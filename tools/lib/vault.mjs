@@ -8,13 +8,17 @@ export const vaultPath = (...xs) => path.join(ROOT, ...xs);
 const DEFAULTS = {
   delivery: { maxRulesPerEdit: 3, maxRuleChars: 300, maxBlockChars: 1200, maxPromptExcerpts: 3, activeMaxLines: 60, activeMaxBytes: 4096 },
   pass: { command: 'claude', model: 'sonnet', effort: 'low', idleHours: 4, sweepEveryMinutes: 30, maxInputChars: 60000, timeoutSeconds: 300 },
+  knowledge: { staleAfterDays: 180 },
 };
 
 let loaded;
 export function config() {
   if (!loaded) {
     const c = readJson(vaultPath('taste.config.json'), {});
-    loaded = { domains: c.domains ?? {}, delivery: { ...DEFAULTS.delivery, ...c.delivery }, pass: { ...DEFAULTS.pass, ...c.pass } };
+    loaded = {
+      domains: c.domains ?? {}, delivery: { ...DEFAULTS.delivery, ...c.delivery }, pass: { ...DEFAULTS.pass, ...c.pass },
+      knowledge: { ...DEFAULTS.knowledge, ...c.knowledge },
+    };
   }
   return loaded;
 }
@@ -163,6 +167,13 @@ export function logError(name, e) {
 }
 
 export const cwdOf = input => input.cwd || process.cwd();
+
+export const FILE_TOOLS = ['Edit', 'Write', 'MultiEdit', 'NotebookEdit'];
+export const SHELL_TOOLS = ['Bash', 'PowerShell'];
+export const toolCommand = (name, input) => (SHELL_TOOLS.includes(name) ? String(input.command ?? '') : null);
+export const toolFile = (name, input) => (name === 'NotebookEdit' ? input.notebook_path : input.file_path);
+// `2>&1`, `=>`, `->` and `>=` contain `>` but write no file.
+export const WRITEISH = /(?<![\d&=-])>(?![&=])|\btee\b|\bsed\s+-i|\bmv\b|\bcp\b|\brm\b|\bdel\b|Set-Content|Add-Content|Out-File|Remove-Item|Move-Item|Copy-Item|New-Item|writeFile|appendFile|WriteAllText|\bperl\s+-[a-z]*i/i;
 
 export const skip = () => process.env.CLAUDE_CODE_SAFE_MODE === '1' || process.env.AGENT_TASTE_PASS === '1';
 

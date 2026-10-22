@@ -14,6 +14,9 @@
     "activeMaxLines": 60,
     "activeMaxBytes": 4096
   },
+  "knowledge": {
+    "staleAfterDays": 180
+  },
   "pass": {
     "command": "C:/Users/Lowle/.local/bin/claude.exe",
     "model": "sonnet",

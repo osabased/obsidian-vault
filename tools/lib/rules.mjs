@@ -2,10 +2,14 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { parse } from './frontmatter.mjs';
 import { validGlob } from './glob.mjs';
-import { config, vaultPath, readJson, writeJson, writeText, shortHash, toPosix } from './vault.mjs';
+import { config, vaultPath, readJson, writeJson, writeText, shortHash, toPosix, today } from './vault.mjs';
 
 export const LIST_FIELDS = ['applies_to', 'triggers', 'keywords', 'replaces'];
 export const KEY_RE = /^[a-z0-9-]+\/[a-z0-9-]+$/;
+export const BASES = { taste: ['stated', 'inferred'], knowledge: ['stated', 'failure', 'source'] };
+export const wrongBasis = (kind, basis) => (kind === 'knowledge' ? "a knowledge rule's basis must be stated, failure or source"
+  : BASES.knowledge.includes(basis) ? `basis ${basis} is for knowledge rules; set kind: knowledge` : 'basis must be stated or inferred');
+export const validDay = s => typeof s === 'string' && /^\d{4}-\d\d-\d\d$/.test(s) && !Number.isNaN(Date.parse(s)) && new Date(s).toISOString().startsWith(s);
 const KEBAB = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
 const HEAD = [
   '# Taste rules (confirmed by the user)',
@@ -50,6 +54,8 @@ export function parseNote(text, rel) {
     body,
     type: data.type,
     status: data.status,
+    kind: data.kind ?? 'taste',
+    as_of: data.as_of ?? null,
     always: data.always === true,
     do: field(lead, 'Do'),
     not: field(lead, 'Not'),
@@ -62,13 +68,21 @@ export function parseNote(text, rel) {
 
 const sentence = s => (/[.!?…]$/.test(s) ? s : `${s}.`);
 
-export const ruleText = n => [`Do: ${sentence(n.do)}`, `Not: ${sentence(n.not)}`, ...(n.because ? [`Because: ${sentence(n.because)}`] : [])].join(' ');
+export const ruleText = n => [
+  `Do: ${sentence(n.do)}`, `Not: ${sentence(n.not)}`,
+  ...(n.because ? [`Because: ${sentence(n.because)}`] : []),
+  ...(n.kind === 'knowledge' ? [`As of ${n.as_of}.`] : []),
+].join(' ');
+
+export const ruleTextParts = n => (n.kind === 'knowledge' ? 'Do, Not, Because and the as_of date' : 'Do, Not and Because');
 
 export const clip = (s, max) => (s.length <= max ? s : `${s.slice(0, max - 1).trimEnd()}…`);
 
+// Knowledge fields join the hash only for knowledge rules, so taste rules keep the hashes they were confirmed with.
 export const noteHash = n => shortHash(JSON.stringify({
   domain: n.domain, do: n.do, not: n.not, because: n.because,
   applies_to: n.applies_to ?? [], triggers: n.triggers ?? [], keywords: n.keywords ?? [], always: n.always,
+  ...(n.kind === 'knowledge' ? { kind: n.kind, as_of: n.as_of } : {}),
 }));
 
 export function noteErrors(n) {
@@ -80,7 +94,14 @@ export function noteErrors(n) {
   if (n.type !== 'rule') return errs;
   if (n.data.domain === undefined) errs.push('no domain');
   if (!['provisional', 'confirmed', 'outdated'].includes(n.status)) errs.push('status must be provisional, confirmed or outdated');
-  if (!['stated', 'inferred'].includes(n.data.basis)) errs.push('basis must be stated or inferred');
+  if (!BASES[n.kind]) errs.push('kind must be taste or knowledge');
+  else if (!BASES[n.kind].includes(n.data.basis)) errs.push(wrongBasis(n.kind, n.data.basis));
+  if (n.kind === 'knowledge') {
+    if (!validDay(n.as_of)) errs.push('a knowledge rule needs as_of, the day it was last checked, as YYYY-MM-DD');
+    else if (n.as_of > today()) errs.push(`as_of ${n.as_of} is in the future`);
+    if (!n.applies_to?.length) errs.push('a knowledge rule needs applies_to: it reaches the agent only on matching edits');
+    if (n.keywords?.length || n.always) errs.push('a knowledge rule reaches the agent only on matching edits, so it takes no keywords or always: true');
+  } else if (n.kind === 'taste' && n.as_of !== null) errs.push('as_of is only for knowledge rules; taste rules never expire');
   if (!n.do) errs.push('no **Do:** line');
   if (!n.not) errs.push('no **Not:** line');
   for (const f of LIST_FIELDS) if (n[f] === null) errs.push(`${f} must be a list`);
@@ -193,7 +214,8 @@ function indexLine(n, ledger) {
   if (n.type === 'page') return `- ${link} · page`;
   const entry = ledger.rules[n.key];
   const changed = entry && entry.hash !== noteHash(n) ? ' · changed since confirmed' : '';
-  return `- ${link} · ${n.status ?? 'no status'}${changed} · Do: ${clip(n.do || '(missing)', 100)}`;
+  const kind = n.kind === 'knowledge' ? ` · knowledge as of ${n.as_of ?? '(no date)'}` : '';
+  return `- ${link} · ${n.status ?? 'no status'}${changed}${kind} · Do: ${clip(n.do || '(missing)', 100)}`;
 }
 
 export function renderIndex(notes, ledger) {
