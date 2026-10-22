@@ -1,7 +1,6 @@
 import fs from 'node:fs';
 import { setKey } from './frontmatter.mjs';
-import { stripInjected } from './capture.mjs';
-import { typedMessages } from './transcript.mjs';
+import { stripInjected, typedMessages } from './transcript.mjs';
 import { KEY_RE, toKey, parseNote, noteErrors, replaceProblem, noteHash, ruleText, readLedger, readNote, writeLedger, build } from './rules.mjs';
 import { config, vaultPath, writeText, appendLog, statePath, withLock, proposalRows } from './vault.mjs';
 

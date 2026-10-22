@@ -1,14 +1,14 @@
 # Agent taste vault
 
-The user's taste, kept as a small wiki so Claude Code can apply it. The agent proposes rules in session when the user corrects it or a failure or dated source shows what works, a background pass started by the hooks in `tools/hooks/` captures preferences from sessions, and the hooks deliver confirmed rules back to the agent. The user reads and edits the notes in Obsidian.
+The user's taste, kept as a small wiki so Claude Code can apply it. The agent proposes rules in session when the user corrects it or a failure or dated source shows what works, and the hooks in `tools/hooks/` deliver the rules the user confirms back to the agent. The user reads and edits the notes in Obsidian.
 
 ## Layout
 
 - `raw/` holds sources and is append-only.
-  - `raw/inbox/<date>.jsonl`: preferences captured from sessions, written by the session pass, and rules the agent proposed in session (`source: agent`), written by `tools/propose.mjs`.
-  - `raw/picks/<date>.jsonl`: every question the agent asked in a domain session and the user answered, word for word: the question, its options, the pick and any notes. Written by the session pass, without the model.
-  - `raw/decisions.jsonl`: review decisions, written by `tools/review.mjs`, and by `tools/propose.mjs` for the notes it writes.
-  - `raw/judgments/`: the user's picks between design options, verbatim and dated ("B over A because…"). You may add a new file here when the user makes a pick. Unlike `raw/picks/`, which logs every answered question automatically, these are picks you record by hand, usually with the user's reason.
+  - `raw/inbox/<date>.jsonl`: rules the agent proposed in session (`source: agent`, `a-` ids), written by `tools/propose.mjs`. Older rows, with `c-` and `p-` ids, are preferences captured from sessions before proposals existed.
+  - `raw/picks/<date>.jsonl`: questions the agent asked in domain sessions and the user's answers, word for word, with `q-` ids, captured alongside those older rows.
+  - `raw/decisions.jsonl`: what became of each inbox and pick row, by id. `tools/propose.mjs` records the note each proposal wrote; older rows are review decisions.
+  - `raw/judgments/`: the user's picks between design options, verbatim and dated ("B over A because…"), usually with the user's reason. You may add a new file here when the user makes a pick.
   - `raw/refs/`: references the user collects. You may add new files here.
 - `wiki/<domain>/<slug>.md`: one rule per note. Domains and their project folders are in `taste.config.json`. Rules in `wiki/global/` apply in every project.
 - `confirmed.json`: the ledger of confirmed rules. Only the hooks write it, when the user confirms or retires a rule in chat.
@@ -54,12 +54,12 @@ updated: 2026-10-19
 ## Examples
 
 ## Evidence
-- 2026-10-19 · stated · session 1a2b3c4d · "I want the agent to always write scripts in !strict" (c-1a2b3c4d)
+- 2026-10-19 · stated · session 1a2b3c4d · "I want the agent to always write scripts in !strict" (a-1a2b3c4d)
 ```
 
 - `status`: `provisional`, `confirmed` or `outdated`. Only the user's `confirm:` makes a rule confirmed, and the hook sets the field.
 - `kind`: `taste` (the default) or `knowledge`, a fact about an API, version or tool that training gets wrong or doesn't know. Knowledge rules reach the agent only on matching edits, so they need `applies_to` and take no `keywords` or `always`.
-- `basis`: `stated` when the user said it, `inferred` when it comes from their choices or corrections. Knowledge rules use `stated`, `failure` (something worked only after a failure) or `source` (a dated source shows it).
+- `basis`: `stated` when the user said it, `inferred` when you generalized it from their corrections. Knowledge rules use `stated`, `failure` (something worked only after a failure) or `source` (a dated source shows it).
 - `as_of`: knowledge rules only, the day the fact was last checked, as YYYY-MM-DD: the source's date, or the day it was proposed. Delivery shows it, and lint warns once it is more than 180 days old (`knowledge.staleAfterDays` in `taste.config.json`). Taste rules never expire.
 - `topic`: one of the domain's topics in `taste.config.json`.
 - `always`: only for short rules that matter in nearly every session.
@@ -69,7 +69,7 @@ updated: 2026-10-19
 - `replaces`: keys of rules this one supersedes, like `roblox-ui/old-slug`, from its own domain; a global rule may replace any. Confirming this note retires them.
 - Single-quote globs and regexes so Obsidian reads them as text.
 - `**Do:**` and `**Not:**` are required, one line each. Pair every "never X" with an "instead Y". `**Because:**` gives the user's reason; leave it empty rather than invent one. Keep the three lines under 300 characters together, counting the "As of" date a knowledge rule is delivered with.
-- `## Evidence` has one line per source: date, kind (`stated`, `choice` or `correction`), the first 8 characters of the session id, the user's exact words, and the capture, pick or proposal id. A `failure` line gives the file, the error as a tool printed it and `fixed by:` the fix; a `source` line gives the URL or `raw/refs/` file, `dated` its date, `summary` when the quote comes from a WebFetch summary rather than the page, and its exact words.
+- `## Evidence` has one line per source: date, kind (`stated` or `correction`, or `choice` in older notes), the first 8 characters of the session id, the user's exact words, and the proposal id. A `failure` line gives the file, the error as a tool printed it and `fixed by:` the fix; a `source` line gives the URL or `raw/refs/` file, `dated` its date, `summary` when the quote comes from a WebFetch summary rather than the page, and its exact words.
 - Link notes with `[[wiki/<domain>/<slug>|<slug>]]`.
 
 ## What belongs here
@@ -79,15 +79,13 @@ The vault holds one-line Do/Not rules. Procedures, how-tos and project facts bel
 ## Operations
 
 - **Propose**: in domain sessions the start hook tells you how to propose a rule with `tools/propose.mjs` when the user corrects you, or when a failure or a dated source shows a fact your training gets wrong. `node tools/propose.mjs --help` lists the fields. When the rule may repeat ones the user confirmed, it lists them and refuses once; you propose again with the key of the one it repeats in `replaces`, or `replaces: []`. It writes a provisional note, and you end your reply with the lines it prints. The user answers with a bare `confirm` or `drop`, which takes the proposal made since their last message, or later with `confirm: <key>` or `drop: <key>`. `drop:` marks a provisional note outdated so it isn't offered again; confirmed rules need `retire:`. The hooks take these commands only in a session where the user has typed a message.
-- **Review**: the user runs `/taste-review` in this folder to turn captures into notes.
+- **Review**: the user runs `/taste-review` in this folder for a check-up: rules changed since they were confirmed, provisional rules waiting for a confirm or drop, repeats of confirmed rules, lint and hook errors.
 - **Query**: when asked what the user prefers, read `index.md`, then the notes. Confirmed rules are the user's taste; provisional ones are candidates. Say which is which.
 - **Lint**: `node tools/lint.mjs` checks notes, the ledger and the generated files. The pre-commit hook rebuilds the generated files and runs it.
 
 ## Evidence
 
-- A stated preference from one session is enough for a provisional note.
-- An inferred one needs evidence from 3 sessions before you suggest confirming it, unless you proposed it in the session where the user corrected you.
-- Picks from `raw/picks/` back a provisional `basis: inferred` note only once the same leaning shows up in picks from 3 sessions. Their evidence lines use kind `choice` and the pick's `q-` id.
+- A stated preference or a correction from one session is enough for a provisional note.
 - When evidence conflicts, show the user both sides and let them decide.
 - A knowledge rule needs a failure that a command or a failed tool call printed in the session where it was fixed, or a source with its date: a URL fetched in that session, or a file in `raw/refs/` that the session didn't write. A subagent's tool calls count; its report doesn't. An error in a file a command only showed or on a browser page doesn't count, and neither do words the agent gave the tool.
 - The user's own taste beats general best practice. Don't add rules they didn't express, unless the evidence is a recorded failure or a dated source, and the user confirms.
