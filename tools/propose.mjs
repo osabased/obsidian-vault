@@ -11,7 +11,6 @@ import {
 import { normGlob } from './lib/glob.mjs';
 import { registry, markRepeat, marked, wasShown } from './lib/sessions.mjs';
 import { typedMessages, toolActivity } from './lib/transcript.mjs';
-import { normText } from './lib/capture.mjs';
 
 const RUN = 'usage: node tools/propose.mjs <session-id> < rule.json';
 const USAGE = `${RUN}\n       node tools/propose.mjs --help lists the fields of rule.json`;
@@ -103,6 +102,12 @@ function evidence(f, p) {
   return e;
 }
 
+const normText = s => String(s)
+  .toLowerCase()
+  .replace(/[‘’ʼ]/g, "'")
+  .replace(/[“”]/g, '"')
+  .replace(/\s+/g, ' ')
+  .trim();
 const wordCount = s => normText(s).split(' ').filter(w => /[\p{L}\p{N}]/u.test(w)).length;
 const finder = s => new RegExp(`(?<![\\p{L}\\p{N}])${escapeRegExp(normText(s))}(?![\\p{L}\\p{N}])`, 'u');
 

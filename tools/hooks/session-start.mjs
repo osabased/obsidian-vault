@@ -1,8 +1,6 @@
-import { runHook, domainsFor, vaultRel, vaultPath, toPosix, pendingRows, plural, clock } from '../lib/vault.mjs';
-import { alwaysContext, readLedger, clip } from '../lib/rules.mjs';
-import { touchSession, clearMarkers, lastPass, markShown } from '../lib/sessions.mjs';
-
-const LOGIN = /OAuth|authenticat|\/login|not logged in/i;
+import { runHook, domainsFor, vaultPath, toPosix, logError } from '../lib/vault.mjs';
+import { alwaysContext, readLedger } from '../lib/rules.mjs';
+import { touchSession, clearMarkers, markShown, tidy } from '../lib/sessions.mjs';
 
 function proposeNote(sid) {
   const script = toPosix(vaultPath('tools', 'propose.mjs'));
@@ -18,31 +16,8 @@ function proposeNote(sid) {
   ].join(' ');
 }
 
-// Only the newest pass counts: one that succeeds after a failure shows the cause is gone, and the sweep retries the failed session.
-function passNote() {
-  const { at, id, failed: why } = lastPass() ?? {};
-  if (why === undefined) return '';
-  return [
-    `The taste vault's last session pass failed at ${clock(new Date(at))} with "${clip(why, 200)}".`,
-    ...(LOGIN.test(why) ? ["The pass's claude login has expired, and only the user can renew it, with `claude auth login` in a terminal."] : []),
-    `Once the cause is fixed, \`node tools/session-pass.mjs ${id}\` from the vault root reruns the pass.`,
-    'At the start of your first reply, tell the user so in a line of its own.',
-  ].join(' ');
-}
-
-function reviewNote() {
-  const n = pendingRows().length;
-  if (!n) return '';
-  const waiting = `${plural(n, 'capture')} in the taste vault ${n === 1 ? 'is' : 'are'} waiting for review.`;
-  return `${waiting} At the start of your first reply, tell the user so in one line and mention that /taste-review turns captures into rules.`;
-}
-
-function vaultNotes(input) {
-  if (!['startup', 'clear'].includes(input.source) || !input.cwd || vaultRel(input.cwd) === null) return [];
-  return [passNote(), reviewNote()];
-}
-
 runHook('session-start', input => {
+  try { tidy(); } catch (e) { logError('tidy', e); }
   const doms = domainsFor(input.cwd).map(d => d.domain);
   // Compaction can drop the rules the gate and excerpts already showed, so they show them again.
   if (input.session_id && (input.source === 'compact' || input.source === 'clear')) clearMarkers(input.session_id);
@@ -54,6 +29,6 @@ runHook('session-start', input => {
     for (const k of always.keys) markShown(input.session_id, k, ledger.rules[k].hash);
     propose = proposeNote(input.session_id);
   }
-  const context = [always.text, propose, ...vaultNotes(input)].filter(Boolean).join('\n\n');
+  const context = [always.text, propose].filter(Boolean).join('\n\n');
   return context ? { hookSpecificOutput: { hookEventName: 'SessionStart', additionalContext: context } } : null;
 });

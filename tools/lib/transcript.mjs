@@ -1,12 +1,16 @@
 import fs from 'node:fs';
 import path from 'node:path';
-import { stripInjected } from './capture.mjs';
 import { inside } from './vault.mjs';
 
 const SKIPPED_ENTRY = ['isMeta', 'isSidechain', 'isCompactSummary', 'isVisibleInTranscriptOnly'];
-export const NOT_TYPED = ['<', '[Request interrupted by user', 'This session is being continued', 'Caveat:'];
+const NOT_TYPED = ['<', '[Request interrupted by user', 'This session is being continued', 'Caveat:'];
 
-export function* entries(buf, skipped = SKIPPED_ENTRY) {
+export const stripInjected = text => String(text ?? '')
+  .replace(/<system-reminder>[\s\S]*?<\/system-reminder>/g, '')
+  .replace(/<pasted_content\b[^>]*>[\s\S]*?<\/pasted_content>/g, '')
+  .trim();
+
+function* entries(buf, skipped = SKIPPED_ENTRY) {
   let pos = 0;
   while (pos < buf.length) {
     const nl = buf.indexOf(10, pos);
@@ -24,13 +28,12 @@ export function* entries(buf, skipped = SKIPPED_ENTRY) {
 
 // A message the user sends mid-turn is a queued_command attachment, not a user entry. One without an
 // origin can be another session's report, so only an explicit human origin counts.
-export const queuedPrompt = e => {
+const queuedPrompt = e => {
   const a = e.type === 'attachment' ? e.attachment : null;
   return a?.type === 'queued_command' && a.origin?.kind === 'human' && typeof a.prompt === 'string' ? a.prompt : null;
 };
 
-// Stricter than the pass, which also reads unmarked entries: slash-command echoes are unmarked, and a
-// brief can produce them.
+// An entry with no origin at all doesn't count: slash-command echoes are unmarked, and a brief can produce them.
 const typedEntry = e => {
   const marks = [e.turnOrigin, e.origin?.kind];
   return e.type === 'user' && marks.includes('human') && marks.every(m => m == null || m === 'human');

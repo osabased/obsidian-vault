@@ -7,7 +7,6 @@ export const vaultPath = (...xs) => path.join(ROOT, ...xs);
 
 const DEFAULTS = {
   delivery: { maxRulesPerEdit: 3, maxRuleChars: 300, maxBlockChars: 1200, maxPromptExcerpts: 3, activeMaxLines: 60, activeMaxBytes: 4096 },
-  pass: { command: 'claude', model: 'sonnet', effort: 'low', idleHours: 4, sweepEveryMinutes: 30, maxInputChars: 60000, timeoutSeconds: 300 },
   knowledge: { staleAfterDays: 180 },
 };
 
@@ -15,10 +14,7 @@ let loaded;
 export function config() {
   if (!loaded) {
     const c = readJson(vaultPath('taste.config.json'), {});
-    loaded = {
-      domains: c.domains ?? {}, delivery: { ...DEFAULTS.delivery, ...c.delivery }, pass: { ...DEFAULTS.pass, ...c.pass },
-      knowledge: { ...DEFAULTS.knowledge, ...c.knowledge },
-    };
+    loaded = { domains: c.domains ?? {}, delivery: { ...DEFAULTS.delivery, ...c.delivery }, knowledge: { ...DEFAULTS.knowledge, ...c.knowledge } };
   }
   return loaded;
 }
@@ -113,10 +109,9 @@ export const plural = (n, word) => `${n} ${word}${n === 1 ? '' : 's'}`;
 
 const pad = n => String(n).padStart(2, '0');
 export const today = (d = new Date()) => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
-export const clock = (d = new Date()) => `${today(d)} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
+const clock = (d = new Date()) => `${today(d)} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
 
 export const inboxFile = () => vaultPath('raw', 'inbox', `${today()}.jsonl`);
-export const picksFile = () => vaultPath('raw', 'picks', `${today()}.jsonl`);
 
 function datedRows(folder) {
   const dir = vaultPath('raw', folder);
@@ -125,16 +120,9 @@ function datedRows(folder) {
   return files.flatMap(f => readJsonl(path.join(dir, f)));
 }
 
-export const inboxRows = () => datedRows('inbox');
-export const pickRows = () => datedRows('picks');
-export const proposalRows = () => inboxRows().filter(r => r.source === 'agent');
+export const proposalRows = () => datedRows('inbox').filter(r => r.source === 'agent');
 
 export const decisionsFile = () => vaultPath('raw', 'decisions.jsonl');
-
-export function pendingRows(rows = inboxRows()) {
-  const done = new Set(readJsonl(decisionsFile()).flatMap(d => (Array.isArray(d.ids) ? d.ids : [])));
-  return rows.filter(r => r.id && !done.has(r.id));
-}
 
 export function appendLog(lines) {
   const file = vaultPath('log.md');
@@ -156,14 +144,20 @@ export function stateDir(...xs) {
   return dir;
 }
 
-export function mtime(file) {
+function mtime(file) {
   try { return fs.statSync(file).mtimeMs; } catch { return 0; }
 }
 
-export const appendLine = (file, line) => fs.appendFileSync(file, `${line}\n`);
-
 export function logError(name, e) {
-  try { appendLine(statePath('errors.log'), `${new Date().toISOString()} ${name}: ${e?.stack ?? e}`); } catch {}
+  try {
+    const file = statePath('errors.log');
+    const big = () => fs.statSync(file).size > 1 << 20;
+    // A hook that saw the full log may wait while another rotates it, so it checks the size again under
+    // the lock rather than rotate the fresh log over the full one. No log yet, a busy lock or a failed
+    // rename: this error still gets logged.
+    try { if (big()) withLock(`${file}.lock`, () => { if (big()) fs.renameSync(file, `${file}.1`); }); } catch {}
+    fs.appendFileSync(file, `${new Date().toISOString()} ${name}: ${e?.stack ?? e}\n`);
+  } catch {}
 }
 
 export const cwdOf = input => input.cwd || process.cwd();
@@ -175,11 +169,9 @@ export const toolFile = (name, input) => (name === 'NotebookEdit' ? input.notebo
 // `2>&1`, `=>`, `->` and `>=` contain `>` but write no file.
 export const WRITEISH = /(?<![\d&=-])>(?![&=])|\btee\b|\bsed\s+-i|\bmv\b|\bcp\b|\brm\b|\bdel\b|Set-Content|Add-Content|Out-File|Remove-Item|Move-Item|Copy-Item|New-Item|writeFile|appendFile|WriteAllText|\bperl\s+-[a-z]*i/i;
 
-export const skip = () => process.env.CLAUDE_CODE_SAFE_MODE === '1' || process.env.AGENT_TASTE_PASS === '1';
-
 // Hooks fail open: a broken vault must never block the user's session.
 export function runHook(name, fn) {
-  if (skip()) return;
+  if (process.env.CLAUDE_CODE_SAFE_MODE === '1') return;
   try {
     const out = fn(JSON.parse(fs.readFileSync(0, 'utf8').replace(/^\uFEFF/, '')));
     if (out) process.stdout.write(JSON.stringify(out));
@@ -191,7 +183,7 @@ export function runHook(name, fn) {
 export const shortHash = s => crypto.createHash('sha256').update(String(s)).digest('hex').slice(0, 16);
 export const safeId = s => (/^[A-Za-z0-9_-]{1,100}$/.test(String(s)) ? String(s) : shortHash(s));
 
-export function tryLock(file, staleMs) {
+function tryLock(file, staleMs) {
   for (let i = 0; i < 2; i++) {
     try {
       fs.writeFileSync(file, String(process.pid), { flag: 'wx' });
@@ -205,13 +197,11 @@ export function tryLock(file, staleMs) {
   return false;
 }
 
-export const unlock = file => fs.rmSync(file, { force: true });
-
 export function withLock(file, fn, staleMs = 10000) {
   const giveUp = Date.now() + 3000;
   while (!tryLock(file, staleMs)) {
     if (Date.now() > giveUp) throw new Error(`${path.basename(file)} is held by another process`);
     sleep(50);
   }
-  try { return fn(); } finally { unlock(file); }
+  try { return fn(); } finally { fs.rmSync(file, { force: true }); }
 }

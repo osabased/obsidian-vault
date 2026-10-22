@@ -45,10 +45,6 @@ export function lint() {
     if (n.do && n.not && ruleText(n).length > delivery.maxRuleChars) {
       add('warn', n.rel, `${ruleTextParts(n)} come to ${ruleText(n).length} characters; the hooks cut them at ${delivery.maxRuleChars}`);
     }
-    if (n.data.basis === 'inferred') {
-      const sessions = new Set(n.body.match(/\bsession [0-9a-f]{8}\b/g) ?? []).size;
-      if (sessions < 3) add('warn', n.rel, `basis is inferred but the evidence names ${plural(sessions, 'session')}; inferred rules need 3`);
-    }
     const confirmed = n.status === 'confirmed';
     // The hooks deliver the date recorded at confirmation, so that is the one that goes stale.
     const asOf = (confirmed && entry?.as_of) || n.as_of;
@@ -221,9 +217,7 @@ function codeErrors(rel, src) {
     if (!relative && !spec.startsWith('node:') && isBuiltin(spec)) errors.push(`imports '${spec}'; name built-ins with node:, as in 'node:${spec}'`);
     else if (!relative && !(spec.startsWith('node:') && isBuiltin(spec))) errors.push(`imports '${spec}'; tools/ uses only Node's built-in modules`);
     const mod = spec.replace(/^node:/, '');
-    if (mod === 'child_process' && !['lib/sessions.mjs', 'session-pass.mjs'].includes(rel)) {
-      errors.push('imports node:child_process; only lib/sessions.mjs and session-pass.mjs run other programs');
-    }
+    if (mod === 'child_process') errors.push("imports node:child_process; tools/ doesn't run other programs");
     if (quiet && NETWORK.includes(mod)) errors.push(`imports node:${mod}; hooks and lib/ stay off the network`);
   }
   if (quiet && /(?<![\w$.])fetch\s*\(/.test(code)) errors.push('calls fetch(); hooks and lib/ stay off the network');

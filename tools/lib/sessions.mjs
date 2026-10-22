@@ -1,23 +1,10 @@
 import fs from 'node:fs';
 import path from 'node:path';
-import { spawn } from 'node:child_process';
-import { config, vaultPath, statePath, stateDir, readJsonSafe, writeJson, safeId, shortHash, mtime, domainsFor } from './vault.mjs';
+import { vaultPath, statePath, stateDir, readJsonSafe, writeJson, safeId, shortHash, logError } from './vault.mjs';
 
 const DAY = 86400e3;
 
 export const registry = id => statePath('sessions', `${id}.json`);
-export const passFiles = id => ({ state: statePath('passes', `${id}.json`), lock: statePath('passes', `${id}.lock`) });
-export const lockStaleMs = () => (config().pass.timeoutSeconds * 4 + 60) * 1000;
-
-const PASS_END = /^(\d{4}-\d{2}-\d{2}T[\d:.]+Z) ([A-Za-z0-9_-]{1,100}) (kept \d.*|failed: (.*))/;
-
-// A pass logs picks and pattern captures along the way; only its kept or failed line says how it ended.
-export function lastPass() {
-  let log = '';
-  try { log = fs.readFileSync(vaultPath('.state', 'passes.log'), 'utf8'); } catch {}
-  const [, at, id, kept, failed] = log.split(/\r?\n/).map(l => PASS_END.exec(l)).findLast(Boolean) ?? [];
-  return at ? { at, id, kept: failed === undefined ? kept : undefined, failed } : null;
-}
 
 // `loaded` records when each domain's always-on rules went into the session's context, so rules
 // confirmed later, or domains the session moves into, are delivered with the next prompt.
@@ -30,8 +17,6 @@ export function touchSession(input, { loaded = [] } = {}) {
     session: String(input.session_id),
     transcript: input.transcript_path ?? prev.transcript ?? null,
     cwd: input.cwd ?? prev.cwd ?? null,
-    domain: domainsFor(input.cwd)[0]?.domain ?? prev.domain ?? null,
-    first_seen: prev.first_seen ?? now,
     last_seen: now,
     loaded: { ...prev.loaded, ...Object.fromEntries(loaded.map(d => [d, now])) },
   };
@@ -81,50 +66,29 @@ export function markDelivered(kind, sid, id, key, hash) {
   return true;
 }
 
-export function spawnPass(id) {
-  spawn(process.execPath, [vaultPath('tools', 'session-pass.mjs'), id], { detached: true, stdio: 'ignore', windowsHide: true }).unref();
-}
+const KINDS = ['gate', 'excerpts', 'shown', 'repeats'];
 
+// The registry goes last, so a session whose markers can't be removed yet is tried again next time.
 function prune(id) {
+  for (const kind of KINDS) fs.rmSync(vaultPath('.state', kind, id), { recursive: true, force: true });
   fs.rmSync(registry(id), { force: true });
-  fs.rmSync(passFiles(id).state, { force: true });
-  // No hook writes 'captured' markers; this clears the ones still in .state/.
-  for (const kind of ['gate', 'excerpts', 'shown', 'repeats', 'captured']) fs.rmSync(vaultPath('.state', kind, id), { recursive: true, force: true });
 }
 
-const fileSize = file => {
-  try { return fs.statSync(file).size; } catch { return 0; }
-};
+const markersChanged = id => Math.max(...KINDS.map(kind => fs.statSync(vaultPath('.state', kind, id), { throwIfNoEntry: false })?.mtimeMs ?? 0));
 
-function rotate(file) {
-  if (fileSize(file) > 1 << 20) fs.renameSync(file, `${file}.1`);
-}
-
-// SessionEnd may not fire (a closed app, a crash), so prompts in any session also catch up idle ones.
-export function maybeSweep(currentId) {
-  const { idleHours, sweepEveryMinutes } = config().pass;
-  const stampFile = statePath('sweep.json');
-  if (Date.now() - Date.parse(readJsonSafe(stampFile)?.at) < sweepEveryMinutes * 60e3) return;
+// Nothing marks a session's end, so each day's first session start clears sessions idle for 30 days:
+// by last_seen when registered, otherwise by when their markers last changed.
+export function tidy() {
+  const stampFile = statePath('tidy.json');
+  if (Date.now() - Date.parse(readJsonSafe(stampFile)?.at) < DAY) return;
   writeJson(stampFile, { at: new Date().toISOString() });
-  let spawned = 0;
-  for (const name of fs.readdirSync(stateDir('sessions'))) {
-    if (!name.endsWith('.json')) continue;
-    const id = name.slice(0, -'.json'.length);
-    const entry = readJsonSafe(registry(id));
-    const idle = Date.now() - Date.parse(entry?.last_seen);
-    if (!entry || !(idle <= 30 * DAY)) {
-      prune(id);
-      continue;
+  const registered = new Set(fs.readdirSync(stateDir('sessions')).filter(n => n.endsWith('.json')).map(n => n.slice(0, -'.json'.length)));
+  for (const id of new Set([...registered, ...KINDS.flatMap(kind => fs.readdirSync(stateDir(kind)))])) {
+    try {
+      const seen = registered.has(id) ? Date.parse(readJsonSafe(registry(id))?.last_seen) : markersChanged(id);
+      if (!(Date.now() - seen <= 30 * DAY)) prune(id);
+    } catch (e) {
+      logError('tidy', e);
     }
-    if (id === currentId || idle < idleHours * 3600e3 || spawned >= 3) continue;
-    const size = fileSize(entry.transcript);
-    const { state, lock } = passFiles(id);
-    const passed = readJsonSafe(state);
-    // State from before picks were logged lacks `picks`, so those sessions get one more pass for them.
-    if (!size || ((passed?.offset ?? 0) >= size && passed?.picks)) continue;
-    if (Date.now() - mtime(lock) < lockStaleMs()) continue;
-    spawnPass(id);
-    spawned++;
   }
-  for (const f of ['errors.log', 'passes.log']) rotate(statePath(f));
 }

@@ -1,7 +1,7 @@
-import { runHook, config, domainsFor, safeId, logError } from '../lib/vault.mjs';
+import { runHook, config, domainsFor, logError } from '../lib/vault.mjs';
 import { readLedger, clip, cmp, byKey, mentions } from '../lib/rules.mjs';
 import { parseCommands, runCommands } from '../lib/commands.mjs';
-import { touchSession, maybeSweep, marked, markDelivered } from '../lib/sessions.mjs';
+import { touchSession, marked, markDelivered } from '../lib/sessions.mjs';
 
 const ruleLine = (k, r) => `- ${k}: ${clip(r.text, config().delivery.maxRuleChars)}`;
 
@@ -41,7 +41,6 @@ runHook('prompt', input => {
   if (!input.session_id) return null;
   const doms = domainsFor(input.cwd).map(d => d.domain);
   const session = doms.length ? touchSession(input) : null;
-  try { maybeSweep(safeId(input.session_id)); } catch (e) { logError('sweep', e); }
   const scope = ['global', ...doms];
   const ledger = readLedger();
   const context = [session ? late(session, scope, ledger) : '', excerpts(input, scope, ledger)].filter(Boolean).join('\n\n');
