@@ -61,7 +61,7 @@ export const wasShown = (sid, key, hash) => marked('shown', sid, `${key}|${hash}
 
 export function markDelivered(kind, sid, id, key, hash) {
   if (!mark(kind, sid, id)) return false;
-  // Only registered sessions can propose, and only theirs are pruned.
+  // Only registered sessions can propose, so only theirs need shown markers.
   if (fs.existsSync(registry(safeId(sid)))) markShown(sid, key, hash);
   return true;
 }
