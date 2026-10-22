@@ -1,13 +1,9 @@
 import fs from 'node:fs';
-import { runHook, config, domainsFor, inside, vaultRel, toPosix, cwdOf } from '../lib/vault.mjs';
+import { runHook, config, domainsFor, inside, vaultRel, toPosix, cwdOf, FILE_TOOLS, SHELL_TOOLS, WRITEISH, toolCommand, toolFile } from '../lib/vault.mjs';
 import { readLedger, parseNote, noteHash, clip, tryRegex, cmp } from '../lib/rules.mjs';
 import { bestMatch, specificity, bySpecificity } from '../lib/glob.mjs';
 import { mark, marked } from '../lib/sessions.mjs';
 
-const FILE_TOOLS = ['Edit', 'Write', 'MultiEdit', 'NotebookEdit'];
-const SHELL_TOOLS = ['Bash', 'PowerShell'];
-// `2>&1`, `=>`, `->` and `>=` contain `>` but write no file.
-const WRITEISH = /(?<![\d&=-])>(?![&=])|\btee\b|\bsed\s+-i|\bmv\b|\bcp\b|\brm\b|\bdel\b|Set-Content|Add-Content|Out-File|Remove-Item|Move-Item|Copy-Item|New-Item|writeFile|appendFile|WriteAllText|\bperl\s+-[a-z]*i/i;
 const LEDGER = 'confirmed.json is the ledger of the rules the user confirmed. Only the hooks write it, when the user confirms or retires a rule in chat. Reading it is fine.';
 const ONLY_USER = 'Only the user confirms, retires or drops rules, in their own chat. Ask them to.';
 
@@ -54,7 +50,10 @@ function noteGuard(tool, ti, file, rel) {
   if (after.status !== before.status) return `${key} is confirmed. Only the user changes its status, by typing \`retire: ${key}\` in chat.`;
   const hash = noteHash(after);
   if (hash !== noteHash(before) && hash !== entry.hash) {
-    return `${key} is confirmed, so its Do, Not, Because, applies_to, triggers, keywords and always stay as the user confirmed them. Write a new note with \`replaces: ['${key}']\` instead and ask the user to confirm it.`;
+    const fields = [before, after].some(n => n.kind === 'knowledge')
+      ? 'Do, Not, Because, applies_to, triggers, keywords, always, kind and as_of'
+      : 'Do, Not, Because, applies_to, triggers, keywords and always';
+    return `${key} is confirmed, so its ${fields} stay as the user confirmed them. Write a new note with \`replaces: ['${key}']\` instead and ask the user to confirm it.`;
   }
   return null;
 }
@@ -118,9 +117,9 @@ runHook('edit', input => {
   const ti = input.tool_input ?? {};
   let why = null;
   if (SHELL_TOOLS.includes(tool)) {
-    why = shellGuard(String(ti.command ?? ''));
+    why = shellGuard(toolCommand(tool, ti));
   } else if (FILE_TOOLS.includes(tool)) {
-    const file = tool === 'NotebookEdit' ? ti.notebook_path : ti.file_path;
+    const file = toolFile(tool, ti);
     const cwd = cwdOf(input);
     if (file) why = vaultGuard(tool, ti, file, cwd) ?? gate(input, file, cwd);
   }

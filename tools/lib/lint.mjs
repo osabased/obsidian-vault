@@ -1,8 +1,8 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { isBuiltin } from 'node:module';
-import { config, vaultPath, plural } from './vault.mjs';
-import { loadNotes, readLedger, noteErrors, noteHash, ruleText, alwaysSize, build } from './rules.mjs';
+import { config, vaultPath, plural, today } from './vault.mjs';
+import { loadNotes, readLedger, noteErrors, noteHash, ruleText, ruleTextParts, alwaysSize, build, validDay } from './rules.mjs';
 
 export const tally = found => {
   const errors = found.filter(f => f.level === 'error').length;
@@ -12,7 +12,7 @@ export const tally = found => {
 export function lint() {
   const found = [];
   const add = (level, file, msg) => found.push({ level, file, msg });
-  const { domains, delivery } = config();
+  const { domains, delivery, knowledge } = config();
   let ledger = null;
   try { ledger = readLedger(); } catch (e) { add('error', 'confirmed.json', `not valid JSON: ${e.message}`); }
   const rules = ledger?.rules ?? {};
@@ -39,11 +39,22 @@ export function lint() {
     const topics = domains[n.domain]?.topics;
     if (topics && !topics.includes(n.data.topic)) add('warn', n.rel, `topic should be one of ${topics.join(', ')}`);
     if (n.do && n.not && ruleText(n).length > delivery.maxRuleChars) {
-      add('warn', n.rel, `Do, Not and Because come to ${ruleText(n).length} characters; the hooks cut them at ${delivery.maxRuleChars}`);
+      add('warn', n.rel, `${ruleTextParts(n)} come to ${ruleText(n).length} characters; the hooks cut them at ${delivery.maxRuleChars}`);
     }
     if (n.data.basis === 'inferred') {
       const sessions = new Set(n.body.match(/\bsession [0-9a-f]{8}\b/g) ?? []).size;
       if (sessions < 3) add('warn', n.rel, `basis is inferred but the evidence names ${plural(sessions, 'session')}; inferred rules need 3`);
+    }
+    const confirmed = n.status === 'confirmed';
+    // The hooks deliver the date recorded at confirmation, so that is the one that goes stale.
+    const asOf = (confirmed && entry?.as_of) || n.as_of;
+    if (n.kind === 'knowledge' && n.status !== 'outdated' && validDay(asOf)) {
+      const days = Math.round((Date.parse(today()) - Date.parse(asOf)) / 864e5);
+      if (days > knowledge.staleAfterDays) {
+        add('warn', n.rel, asOf !== n.as_of && validDay(n.as_of)
+          ? `the confirmed as_of is ${days} days old; confirm it again to deliver as_of ${n.as_of}`
+          : `as_of is ${days} days old. If it still holds, set as_of to the day you checked and confirm it${confirmed ? ' again' : ''}; if not, ${confirmed ? 'retire' : 'drop'} it`);
+      }
     }
   }
 

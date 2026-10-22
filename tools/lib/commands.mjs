@@ -112,6 +112,7 @@ function confirm(key, ctx) {
   ctx.ledger.rules[key] = {
     domain: n.domain, slug: n.slug, text: ruleText(n),
     applies_to: n.applies_to, triggers: n.triggers, keywords: n.keywords, always: n.always,
+    ...(n.kind === 'knowledge' ? { as_of: n.as_of } : {}),
     hash, confirmed_at: ctx.now, session: ctx.session,
   };
   delete ctx.ledger.retired[key];
