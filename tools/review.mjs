@@ -1,5 +1,5 @@
 import fs from 'node:fs';
-import { vaultPath, appendJsonl, inboxRows, pickRows, pendingRows, decisionsFile, plural, today, clock, appendLog, toPosix } from './lib/vault.mjs';
+import { vaultPath, appendJsonl, inboxRows, proposalRows, pickRows, pendingRows, decisionsFile, plural, today, clock, appendLog, toPosix } from './lib/vault.mjs';
 import { KEY_RE, readNote, readLedger, noteHash, ruleText, loadNotes, clip, byKey } from './lib/rules.mjs';
 import { lint, tally } from './lib/lint.mjs';
 import { lastPass } from './lib/sessions.mjs';
@@ -144,6 +144,24 @@ function provisional() {
   return out.length ? out : ['none'];
 }
 
+function fate(key, { rules, retired }) {
+  if (rules[key]) return ', confirmed';
+  if (retired[key]) return ', confirmed, then retired';
+  return readNote(key)?.status === 'outdated' ? ', dropped' : '';
+}
+
+function repeats() {
+  const ledger = readLedger();
+  const out = proposalRows().filter(r => Array.isArray(r.repeats)).flatMap(r => {
+    const then = fate(r.note, ledger);
+    return r.repeats.map(k => {
+      const how = Array.isArray(r.delivered) && r.delivered.includes(k) ? 'reached the agent' : 'never reached the agent';
+      return `- ${k}: repeated by ${r.note} on ${day(r.at)} (${how}${then})`;
+    });
+  });
+  return out.length ? out : ['none'];
+}
+
 function lintLine() {
   try {
     return `Lint: ${tally(lint())}`;
@@ -173,6 +191,7 @@ function status() {
   return [
     'Changed since confirmed', ...changed(),
     '', 'Provisional rules', ...provisional(),
+    '', 'Repeats of confirmed rules', ...repeats(),
     '', `Pending captures: ${pendingRows().length}`,
     `Pending picks: ${pendingRows(pickRows()).length}`,
     lintLine(),

@@ -43,11 +43,19 @@ const marker = (kind, sid, key) => vaultPath('.state', kind, safeId(sid), shortH
 
 export const marked = (kind, sid, key) => fs.existsSync(marker(kind, sid, key));
 
-export function mark(kind, sid, key) {
-  const file = marker(kind, sid, key);
-  fs.mkdirSync(path.dirname(file), { recursive: true });
+function create(file, text) {
   try {
-    fs.writeFileSync(file, key, { flag: 'wx' });
+    fs.writeFileSync(file, text, { flag: 'wx' });
+  } catch (e) {
+    if (e.code !== 'ENOENT') throw e;
+    fs.mkdirSync(path.dirname(file), { recursive: true });
+    fs.writeFileSync(file, text, { flag: 'wx' });
+  }
+}
+
+function mark(kind, sid, key) {
+  try {
+    create(marker(kind, sid, key), key);
     return true;
   } catch (e) {
     if (e.code === 'EEXIST') return false;
@@ -55,8 +63,22 @@ export function mark(kind, sid, key) {
   }
 }
 
+export const markRepeat = (sid, id) => mark('repeats', sid, id);
+
 export function clearMarkers(sid) {
   for (const kind of ['gate', 'excerpts']) fs.rmSync(vaultPath('.state', kind, safeId(sid)), { recursive: true, force: true });
+}
+
+// Unlike the gate and excerpt markers, `shown` markers survive compaction, so a repeat can tell
+// whether the rule it repeats ever reached the agent in the wording confirmed now.
+export const markShown = (sid, key, hash) => mark('shown', sid, `${key}|${hash}`);
+export const wasShown = (sid, key, hash) => marked('shown', sid, `${key}|${hash}`);
+
+export function markDelivered(kind, sid, id, key, hash) {
+  if (!mark(kind, sid, id)) return false;
+  // Only registered sessions can propose, and only theirs are pruned.
+  if (fs.existsSync(registry(safeId(sid)))) markShown(sid, key, hash);
+  return true;
 }
 
 export function spawnPass(id) {
@@ -67,7 +89,7 @@ function prune(id) {
   fs.rmSync(registry(id), { force: true });
   fs.rmSync(passFiles(id).state, { force: true });
   // No hook writes 'captured' markers; this clears the ones still in .state/.
-  for (const kind of ['gate', 'excerpts', 'captured']) fs.rmSync(vaultPath('.state', kind, id), { recursive: true, force: true });
+  for (const kind of ['gate', 'excerpts', 'shown', 'repeats', 'captured']) fs.rmSync(vaultPath('.state', kind, id), { recursive: true, force: true });
 }
 
 const fileSize = file => {

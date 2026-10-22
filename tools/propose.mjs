@@ -5,8 +5,11 @@ import {
   config, vaultPath, domainsFor, readJsonSafe, writeText, appendJsonl, inboxFile, decisionsFile, proposalRows, statePath, withLock, safeId, today,
   inside, FILE_TOOLS, WRITEISH, toolCommand, toolFile,
 } from './lib/vault.mjs';
-import { KEY_RE, BASES, wrongBasis, parseNote, noteErrors, ruleText, ruleTextParts, readNote, build, escapeRegExp, validDay } from './lib/rules.mjs';
-import { registry } from './lib/sessions.mjs';
+import {
+  KEY_RE, BASES, wrongBasis, toKey, parseNote, noteErrors, ruleText, ruleTextParts, readNote, readLedger, build, escapeRegExp, mentions, validDay, byKey,
+} from './lib/rules.mjs';
+import { normGlob } from './lib/glob.mjs';
+import { registry, markRepeat, marked, wasShown } from './lib/sessions.mjs';
 import { typedMessages, toolActivity } from './lib/transcript.mjs';
 import { normText } from './lib/capture.mjs';
 
@@ -46,6 +49,9 @@ const help = () => [
   '  always       true for short rules that matter in nearly every session',
   '               A taste rule needs keywords, applies_to or always: true. A knowledge rule needs applies_to',
   '               and takes no keywords or always.',
+  '  replaces     leave it out at first. If the rule may repeat ones the user confirmed, propose.mjs lists them',
+  '               and refuses once. Then propose it again with the keys of the ones it repeats, or [] if none.',
+  '               Confirming it retires the rules it replaces.',
   '',
   "A knowledge rule's as_of is set for you: the source_date for a source, today otherwise.",
 ].join('\n');
@@ -204,6 +210,67 @@ function checkEvidence(f, session) {
   return false;
 }
 
+const andList = xs => (xs.length < 2 ? xs.join('') : `${xs.slice(0, -1).join(', ')} and ${xs.at(-1)}`);
+const those = xs => (xs.length === 1 ? 'that one' : 'them');
+
+function checkReplaces(f, scope, rules) {
+  const bad = f.replaces.filter(k => !scope.includes(rules[k]?.domain));
+  if (bad.length) refuse(`replaces names rules the user confirmed in ${scope.join(' or ')}, by key. ${bad.join(', ')} ${bad.length === 1 ? "isn't one" : "aren't"}.`);
+  const wide = f.domain === 'global' ? [] : f.replaces.filter(k => rules[k].domain === 'global');
+  if (!wide.length) return;
+  const it = wide.length === 1 ? 'it' : 'them';
+  refuse(`${andList(wide)} ${wide.length === 1 ? 'applies' : 'apply'} in every project, so a ${f.domain} rule can't replace ${it}. Propose this one in global instead, or leave ${it} out of replaces.`);
+}
+
+const OVERLAP = 0.2;
+const STOPWORDS = new Set(('a all an and any are as at be because but by can cant didnt do doesnt dont for from in is isnt it its must never not of on or '
+  + 'should that the their theirs them these they this those to use was we were with wont you your yours').split(' '));
+// Apostrophes go first so "don't" reads as the stopword dont rather than as don, which every Not line shares.
+const words = s => new Set((normText(s).replace(/'/g, '').match(/[\p{L}\p{N}]+/gu) ?? [])
+  .filter(w => w.length > 2 && !STOPWORDS.has(w) && !/^\p{N}+$/u.test(w))
+  .map(w => (w.length > 3 ? w.replace(/s$/, '') : w)));
+
+function overlap(x, y) {
+  const shared = [...x].filter(w => y.has(w)).length;
+  return shared / (x.size + y.size - shared || 1);
+}
+
+const globKey = g => normGlob(g).toLowerCase();
+
+const SHORTLIST = 5;
+
+// Paraphrases share few words, so a shared glob or keyword lists a rule too; the agent judges which it repeats.
+function lookalikes(f, text, scope, rules) {
+  const globs = new Set(f.applies_to.map(globKey));
+  const mine = words(text);
+  const close = [];
+  for (const [k, r] of Object.entries(rules)) {
+    if (!scope.includes(r.domain)) continue;
+    const glob = (r.applies_to ?? []).some(g => globs.has(globKey(g)));
+    const theirs = [r.text, ...(r.keywords ?? [])].join('\n');
+    const keyword = f.keywords.some(w => mentions(w, theirs));
+    const share = overlap(mine, words(r.text));
+    if (glob || keyword || share >= OVERLAP) close.push({ entry: [k, r], score: glob + keyword + share });
+  }
+  return close.sort((a, b) => b.score - a.score || byKey(a.entry, b.entry)).map(c => c.entry);
+}
+
+function checkRepeats(f, text, scope, given, rules) {
+  const all = lookalikes(f, text, scope, rules);
+  const alike = all.slice(0, SHORTLIST).sort(byKey);
+  const id = ([k, r]) => `${f.slug}|${k}|${r.hash}`;
+  const seen = e => f.replaces.includes(e[0]) || marked('repeats', f.sid, id(e));
+  if (!alike.length || (given && alike.every(seen))) return alike.map(([k]) => k);
+  for (const e of alike) markRepeat(f.sid, id(e));
+  const more = all.length - alike.length;
+  refuse([
+    'it may repeat rules the user confirmed:',
+    ...alike.map(([k, r]) => `- ${k}: ${r.text}`),
+    ...(more ? [`${more} more match less closely and aren't listed.`] : []),
+    "If it repeats one, propose it again with that rule's key in replaces; confirming yours retires it. If it says something new, propose it again with replaces: [].",
+  ].join('\n'));
+}
+
 const sameList = (a, b) => Array.isArray(a) && a.length === b.length && a.every((x, i) => x === b[i]);
 
 function checkReadBack(n, f) {
@@ -211,7 +278,7 @@ function checkReadBack(n, f) {
     ['domain', n.data.domain === f.domain], ['status', n.status === 'provisional'], ['kind', n.kind === f.kind], ['basis', n.data.basis === f.basis],
     ['as_of', n.as_of === (f.as_of ?? null)], ['topic', n.data.topic === f.topic], ['always', n.data.always === f.always],
     ['applies_to', sameList(n.applies_to, f.applies_to)], ['triggers', sameList(n.triggers, f.triggers)], ['keywords', sameList(n.keywords, f.keywords)],
-    ['replaces', sameList(n.replaces, [])], ['do', n.do === f.do], ['not', n.not === f.not], ['because', n.because === f.because],
+    ['replaces', sameList(n.replaces, f.replaces.map(toKey))], ['do', n.do === f.do], ['not', n.not === f.not], ['because', n.because === f.because],
   ];
   const bad = fields.find(([, ok]) => !ok);
   if (bad) refuse(`${bad[0]} doesn't survive as YAML. Rephrase it.`);
@@ -230,7 +297,7 @@ function evidenceLine(f) {
 const noteText = f => [
   '---', 'type: rule', `domain: ${f.domain}`, 'status: provisional', `kind: ${f.kind}`, `basis: ${f.basis}`, ...(f.as_of ? [`as_of: ${f.as_of}`] : []),
   `topic: ${yaml(f.topic)}`, `always: ${f.always}`,
-  ...yamlList('applies_to', f.applies_to), ...yamlList('triggers', f.triggers), ...yamlList('keywords', f.keywords), 'replaces: []',
+  ...yamlList('applies_to', f.applies_to), ...yamlList('triggers', f.triggers), ...yamlList('keywords', f.keywords), ...yamlList('replaces', f.replaces),
   `created: ${f.day}`, `updated: ${f.day}`, '---', '',
   `**Do:** ${f.do}`, `**Not:** ${f.not}`, `**Because:**${f.because ? ` ${f.because}` : ''}`, '',
   '## Examples', '', '## Evidence', evidenceLine(f), '',
@@ -254,6 +321,8 @@ function propose(sid, p) {
   Object.assign(f, { applies_to: list(p, 'applies_to'), triggers: list(p, 'triggers'), keywords: list(p, 'keywords'), always: p.always ?? false });
   if (typeof f.always !== 'boolean') refuse('always must be true or false.');
   if (f.kind === 'taste' && !f.always && !f.applies_to.length && !f.keywords.length) refuse('give it keywords, applies_to or always: true, or nothing will deliver it.');
+  const scope = f.domain === 'global' ? domains : [f.domain, 'global'];
+  f.replaces = [...new Set(list(p, 'replaces'))];
   Object.assign(f, evidence(f, p));
   if (f.kind === 'knowledge') f.as_of = f.source_date ?? today();
   f.summary = checkEvidence(f, session);
@@ -277,19 +346,28 @@ function propose(sid, p) {
     const earlier = rows.find(same);
     if (earlier) refuse(`these words were already proposed as ${earlier.note}.`);
     if (readNote(key)) refuse(`wiki/${key}.md already exists. Pick another slug, or leave that note to the user.`);
+    // Read under the lock, so a rule in replaces the user retired meanwhile is refused here.
+    const { rules } = readLedger();
+    checkReplaces(f, scope, rules);
+    const overlaps = checkRepeats(f, ruleText(n), scope, p.replaces !== undefined, rules).filter(k => !f.replaces.includes(k));
     writeText(`${vaultPath('wiki', f.domain, f.slug)}.md`, text);
     appendJsonl(inboxFile(), [{
       id: f.id, at, source: 'agent', kind: f.evidence, text: said, ...(f.basis === 'failure' ? { fix: f.fix } : {}),
       note: key, session: sid, transcript: session.transcript ?? null, cwd: session.cwd ?? null, domain: f.domain,
+      ...(f.replaces.length ? { repeats: f.replaces, delivered: f.replaces.filter(k => wasShown(sid, k, rules[k].hash)) } : {}),
     }]);
     appendJsonl(decisionsFile(), [{ at, ids: [f.id], action: 'note', note: key }]);
     build();
     const reply = [
       `**Proposed ${f.kind === 'knowledge' ? 'knowledge rule' : 'rule'}** ${key}: ${ruleText(n)}`,
       ...(f.summary ? [`The quote comes from a WebFetch summary of ${f.source}, not the page's own words.`] : []),
+      ...(f.replaces.length
+        ? [`It repeats ${andList(f.replaces)}, which you confirmed. Confirming this one retires ${those(f.replaces)}.`] : []),
+      ...(overlaps.length
+        ? [`It may overlap ${andList(overlaps)}, which you confirmed. Confirming this one keeps ${those(overlaps)} too.`] : []),
       `Type \`confirm\` to keep it or \`drop\` to let it go. After another message, use \`confirm: ${key}\` or \`drop: ${key}\`.`,
     ];
-    return [`Wrote wiki/${key}.md. End your reply with these ${f.summary ? 'three' : 'two'} lines as they are:`, '', ...reply].join('\n');
+    return [`Wrote wiki/${key}.md. End your reply with these ${['two', 'three', 'four', 'five'][reply.length - 2]} lines as they are:`, '', ...reply].join('\n');
   });
 }
 
