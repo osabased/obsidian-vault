@@ -3,7 +3,7 @@ import path from 'node:path';
 import crypto from 'node:crypto';
 import {
   config, vaultPath, proposeDomains, inVaultFolder, readJsonSafe, writeText, appendJsonl, inboxFile, decisionsFile, proposalRows, statePath, withLock, safeId, today,
-  inside, FILE_TOOLS, WRITEISH, toolCommand, toolFile,
+  inside, FILE_TOOLS, WRITEISH, toolCommand, toolFile, logError,
 } from './lib/vault.mjs';
 import {
   KEY_RE, BASES, wrongBasis, toKey, parseNote, noteErrors, ruleText, ruleTextParts, readNote, readLedger, build, escapeRegExp, mentions, isUrl, validDay, byKey,
@@ -246,6 +246,29 @@ function overlap(x, y) {
 const globKey = g => normGlob(g).toLowerCase();
 
 const SHORTLIST = 5;
+const TOPIC_LIST = 20;
+
+// The ledger keeps no topic, so it comes from the notes, read before the ledger lock that the user's confirm waits on.
+// Global topics are free text, so case doesn't count. A note that can't be read leaves its rule off the topic list.
+function topicReader(domain, rules) {
+  const topics = new Map();
+  const read = k => {
+    if (!topics.has(k)) {
+      let t;
+      try { t = readNote(k)?.data.topic; } catch (e) { logError('propose', e); }
+      topics.set(k, String(t ?? '').trim().toLowerCase());
+    }
+    return topics.get(k);
+  };
+  for (const [k, r] of Object.entries(rules)) if (r.domain === domain) read(k);
+  return read;
+}
+
+// While a topic holds few rules the agent judges them all, words shared or not.
+function onTopic(f, rules, topicOf) {
+  const mine = Object.entries(rules).filter(([k, r]) => r.domain === f.domain && topicOf(k) === f.topic.toLowerCase());
+  return mine.length <= TOPIC_LIST ? mine.sort(byKey) : [];
+}
 
 // Paraphrases share few words, so a shared glob or keyword lists a rule too; the agent judges which it repeats.
 function lookalikes(f, text, scope, rules) {
@@ -263,17 +286,26 @@ function lookalikes(f, text, scope, rules) {
   return close.sort((a, b) => b.score - a.score || byKey(a.entry, b.entry)).map(c => c.entry);
 }
 
-function checkRepeats(f, text, scope, given, rules) {
+function checkRepeats(f, text, scope, given, rules, topicOf) {
+  const topic = onTopic(f, rules, topicOf);
   const all = lookalikes(f, text, scope, rules);
-  const alike = all.slice(0, SHORTLIST).sort(byKey);
+  const inTopic = new Set(topic.map(([k]) => k));
+  const others = all.filter(([k]) => !inTopic.has(k));
+  const alike = others.slice(0, SHORTLIST).sort(byKey);
+  const shown = [...topic, ...alike];
   const id = ([k, r]) => `${f.slug}|${k}|${r.hash}`;
   const seen = e => f.replaces.includes(e[0]) || marked('repeats', f.sid, id(e));
-  if (!alike.length || (given && alike.every(seen))) return alike.map(([k]) => k);
-  for (const e of alike) markRepeat(f.sid, id(e));
-  const more = all.length - alike.length;
+  if (!shown.length || (given && shown.every(seen))) return [...all.filter(([k]) => inTopic.has(k)), ...alike].sort(byKey).map(([k]) => k);
+  for (const e of shown) markRepeat(f.sid, id(e));
+  const more = others.length - alike.length;
+  const item = ([k, r]) => `- ${k}: ${r.text}`;
   refuse([
-    'it may repeat rules the user confirmed:',
-    ...alike.map(([k, r]) => `- ${k}: ${r.text}`),
+    ...(topic.length ? [
+      'it may repeat rules the user confirmed.',
+      `Every confirmed ${f.domain} rule on ${f.topic}:`,
+      ...topic.map(item),
+      ...(alike.length ? ['Others that share words, globs or keywords:', ...alike.map(item)] : []),
+    ] : ['it may repeat rules the user confirmed:', ...alike.map(item)]),
     ...(more ? [`${more} more match less closely and aren't listed.`] : []),
     "If it repeats one, propose it again with that rule's key in replaces; confirming yours retires it. If it says something new, propose it again with replaces: [].",
   ].join('\n'));
@@ -348,6 +380,7 @@ function propose(sid, p) {
   const said = f.basis === 'failure' ? f.error : f.quote;
   // One error can show several facts, so a failure repeats an earlier one only if its fix does too.
   const same = r => normText(r.text) === normText(said) && (f.basis !== 'failure' || normText(r.fix ?? '') === normText(f.fix));
+  const topicOf = topicReader(f.domain, readLedger().rules);
   return withLock(statePath('ledger.lock'), () => {
     const rows = proposalRows();
     if (rows.filter(r => r.session === sid).length >= MAX_PER_SESSION) refuse(`this session already proposed ${MAX_PER_SESSION} rules.`);
@@ -357,7 +390,7 @@ function propose(sid, p) {
     // Read under the lock, so a rule in replaces the user retired meanwhile is refused here.
     const { rules } = readLedger();
     checkReplaces(f, scope, rules);
-    const overlaps = checkRepeats(f, ruleText(n), scope, p.replaces !== undefined, rules).filter(k => !f.replaces.includes(k));
+    const overlaps = checkRepeats(f, ruleText(n), scope, p.replaces !== undefined, rules, topicOf).filter(k => !f.replaces.includes(k));
     writeText(`${vaultPath('wiki', f.domain, f.slug)}.md`, text);
     appendJsonl(inboxFile(), [{
       id: f.id, at, source: 'agent', kind: f.evidence, text: said, ...(f.basis === 'failure' ? { fix: f.fix } : {}),
