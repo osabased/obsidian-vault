@@ -1,7 +1,7 @@
 import fs from 'node:fs';
 import { setKey } from './frontmatter.mjs';
 import { stripInjected, typedMessages } from './transcript.mjs';
-import { KEY_RE, toKey, parseNote, noteErrors, replaceProblem, noteHash, ruleText, readLedger, readNote, writeLedger, build } from './rules.mjs';
+import { KEY_RE, toKey, linkTo, parseNote, noteErrors, replaceProblem, noteHash, ruleText, readLedger, readNote, writeLedger, build } from './rules.mjs';
 import { config, vaultPath, writeText, appendLog, statePath, withLock, proposalRows } from './vault.mjs';
 
 const BARE = /^(?:(`?)(confirm|drop)\1[.!]?|(confirm|drop):)$/i;
@@ -84,7 +84,7 @@ function replace(t, key, ctx) {
   const old = ctx.ws.get(t);
   if (old) {
     ctx.ws.set(t, 'status', 'outdated');
-    ctx.ws.set(t, 'superseded_by', `[[wiki/${key}|${key.split('/')[1]}]]`);
+    ctx.ws.set(t, 'superseded_by', linkTo(key));
   }
   if (ctx.ledger.rules[t]) {
     delete ctx.ledger.rules[t];
