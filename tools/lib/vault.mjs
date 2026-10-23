@@ -51,6 +51,11 @@ export function domainsFor(p, base) {
   return hits.filter((h, i) => hits.findIndex(x => x.domain === h.domain) === i);
 }
 
+export const inVaultFolder = cwd => Boolean(cwd) && vaultRel(cwd) !== null;
+
+// /ingest runs in the vault folder and can feed any domain.
+export const proposeDomains = cwd => (inVaultFolder(cwd) ? Object.keys(config().domains) : domainsFor(cwd).map(d => d.domain));
+
 export function readJson(file, fallback) {
   try {
     return JSON.parse(fs.readFileSync(file, 'utf8').replace(/^\uFEFF/, ''));

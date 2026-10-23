@@ -9,6 +9,7 @@ export const KEY_RE = /^[a-z0-9-]+\/[a-z0-9-]+$/;
 export const BASES = { taste: ['stated', 'inferred'], knowledge: ['stated', 'failure', 'source'] };
 export const wrongBasis = (kind, basis) => (kind === 'knowledge' ? "a knowledge rule's basis must be stated, failure or source"
   : BASES.knowledge.includes(basis) ? `basis ${basis} is for knowledge rules; set kind: knowledge` : 'basis must be stated or inferred');
+export const isUrl = s => typeof s === 'string' && /^https?:\/\/\S+$/i.test(s);
 export const validDay = s => typeof s === 'string' && /^\d{4}-\d\d-\d\d$/.test(s) && !Number.isNaN(Date.parse(s)) && new Date(s).toISOString().startsWith(s);
 const KEBAB = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
 const HEAD = [
@@ -92,8 +93,8 @@ export function noteErrors(n) {
   if (!KEBAB.test(n.slug) || (n.domain && !KEBAB.test(n.domain))) errs.push('file and folder names must be lowercase-kebab-case');
   if (n.type !== 'rule' && n.type !== 'page') errs.push('type must be rule or page');
   if (n.domain && n.data.domain !== undefined && n.data.domain !== n.domain) errs.push(`domain is ${n.data.domain} but the note is in wiki/${n.domain}/`);
-  if (n.type !== 'rule') return errs;
   if (n.data.domain === undefined) errs.push('no domain');
+  if (n.type !== 'rule') return errs;
   if (!['provisional', 'confirmed', 'outdated'].includes(n.status)) errs.push('status must be provisional, confirmed or outdated');
   if (!BASES[n.kind]) errs.push('kind must be taste or knowledge');
   else if (!BASES[n.kind].includes(n.data.basis)) errs.push(wrongBasis(n.kind, n.data.basis));

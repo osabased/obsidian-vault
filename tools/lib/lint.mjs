@@ -2,7 +2,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { isBuiltin } from 'node:module';
 import { config, vaultPath, plural, today } from './vault.mjs';
-import { loadNotes, readLedger, noteErrors, replaceProblem, noteHash, ruleText, ruleTextParts, alwaysSize, build, validDay } from './rules.mjs';
+import { loadNotes, readLedger, noteErrors, replaceProblem, noteHash, ruleText, ruleTextParts, alwaysSize, build, isUrl, validDay } from './rules.mjs';
 
 export const tally = found => {
   const errors = found.filter(f => f.level === 'error').length;
@@ -25,6 +25,7 @@ export function lint() {
     else if (n.domain !== 'global' && !domains[n.domain]) add('error', n.rel, `${n.domain} isn't a domain in taste.config.json`);
     if (n.depth > 2) add('warn', n.rel, 'notes go directly in wiki/<domain>/, not in subfolders, or they can\'t be confirmed');
     for (const e of noteErrors(n)) add('error', n.rel, e);
+    if (n.type === 'page') lintPage(n, add);
     if (n.type !== 'rule') continue;
 
     const entry = rules[n.key];
@@ -70,6 +71,23 @@ export function lint() {
   }
   lintCode(add);
   return found.sort((a, b) => (a.level === b.level ? 0 : a.level === 'error' ? -1 : 1));
+}
+
+const realFile = file => {
+  try { return fs.statSync(file).isFile() ? fs.realpathSync.native(file) : null; } catch { return null; }
+};
+
+// /ingest finds the sources no page names yet by comparing paths, so each file has one spelling.
+function lintPage(n, add) {
+  const { source, source_date: dated } = n.data;
+  if (!isUrl(source)) {
+    const real = typeof source === 'string' ? realFile(vaultPath(source)) : null;
+    const rel = real ? path.relative(fs.realpathSync.native(vaultPath()), real).split(path.sep).join('/') : '';
+    if (!rel.startsWith('raw/')) add('error', n.rel, 'source must be a URL or a file under raw/ that exists');
+    else if (rel !== source) add('error', n.rel, `write source as ${rel}, the path from the vault root`);
+  }
+  if (dated != null && !validDay(dated)) add('error', n.rel, 'source_date must be a date as YYYY-MM-DD');
+  else if (dated > today()) add('error', n.rel, `source_date ${dated} is in the future`);
 }
 
 const REGEX_AFTER_WORD = new Set(['return', 'typeof', 'instanceof', 'in', 'of', 'new', 'delete', 'void', 'throw', 'case', 'do', 'else', 'yield', 'await']);
