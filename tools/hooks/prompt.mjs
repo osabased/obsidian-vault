@@ -1,4 +1,4 @@
-import { runHook, config, domainsFor, logError } from '../lib/vault.mjs';
+import { runHook, config, domainsFor, inVaultFolder, logError } from '../lib/vault.mjs';
 import { readLedger, clip, cmp, byKey, mentions } from '../lib/rules.mjs';
 import { parseCommands, runCommands } from '../lib/commands.mjs';
 import { touchSession, marked, markDelivered } from '../lib/sessions.mjs';
@@ -40,7 +40,7 @@ runHook('prompt', input => {
   }
   if (!input.session_id) return null;
   const doms = domainsFor(input.cwd).map(d => d.domain);
-  const session = doms.length ? touchSession(input) : null;
+  const session = doms.length || inVaultFolder(input.cwd) ? touchSession(input) : null;
   const scope = ['global', ...doms];
   const ledger = readLedger();
   const context = [session ? late(session, scope, ledger) : '', excerpts(input, scope, ledger)].filter(Boolean).join('\n\n');

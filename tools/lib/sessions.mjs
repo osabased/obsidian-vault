@@ -7,7 +7,8 @@ const DAY = 86400e3;
 export const registry = id => statePath('sessions', `${id}.json`);
 
 // `loaded` records when each domain's always-on rules went into the session's context, so rules
-// confirmed later, or domains the session moves into, are delivered with the next prompt.
+// confirmed later, or domains the session moves into, are delivered with the next prompt. `cwd` stays where
+// the session registered, so a move into the vault folder doesn't let it propose for every domain.
 export function touchSession(input, { loaded = [] } = {}) {
   const id = safeId(input.session_id);
   const file = registry(id);
@@ -16,7 +17,7 @@ export function touchSession(input, { loaded = [] } = {}) {
   const entry = {
     session: String(input.session_id),
     transcript: input.transcript_path ?? prev.transcript ?? null,
-    cwd: input.cwd ?? prev.cwd ?? null,
+    cwd: prev.cwd ?? input.cwd ?? null,
     last_seen: now,
     loaded: { ...prev.loaded, ...Object.fromEntries(loaded.map(d => [d, now])) },
   };

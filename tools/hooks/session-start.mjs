@@ -1,4 +1,4 @@
-import { runHook, domainsFor, vaultPath, toPosix, logError } from '../lib/vault.mjs';
+import { runHook, domainsFor, inVaultFolder, vaultPath, toPosix, logError } from '../lib/vault.mjs';
 import { alwaysContext, readLedger } from '../lib/rules.mjs';
 import { touchSession, clearMarkers, markShown, tidy } from '../lib/sessions.mjs';
 
@@ -24,10 +24,11 @@ runHook('session-start', input => {
   const ledger = readLedger();
   const always = alwaysContext(['global', ...doms], ledger);
   let propose = '';
-  if (input.session_id && doms.length) {
+  // Vault sessions register so /ingest can propose; the skill tells them how, so they get no note.
+  if (input.session_id && (doms.length || inVaultFolder(input.cwd))) {
     touchSession(input, { loaded: ['global', ...doms] });
     for (const k of always.keys) markShown(input.session_id, k, ledger.rules[k].hash);
-    propose = proposeNote(input.session_id);
+    if (doms.length) propose = proposeNote(input.session_id);
   }
   const context = [always.text, propose].filter(Boolean).join('\n\n');
   return context ? { hookSpecificOutput: { hookEventName: 'SessionStart', additionalContext: context } } : null;

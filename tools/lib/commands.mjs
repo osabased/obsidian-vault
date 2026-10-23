@@ -134,6 +134,7 @@ function retire(key, ctx) {
     ctx.log.push(`retired ${key}`);
     return `Retired ${key}. No longer enforced.`;
   }
+  if (n && n.type !== 'rule') return `Not retired: ${key} — its type is not rule.`;
   if (n && n.status !== 'outdated') {
     ctx.ws.set(key, 'status', 'outdated');
     ctx.log.push(`marked ${key} outdated`);
@@ -146,6 +147,7 @@ function drop(key, ctx) {
   if (!KEY_RE.test(key)) return `Not dropped: ${key} — use <domain>/<slug>, like roblox-ui/strict-mode.`;
   const n = ctx.ws.get(key);
   if (!n) return `Not dropped: ${key} — no note at wiki/${key}.md.`;
+  if (n.type !== 'rule') return `Not dropped: ${key} — its type is not rule.`;
   if (ctx.ledger.rules[key]) return `Not dropped: ${key} is confirmed. Type retire: ${key} to stop enforcing it.`;
   if (n.status === 'outdated') return `Not dropped: ${key} is already outdated.`;
   ctx.ws.set(key, 'status', 'outdated');

@@ -81,6 +81,8 @@ function newText(tool, ti) {
 }
 
 function gate(input, file, cwd) {
+  // The vault's notes and sources are the user's taste, not project work, so no rule gates them.
+  if (/^(?:wiki|raw)\//i.test(vaultRel(file, cwd) ?? '')) return null;
   const { maxRulesPerEdit, maxRuleChars, maxBlockChars } = config().delivery;
   const sid = input.session_id;
   const doms = domainsFor(file, cwd);

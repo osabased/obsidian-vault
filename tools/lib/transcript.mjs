@@ -41,6 +41,7 @@ const typedEntry = e => {
 
 const SLASH = /^<command-(?:message|name)>/;
 const commandArgs = text => text.match(/<command-args>([\s\S]*?)<\/command-args>/)?.[1].trim() ?? '';
+const commandName = text => text.match(/<command-name>\/?([^<]*)<\/command-name>/)?.[1].trim() ?? '';
 
 const resultText = c => (typeof c === 'string' ? c : Array.isArray(c) ? c.filter(b => b?.type === 'text').map(b => b.text).join('\n') : '');
 const SAVED = /^<persisted-output>[\s\S]*?Full output saved to: (.+)$/m;
@@ -96,7 +97,7 @@ export function typedMessages(file) {
     for (const raw of texts) {
       const text = stripInjected(raw);
       const at = String(e.timestamp ?? '');
-      if (SLASH.test(text)) out.push({ at, text: commandArgs(text) });
+      if (SLASH.test(text)) out.push({ at, text: commandArgs(text), command: commandName(text) });
       else if (text && !NOT_TYPED.some(p => text.startsWith(p))) out.push({ at, text });
     }
   }

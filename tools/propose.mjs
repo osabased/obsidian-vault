@@ -2,11 +2,11 @@ import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
 import {
-  config, vaultPath, domainsFor, readJsonSafe, writeText, appendJsonl, inboxFile, decisionsFile, proposalRows, statePath, withLock, safeId, today,
+  config, vaultPath, proposeDomains, inVaultFolder, readJsonSafe, writeText, appendJsonl, inboxFile, decisionsFile, proposalRows, statePath, withLock, safeId, today,
   inside, FILE_TOOLS, WRITEISH, toolCommand, toolFile,
 } from './lib/vault.mjs';
 import {
-  KEY_RE, BASES, wrongBasis, toKey, parseNote, noteErrors, ruleText, ruleTextParts, readNote, readLedger, build, escapeRegExp, mentions, validDay, byKey,
+  KEY_RE, BASES, wrongBasis, toKey, parseNote, noteErrors, ruleText, ruleTextParts, readNote, readLedger, build, escapeRegExp, mentions, isUrl, validDay, byKey,
 } from './lib/rules.mjs';
 import { normGlob } from './lib/glob.mjs';
 import { registry, markRepeat, marked, wasShown } from './lib/sessions.mjs';
@@ -20,7 +20,7 @@ const help = () => [
   RUN,
   '',
   'rule.json is an object with these fields:',
-  "  domain       this session's domain, or global for every project",
+  "  domain       this session's domain (any domain after /ingest in the vault folder), or global for every project",
   '  slug         lowercase-kebab-case',
   '  kind         "taste" (the default), or "knowledge" for a fact about an API, version or tool',
   "               that your training gets wrong or doesn't know",
@@ -85,8 +85,11 @@ function sessionOf(sid) {
   const own = process.env.CLAUDE_CODE_SESSION_ID;
   if (own && own !== sid) refuse(`${sid} isn't this session, which is ${own}.`);
   const entry = readJsonSafe(registry(safeId(sid)));
-  const domains = domainsFor(entry?.cwd).map(d => d.domain);
-  if (!domains.length) refuse(`the taste vault has no domain session ${sid}. Pass the session id from the taste vault's note at session start.`);
+  const domains = proposeDomains(entry?.cwd);
+  if (!domains.length) refuse(`the taste vault has no session ${sid} from a domain's project folder or the vault folder. Pass the session id from the taste vault's note at session start, or $CLAUDE_CODE_SESSION_ID in the vault folder.`);
+  if (inVaultFolder(entry.cwd) && !typedMessages(entry.transcript).some(m => m.command === 'ingest')) {
+    refuse('a session in the vault folder proposes only after the user types /ingest in it.');
+  }
   return { ...entry, domains };
 }
 
@@ -96,7 +99,7 @@ function evidence(f, p) {
   if (f.basis === 'failure') return { error: line(p, 'error'), fix: line(p, 'fix'), file: line(p, 'file') };
   if (f.basis !== 'source') return { quote: line(p, 'quote') };
   const e = { source: line(p, 'source'), source_date: line(p, 'source_date'), quote: line(p, 'quote') };
-  if (!/^https?:\/\/\S+$/i.test(e.source) && !REFS.test(e.source)) refuse('source must be a URL or a file under raw/refs/.');
+  if (!isUrl(e.source) && !REFS.test(e.source)) refuse('source must be a URL or a file under raw/refs/.');
   if (!validDay(e.source_date)) refuse('source_date must be a date as YYYY-MM-DD.');
   if (e.source_date > today()) refuse("source_date can't be in the future.");
   return e;
