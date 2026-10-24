@@ -59,7 +59,7 @@ updated: 2026-10-19
 
 - `status`: `provisional`, `confirmed` or `outdated`. Only the user's confirm (a bare `confirm` or `confirm: <key>`) makes a rule confirmed, and the hook sets the field.
 - `kind`: `taste` (the default) or `knowledge`, a fact about an API, version or tool that training gets wrong or doesn't know. Knowledge rules reach the agent only on matching edits, so they need `applies_to` and take no `keywords` or `always`.
-- `basis`: `stated` when the user said it, `inferred` when you generalized it from their corrections. Knowledge rules use `stated`, `failure` (something worked only after a failure) or `source` (a dated source shows it).
+- `basis`: `stated` when the user said it, `inferred` when you generalized it from their corrections, `pick` when a recorded answer from an earlier session backs it (a `q-` row in `raw/picks/`, or an older `c-`/`p-` row in `raw/inbox/` that holds the user's own words). Knowledge rules use `stated`, `failure` (something worked only after a failure) or `source` (a dated source shows it).
 - `as_of`: knowledge rules only, the day the fact was last checked, as YYYY-MM-DD: the source's date, or the day it was proposed. Delivery shows it, and lint warns once it is more than 180 days old (`knowledge.staleAfterDays` in `taste.config.json`). Taste rules never expire.
 - `topic`: one of the domain's topics in `taste.config.json`.
 - `always`: only for short rules that matter in nearly every session.
@@ -69,7 +69,7 @@ updated: 2026-10-19
 - `replaces`: keys of rules this one supersedes, like `roblox-ui/old-slug`, from its own domain; a global rule may replace any. Confirming this note retires them.
 - Single-quote globs and regexes so Obsidian reads them as text.
 - `**Do:**` and `**Not:**` are required, one line each. Pair every "never X" with an "instead Y". `**Because:**` gives the user's reason; leave it empty rather than invent one. Keep the three lines under 300 characters together, counting the "As of" date a knowledge rule is delivered with.
-- `## Evidence` has one line per source: date, kind (`stated` or `correction`, or `choice` in older notes), the first 8 characters of the session id, the user's exact words, and the proposal id. A `failure` line gives the file, the error as a tool printed it and `fixed by:` the fix; a `source` line gives the URL or `raw/refs/` file, `dated` its date, `summary` when the quote comes from a WebFetch summary rather than the page, and its exact words.
+- `## Evidence` has one line per source: date, kind (`stated` or `correction`; `choice` for a pick), the first 8 characters of the session id, the user's exact words, and the proposal id. A `choice` line also names the options the user passed over and the question, and ends with the pick's id and the proposal id. A `failure` line gives the file, the error as a tool printed it and `fixed by:` the fix; a `source` line gives the URL or `raw/refs/` file, `dated` its date, `summary` when the quote comes from a WebFetch summary rather than the page, and its exact words.
 - Link notes with `[[wiki/<domain>/<slug>|<slug>]]`.
 
 ## Ref pages
@@ -109,6 +109,8 @@ The vault holds one-line Do/Not rules and the ref pages behind them. Procedures,
 ## Operations
 
 - **Propose**: in domain sessions the start hook tells you how to propose a rule with `tools/propose.mjs` when the user corrects you, or when a failure or a dated source shows a fact your training gets wrong. In this folder, `/ingest` does, for any domain. `node tools/propose.mjs --help` lists the fields. When the rule may repeat ones the user confirmed, it lists them and refuses once; you propose again with the key of the one it repeats in `replaces`, or `replaces: []`. It writes a provisional note, and you end your reply with the lines it prints. The user answers with a bare `confirm` or `drop`, which takes the proposal made since their last message, or later with `confirm: <key>` or `drop: <key>`. `drop:` marks a provisional note outdated so it isn't offered again; confirmed rules need `retire:`. The hooks take these commands only in a session where the user has typed a message.
+- **Re-propose a recorded answer**: a pick or an older captured message that was never turned into a rule can back one from any later session: `basis: pick` with the row's id in `pick`. The row's words are the evidence, so nothing has to be typed again, and these proposals don't count toward a session's three. A row backs one note; proposing it again is refused.
+- **Waiting rules**: at session start the hook lists provisional rules in scope (up to 8, the rest in `index.md`) and asks the agent to open its first reply with them, so a proposal the user never answered comes back to them instead of sitting in the wiki.
 - **Ingest**: the user runs `/ingest` in this folder with a source: a file under `raw/refs/` or `raw/judgments/`, or a URL. You go through it together; what they say about it becomes a ref page and proposed rules.
 - **Review**: the user runs `/taste-review` in this folder for a check-up: rules changed since they were confirmed, provisional rules waiting for a confirm or drop, repeats of confirmed rules, lint and hook errors.
 - **Query**: when asked what the user prefers, read `index.md`, then the notes. Confirmed rules are the user's taste; provisional ones are candidates. Say which is which.

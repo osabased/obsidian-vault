@@ -1,5 +1,5 @@
-import { runHook, domainsFor, inVaultFolder, vaultPath, toPosix, logError } from '../lib/vault.mjs';
-import { alwaysContext, readLedger } from '../lib/rules.mjs';
+import { runHook, domainsFor, inVaultFolder, vaultPath, toPosix, logError, config } from '../lib/vault.mjs';
+import { alwaysContext, readLedger, loadNotes, clip } from '../lib/rules.mjs';
 import { touchSession, clearMarkers, markShown, tidy } from '../lib/sessions.mjs';
 
 function proposeNote(sid) {
@@ -16,6 +16,22 @@ function proposeNote(sid) {
   ].join(' ');
 }
 
+const PENDING_MAX = 8;
+
+// A proposal the user never answered sits in the wiki as provisional; only the agent's reply can put it in front of them.
+function pending(scope, ledger) {
+  const notes = loadNotes().filter(n => n.type === 'rule' && n.status === 'provisional' && scope.includes(n.domain) && !ledger.rules[n.key]);
+  if (!notes.length) return '';
+  const shown = notes.slice(0, PENDING_MAX);
+  const more = notes.length - shown.length;
+  return [
+    "Taste rules proposed earlier that still wait for the user's answer. Begin your first reply with these lines as they are, so they can confirm or drop them:",
+    ...shown.map(n => `- ${n.key}: Do: ${clip(n.do || '(missing)', 120)}`),
+    ...(more ? [`(${more} more in ${toPosix(vaultPath('index.md'))}.)`] : []),
+    'Type `confirm: <key>` or `drop: <key>`; several keys on one line go with commas.',
+  ].join('\n');
+}
+
 runHook('session-start', input => {
   try { tidy(); } catch (e) { logError('tidy', e); }
   const doms = domainsFor(input.cwd).map(d => d.domain);
@@ -24,12 +40,14 @@ runHook('session-start', input => {
   const ledger = readLedger();
   const always = alwaysContext(['global', ...doms], ledger);
   let propose = '';
+  let waiting = '';
   // Vault sessions register so /ingest can propose; the skill tells them how, so they get no note.
   if (input.session_id && (doms.length || inVaultFolder(input.cwd))) {
     touchSession(input, { loaded: ['global', ...doms] });
     for (const k of always.keys) markShown(input.session_id, k, ledger.rules[k].hash);
     if (doms.length) propose = proposeNote(input.session_id);
+    waiting = pending(inVaultFolder(input.cwd) ? ['global', ...Object.keys(config().domains)] : ['global', ...doms], ledger);
   }
-  const context = [always.text, propose].filter(Boolean).join('\n\n');
+  const context = [always.text, waiting, propose].filter(Boolean).join('\n\n');
   return context ? { hookSpecificOutput: { hookEventName: 'SessionStart', additionalContext: context } } : null;
 });

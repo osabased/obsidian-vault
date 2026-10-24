@@ -6,9 +6,9 @@ import { config, vaultPath, readJson, writeJson, writeText, shortHash, toPosix, 
 
 export const LIST_FIELDS = ['applies_to', 'triggers', 'keywords', 'replaces'];
 export const KEY_RE = /^[a-z0-9-]+\/[a-z0-9-]+$/;
-export const BASES = { taste: ['stated', 'inferred'], knowledge: ['stated', 'failure', 'source'] };
+export const BASES = { taste: ['stated', 'inferred', 'pick'], knowledge: ['stated', 'failure', 'source'] };
 export const wrongBasis = (kind, basis) => (kind === 'knowledge' ? "a knowledge rule's basis must be stated, failure or source"
-  : BASES.knowledge.includes(basis) ? `basis ${basis} is for knowledge rules; set kind: knowledge` : 'basis must be stated or inferred');
+  : BASES.knowledge.includes(basis) ? `basis ${basis} is for knowledge rules; set kind: knowledge` : 'basis must be stated, inferred or pick');
 export const isUrl = s => typeof s === 'string' && /^https?:\/\/\S+$/i.test(s);
 export const validDay = s => typeof s === 'string' && /^\d{4}-\d\d-\d\d$/.test(s) && !Number.isNaN(Date.parse(s)) && new Date(s).toISOString().startsWith(s);
 const KEBAB = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
