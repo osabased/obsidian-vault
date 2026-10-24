@@ -1,7 +1,6 @@
 ---
 type: rule
 domain: global
-status: provisional
 kind: taste
 basis: inferred
 topic: code
@@ -15,7 +14,6 @@ keywords:
   - 'deep-research'
   - 'fan out'
   - 'model'
-replaces: []
 created: 2026-10-23
 updated: 2026-10-23
 ---

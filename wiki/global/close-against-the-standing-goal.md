@@ -1,7 +1,6 @@
 ---
 type: rule
 domain: global
-status: confirmed
 kind: taste
 basis: inferred
 topic: code
@@ -15,7 +14,6 @@ keywords:
   - 'next step'
   - 'bigger picture'
   - 'goal'
-replaces: []
 created: 2026-10-23
 updated: 2026-10-23
 ---

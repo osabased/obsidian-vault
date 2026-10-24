@@ -1,7 +1,6 @@
 ---
 type: rule
 domain: roblox-ui
-status: provisional
 kind: taste
 basis: pick
 topic: components
@@ -14,7 +13,6 @@ keywords:
   - 'MidImage'
   - 'BottomImage'
   - 'rhr'
-replaces: []
 created: 2026-10-24
 updated: 2026-10-24
 ---

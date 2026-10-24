@@ -1,7 +1,6 @@
 ---
 type: rule
 domain: roblox-ui
-status: provisional
 basis: inferred
 topic: color
 always: false
@@ -10,7 +9,6 @@ triggers: []
 keywords:
   - 'style tile'
   - 'style tiles'
-replaces: []
 created: 2026-10-21
 updated: 2026-10-21
 ---

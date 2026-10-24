@@ -1,7 +1,6 @@
 ---
 type: rule
 domain: global
-status: provisional
 kind: taste
 basis: pick
 topic: evals
@@ -14,7 +13,6 @@ keywords:
   - 'spend'
   - 'benchmark'
   - 'test the skill'
-replaces: []
 created: 2026-10-24
 updated: 2026-10-24
 ---

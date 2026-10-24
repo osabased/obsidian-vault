@@ -2,14 +2,14 @@ import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
 import {
-  config, vaultPath, proposeDomains, inVaultFolder, readJsonSafe, writeText, appendJsonl, inboxFile, decisionsFile, proposalRows, recordedRows, statePath, withLock, safeId, today,
-  inside, FILE_TOOLS, WRITEISH, toolCommand, toolFile, logError,
+  config, vaultPath, proposeDomains, inVaultFolder, readJsonSafe, writeSettled, appendJsonl, appendLog, inboxFile, proposalRows, recordedRows, statePath, withLock, safeId, today, toPosix,
+  inside, FILE_TOOLS, WRITEISH, toolCommand, toolFile,
 } from './lib/vault.mjs';
 import {
-  KEY_RE, BASES, wrongBasis, toKey, parseNote, noteErrors, ruleText, ruleTextParts, readNote, readLedger, build, escapeRegExp, mentions, isUrl, validDay, byKey,
+  KEY_RE, BASES, wrongBasis, parseNote, noteErrors, ruleText, ruleTextParts, readNote, liveRules, build, escapeRegExp, mentions, isUrl, validDay, byKey,
 } from './lib/rules.mjs';
 import { normGlob } from './lib/glob.mjs';
-import { registry, markRepeat, marked, wasShown } from './lib/sessions.mjs';
+import { registry, marked, mark } from './lib/sessions.mjs';
 import { typedMessages, toolActivity } from './lib/transcript.mjs';
 
 const RUN = 'usage: node tools/propose.mjs <session-id> < rule.json';
@@ -51,9 +51,9 @@ const help = () => [
   '  always       true for short rules that matter in nearly every session',
   '               A taste rule needs keywords, applies_to or always: true. A knowledge rule needs applies_to',
   '               and takes no keywords or always.',
-  '  replaces     leave it out at first. If the rule may repeat ones the user confirmed, propose.mjs lists them',
-  '               and refuses once. Then propose it again with the keys of the ones it repeats, or [] if none.',
-  '               Confirming it retires the rules it replaces.',
+  '',
+  'If the rule may repeat ones in the vault, propose.mjs lists them and refuses once. If it repeats one, update',
+  'that note instead; if not, propose it again.',
   '',
   "A knowledge rule's as_of is set for you: the source_date for a source, today otherwise.",
 ].join('\n');
@@ -247,16 +247,6 @@ function checkEvidence(f, session) {
 }
 
 const andList = xs => (xs.length < 2 ? xs.join('') : `${xs.slice(0, -1).join(', ')} and ${xs.at(-1)}`);
-const those = xs => (xs.length === 1 ? 'that one' : 'them');
-
-function checkReplaces(f, scope, rules) {
-  const bad = f.replaces.filter(k => !scope.includes(rules[k]?.domain));
-  if (bad.length) refuse(`replaces names rules the user confirmed in ${scope.join(' or ')}, by key. ${bad.join(', ')} ${bad.length === 1 ? "isn't one" : "aren't"}.`);
-  const wide = f.domain === 'global' ? [] : f.replaces.filter(k => rules[k].domain === 'global');
-  if (!wide.length) return;
-  const it = wide.length === 1 ? 'it' : 'them';
-  refuse(`${andList(wide)} ${wide.length === 1 ? 'applies' : 'apply'} in every project, so a ${f.domain} rule can't replace ${it}. Propose this one in global instead, or leave ${it} out of replaces.`);
-}
 
 const OVERLAP = 0.2;
 const STOPWORDS = new Set(('a all an and any are as at be because but by can cant didnt do doesnt dont for from in is isnt it its must never not of on or '
@@ -276,25 +266,9 @@ const globKey = g => normGlob(g).toLowerCase();
 const SHORTLIST = 5;
 const TOPIC_LIST = 20;
 
-// The ledger keeps no topic, so it comes from the notes, read before the ledger lock that the user's confirm waits on.
-// Global topics are free text, so case doesn't count. A note that can't be read leaves its rule off the topic list.
-function topicReader(domain, rules) {
-  const topics = new Map();
-  const read = k => {
-    if (!topics.has(k)) {
-      let t;
-      try { t = readNote(k)?.data.topic; } catch (e) { logError('propose', e); }
-      topics.set(k, String(t ?? '').trim().toLowerCase());
-    }
-    return topics.get(k);
-  };
-  for (const [k, r] of Object.entries(rules)) if (r.domain === domain) read(k);
-  return read;
-}
-
-// While a topic holds few rules the agent judges them all, words shared or not.
-function onTopic(f, rules, topicOf) {
-  const mine = Object.entries(rules).filter(([k, r]) => r.domain === f.domain && topicOf(k) === f.topic.toLowerCase());
+// While a topic holds few rules the agent judges them all, words shared or not. Global topics are free text, so case doesn't count.
+function onTopic(f, rules) {
+  const mine = Object.entries(rules).filter(([, r]) => r.domain === f.domain && r.topic === f.topic.toLowerCase());
   return mine.length <= TOPIC_LIST ? mine.sort(byKey) : [];
 }
 
@@ -314,28 +288,28 @@ function lookalikes(f, text, scope, rules) {
   return close.sort((a, b) => b.score - a.score || byKey(a.entry, b.entry)).map(c => c.entry);
 }
 
-function checkRepeats(f, text, scope, given, rules, topicOf) {
-  const topic = onTopic(f, rules, topicOf);
+// The retry goes through once every rule on the list was shown for this proposal.
+function checkRepeats(f, text, scope, rules) {
+  const topic = onTopic(f, rules);
   const all = lookalikes(f, text, scope, rules);
   const inTopic = new Set(topic.map(([k]) => k));
   const others = all.filter(([k]) => !inTopic.has(k));
   const alike = others.slice(0, SHORTLIST).sort(byKey);
   const shown = [...topic, ...alike];
   const id = ([k, r]) => `${f.slug}|${k}|${r.hash}`;
-  const seen = e => f.replaces.includes(e[0]) || marked('repeats', f.sid, id(e));
-  if (!shown.length || (given && shown.every(seen))) return [...all.filter(([k]) => inTopic.has(k)), ...alike].sort(byKey).map(([k]) => k);
-  for (const e of shown) markRepeat(f.sid, id(e));
+  if (shown.every(e => marked('repeats', f.sid, id(e)))) return [...all.filter(([k]) => inTopic.has(k)), ...alike].sort(byKey).map(([k]) => k);
+  for (const e of shown) mark('repeats', f.sid, id(e));
   const more = others.length - alike.length;
   const item = ([k, r]) => `- ${k}: ${r.text}`;
   refuse([
     ...(topic.length ? [
-      'it may repeat rules the user confirmed.',
-      `Every confirmed ${f.domain} rule on ${f.topic}:`,
+      'it may repeat rules already in the vault.',
+      `Every ${f.domain} rule on ${f.topic}:`,
       ...topic.map(item),
       ...(alike.length ? ['Others that share words, globs or keywords:', ...alike.map(item)] : []),
-    ] : ['it may repeat rules the user confirmed:', ...alike.map(item)]),
+    ] : ['it may repeat these rules:', ...alike.map(item)]),
     ...(more ? [`${more} more match less closely and aren't listed.`] : []),
-    "If it repeats one, propose it again with that rule's key in replaces; confirming yours retires it. If it says something new, propose it again with replaces: [].",
+    `If it repeats one, update that note in ${toPosix(vaultPath('wiki'))} instead. If it says something new, propose it again.`,
   ].join('\n'));
 }
 
@@ -343,10 +317,10 @@ const sameList = (a, b) => Array.isArray(a) && a.length === b.length && a.every(
 
 function checkReadBack(n, f) {
   const fields = [
-    ['domain', n.data.domain === f.domain], ['status', n.status === 'provisional'], ['kind', n.kind === f.kind], ['basis', n.data.basis === f.basis],
+    ['domain', n.data.domain === f.domain], ['kind', n.kind === f.kind], ['basis', n.data.basis === f.basis],
     ['as_of', n.as_of === (f.as_of ?? null)], ['topic', n.data.topic === f.topic], ['always', n.data.always === f.always],
     ['applies_to', sameList(n.applies_to, f.applies_to)], ['triggers', sameList(n.triggers, f.triggers)], ['keywords', sameList(n.keywords, f.keywords)],
-    ['replaces', sameList(n.replaces, f.replaces.map(toKey))], ['do', n.do === f.do], ['not', n.not === f.not], ['because', n.because === f.because],
+    ['do', n.do === f.do], ['not', n.not === f.not], ['because', n.because === f.because],
   ];
   const bad = fields.find(([, ok]) => !ok);
   if (bad) refuse(`${bad[0]} doesn't survive as YAML. Rephrase it.`);
@@ -364,9 +338,9 @@ function evidenceLine(f) {
 }
 
 const noteText = f => [
-  '---', 'type: rule', `domain: ${f.domain}`, 'status: provisional', `kind: ${f.kind}`, `basis: ${f.basis}`, ...(f.as_of ? [`as_of: ${f.as_of}`] : []),
+  '---', 'type: rule', `domain: ${f.domain}`, `kind: ${f.kind}`, `basis: ${f.basis}`, ...(f.as_of ? [`as_of: ${f.as_of}`] : []),
   `topic: ${yaml(f.topic)}`, `always: ${f.always}`,
-  ...yamlList('applies_to', f.applies_to), ...yamlList('triggers', f.triggers), ...yamlList('keywords', f.keywords), ...yamlList('replaces', f.replaces),
+  ...yamlList('applies_to', f.applies_to), ...yamlList('triggers', f.triggers), ...yamlList('keywords', f.keywords),
   `created: ${f.day}`, `updated: ${f.day}`, '---', '',
   `**Do:** ${f.do}`, `**Not:** ${f.not}`, `**Because:**${f.because ? ` ${f.because}` : ''}`, '',
   '## Examples', '', '## Evidence', evidenceLine(f), '',
@@ -391,7 +365,6 @@ function propose(sid, p) {
   if (typeof f.always !== 'boolean') refuse('always must be true or false.');
   if (f.kind === 'taste' && !f.always && !f.applies_to.length && !f.keywords.length) refuse('give it keywords, applies_to or always: true, or nothing will deliver it.');
   const scope = f.domain === 'global' ? domains : [f.domain, 'global'];
-  f.replaces = [...new Set(list(p, 'replaces'))];
   Object.assign(f, evidence(f, p));
   if (f.kind === 'knowledge') f.as_of = f.source_date ?? today();
   f.summary = checkEvidence(f, session);
@@ -409,36 +382,30 @@ function propose(sid, p) {
   const said = f.basis === 'failure' ? f.error : f.quote;
   // One error can show several facts, so a failure repeats an earlier one only if its fix does too.
   const same = r => normText(r.text) === normText(said) && (f.basis !== 'failure' || normText(r.fix ?? '') === normText(f.fix));
-  const topicOf = topicReader(f.domain, readLedger().rules);
-  return withLock(statePath('ledger.lock'), () => {
+  return withLock(statePath('propose.lock'), () => {
     const rows = proposalRows();
     // Picks are bounded by what was recorded, so re-proposing them doesn't count toward the session's cap.
     if (f.basis !== 'pick' && rows.filter(r => r.session === sid && r.pick === undefined).length >= MAX_PER_SESSION) refuse(`this session already proposed ${MAX_PER_SESSION} rules.`);
     const earlier = rows.find(r => (f.basis === 'pick' ? r.pick === f.pick : same(r)));
     if (earlier) refuse(f.basis === 'pick' ? `${f.pick} was already proposed as ${earlier.note}.` : `these words were already proposed as ${earlier.note}.`);
     if (readNote(key)) refuse(`wiki/${key}.md already exists. Pick another slug, or leave that note to the user.`);
-    // Read under the lock, so a rule in replaces the user retired meanwhile is refused here.
-    const { rules } = readLedger();
-    checkReplaces(f, scope, rules);
-    const overlaps = checkRepeats(f, ruleText(n), scope, p.replaces !== undefined, rules, topicOf).filter(k => !f.replaces.includes(k));
-    writeText(`${vaultPath('wiki', f.domain, f.slug)}.md`, text);
+    // Read under the lock, so a proposal written meanwhile is on the list.
+    const overlaps = checkRepeats(f, ruleText(n), scope, liveRules());
+    const file = `${vaultPath('wiki', f.domain, f.slug)}.md`;
+    writeSettled(file, text);
     appendJsonl(inboxFile(), [{
       id: f.id, at, source: 'agent', kind: f.evidence, text: said, ...(f.basis === 'failure' ? { fix: f.fix } : {}),
       note: key, session: sid, transcript: session.transcript ?? null, cwd: session.cwd ?? null, domain: f.domain, ...(f.pick ? { pick: f.pick } : {}),
-      ...(f.replaces.length ? { repeats: f.replaces, delivered: f.replaces.filter(k => wasShown(sid, k, rules[k].hash)) } : {}),
     }]);
-    appendJsonl(decisionsFile(), [{ at, ids: [f.id], action: 'note', note: key }]);
+    appendLog([`wrote ${key} · session ${sid.slice(0, 8)}`]);
     build();
     const reply = [
-      `**Proposed ${f.kind === 'knowledge' ? 'knowledge rule' : 'rule'}** ${key}: ${ruleText(n)}`,
+      `**New ${f.kind === 'knowledge' ? 'knowledge rule' : 'rule'}** ${key}: ${ruleText(n)}`,
       ...(f.summary ? [`The quote comes from a WebFetch summary of ${f.source}, not the page's own words.`] : []),
-      ...(f.replaces.length
-        ? [`It repeats ${andList(f.replaces)}, which you confirmed. Confirming this one retires ${those(f.replaces)}.`] : []),
-      ...(overlaps.length
-        ? [`It may overlap ${andList(overlaps)}, which you confirmed. Confirming this one keeps ${those(overlaps)} too.`] : []),
-      `Type \`confirm\` to keep it or \`drop\` to let it go. After another message, use \`confirm: ${key}\` or \`drop: ${key}\`.`,
+      ...(overlaps.length ? [`It may overlap ${andList(overlaps)}.`] : []),
+      `It applies from now on. To change or remove it, edit or delete ${toPosix(file)}.`,
     ];
-    return [`Wrote wiki/${key}.md. End your reply with these ${['two', 'three', 'four', 'five'][reply.length - 2]} lines as they are:`, '', ...reply].join('\n');
+    return [`Wrote wiki/${key}.md. End your reply with these ${['two', 'three', 'four'][reply.length - 2]} lines as they are:`, '', ...reply].join('\n');
   });
 }
 

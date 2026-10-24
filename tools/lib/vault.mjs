@@ -6,7 +6,7 @@ export const ROOT = path.resolve(import.meta.dirname, '..', '..');
 export const vaultPath = (...xs) => path.join(ROOT, ...xs);
 
 const DEFAULTS = {
-  delivery: { maxRulesPerEdit: 3, maxRuleChars: 300, maxBlockChars: 1200, maxPromptExcerpts: 3, activeMaxLines: 60, activeMaxBytes: 4096 },
+  delivery: { maxRulesPerEdit: 3, maxRuleChars: 300, maxBlockChars: 1200, maxPromptExcerpts: 3, activeMaxLines: 60, activeMaxBytes: 4096, settleSeconds: 60 },
   knowledge: { staleAfterDays: 180 },
 };
 
@@ -95,6 +95,14 @@ export function writeText(file, text) {
 
 export const writeJson = (file, data) => writeText(file, `${JSON.stringify(data, null, 2)}\n`);
 
+// The hooks wait out delivery.settleSeconds after a save because Obsidian saves half-typed notes;
+// a note written whole is dated back so it applies at once.
+export function writeSettled(file, text) {
+  writeText(file, text);
+  const t = new Date(Date.now() - config().delivery.settleSeconds * 1000);
+  fs.utimesSync(file, t, t);
+}
+
 // One append per batch, so a reader never sees half of a run's rows.
 export function appendJsonl(file, rows) {
   if (!rows.length) return;
@@ -128,8 +136,6 @@ function datedRows(folder) {
 export const proposalRows = () => datedRows('inbox').filter(r => r.source === 'agent');
 // The user's recorded answers: picks, and the older inbox rows captured from their messages.
 export const recordedRows = () => [...datedRows('picks'), ...datedRows('inbox').filter(r => r.source !== 'agent')];
-
-export const decisionsFile = () => vaultPath('raw', 'decisions.jsonl');
 
 export function appendLog(lines) {
   const file = vaultPath('log.md');
@@ -170,7 +176,7 @@ export function logError(name, e) {
 export const cwdOf = input => input.cwd || process.cwd();
 
 export const FILE_TOOLS = ['Edit', 'Write', 'MultiEdit', 'NotebookEdit'];
-export const SHELL_TOOLS = ['Bash', 'PowerShell'];
+const SHELL_TOOLS = ['Bash', 'PowerShell'];
 export const toolCommand = (name, input) => (SHELL_TOOLS.includes(name) ? String(input.command ?? '') : null);
 export const toolFile = (name, input) => (name === 'NotebookEdit' ? input.notebook_path : input.file_path);
 // `2>&1`, `=>`, `->` and `>=` contain `>` but write no file.

@@ -1,7 +1,6 @@
 ---
 type: rule
 domain: roblox-ui
-status: provisional
 kind: taste
 basis: pick
 topic: code
@@ -15,7 +14,6 @@ keywords:
   - 'text size'
   - 'font'
   - 'color'
-replaces: []
 created: 2026-10-24
 updated: 2026-10-24
 ---

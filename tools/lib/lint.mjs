@@ -2,7 +2,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { isBuiltin } from 'node:module';
 import { config, vaultPath, plural, today } from './vault.mjs';
-import { loadNotes, readLedger, noteErrors, replaceProblem, noteHash, ruleText, ruleTextParts, alwaysSize, build, isUrl, validDay } from './rules.mjs';
+import { loadNotes, noteErrors, ruleText, ruleTextParts, liveRules, knownDomain, alwaysSize, build, isUrl, validDay } from './rules.mjs';
 
 export const tally = found => {
   const errors = found.filter(f => f.level === 'error').length;
@@ -13,62 +13,41 @@ export function lint() {
   const found = [];
   const add = (level, file, msg) => found.push({ level, file, msg });
   const { domains, delivery, knowledge } = config();
-  let ledger = null;
-  try { ledger = readLedger(); } catch (e) { add('error', 'confirmed.json', `not valid JSON: ${e.message}`); }
-  const rules = ledger?.rules ?? {};
-  const retired = ledger?.retired ?? {};
   const notes = loadNotes();
   const keys = new Set(notes.map(n => n.key));
 
   for (const n of notes) {
     if (n.depth === 1) add('error', n.rel, 'notes go in wiki/<domain>/');
-    else if (n.domain !== 'global' && !domains[n.domain]) add('error', n.rel, `${n.domain} isn't a domain in taste.config.json`);
-    if (n.depth > 2) add('warn', n.rel, 'notes go directly in wiki/<domain>/, not in subfolders, or they can\'t be confirmed');
+    else if (!knownDomain(n.domain)) add('error', n.rel, `${n.domain} isn't a domain in taste.config.json`);
+    if (n.depth > 2) add('warn', n.rel, 'notes go directly in wiki/<domain>/, not in subfolders, or the hooks never deliver them');
     for (const e of noteErrors(n)) add('error', n.rel, e);
     if (n.type === 'page') lintPage(n, add);
     if (n.type !== 'rule') continue;
 
-    const entry = rules[n.key];
-    if (n.status === 'confirmed' && !entry) add('error', n.rel, "status is confirmed but the user hasn't confirmed it; only the user's confirm in chat sets it");
-    for (const t of n.replaces ?? []) {
-      if (t === n.key) add('error', n.rel, 'replaces itself');
-      else if (!keys.has(t) && !rules[t] && !retired[t]) add('error', n.rel, `replaces ${t}, which has no note`);
-      else {
-        const wrong = replaceProblem(n, t);
-        if (wrong) add('error', n.rel, wrong);
-      }
-    }
-    if (entry && n.status !== 'confirmed') add('warn', n.rel, `confirmed in confirmed.json but its status is ${n.status}`);
-    if (entry && entry.hash !== noteHash(n)) add('warn', n.rel, 'changed since confirmed; the hooks still enforce the confirmed wording until you confirm it again');
+    if (n.superseded_by === n.key) add('error', n.rel, 'superseded_by names the note itself');
+    else if (n.superseded_by && !keys.has(n.superseded_by)) add('error', n.rel, `superseded_by names ${n.superseded_by}, which has no note`);
+    if (n.data.status !== undefined) add('warn', n.rel, 'status does nothing. To stop a rule, delete its note or set superseded_by');
+    if (n.data.replaces !== undefined) add('warn', n.rel, 'replaces does nothing. Set superseded_by on the note it replaces instead');
     if (!n.because) add('warn', n.rel, 'empty **Because:**');
     const topics = domains[n.domain]?.topics;
     if (topics && !topics.includes(n.data.topic)) add('warn', n.rel, `topic should be one of ${topics.join(', ')}`);
     if (n.do && n.not && ruleText(n).length > delivery.maxRuleChars) {
       add('warn', n.rel, `${ruleTextParts(n)} come to ${ruleText(n).length} characters; the hooks cut them at ${delivery.maxRuleChars}`);
     }
-    const confirmed = n.status === 'confirmed';
-    // The hooks deliver the date recorded at confirmation, so that is the one that goes stale.
-    const asOf = (confirmed && entry?.as_of) || n.as_of;
-    if (n.kind === 'knowledge' && n.status !== 'outdated' && validDay(asOf)) {
-      const days = Math.round((Date.parse(today()) - Date.parse(asOf)) / 864e5);
-      if (days > knowledge.staleAfterDays) {
-        add('warn', n.rel, asOf !== n.as_of && validDay(n.as_of)
-          ? `the confirmed as_of is ${days} days old; confirm it again to deliver as_of ${n.as_of}`
-          : `as_of is ${days} days old. If it still holds, set as_of to the day you checked and confirm it${confirmed ? ' again' : ''}; if not, ${confirmed ? 'retire' : 'drop'} it`);
-      }
+    if (n.kind === 'knowledge' && !n.superseded_by && validDay(n.as_of)) {
+      const days = Math.round((Date.parse(today()) - Date.parse(n.as_of)) / 864e5);
+      if (days > knowledge.staleAfterDays) add('warn', n.rel, `as_of is ${days} days old. If it still holds, set as_of to the day you checked; if not, delete the note`);
     }
   }
 
-  if (ledger) {
-    for (const k of Object.keys(rules)) if (!keys.has(k)) add('warn', 'confirmed.json', `${k} is confirmed but has no note`);
-    for (const d of Object.keys(domains)) {
-      const size = alwaysSize(ledger, ['global', d]);
-      if (size.lines > delivery.activeMaxLines || size.bytes > delivery.activeMaxBytes) {
-        add('error', 'active.md', `always-on rules for ${d} come to ${size.lines} lines and ${size.bytes} bytes, over the ${delivery.activeMaxLines} lines or ${delivery.activeMaxBytes} bytes a session start loads`);
-      }
+  const rules = liveRules(notes);
+  for (const d of Object.keys(domains)) {
+    const size = alwaysSize(rules, ['global', d]);
+    if (size.lines > delivery.activeMaxLines || size.bytes > delivery.activeMaxBytes) {
+      add('error', 'active.md', `always-on rules for ${d} come to ${size.lines} lines and ${size.bytes} bytes, over the ${delivery.activeMaxLines} lines or ${delivery.activeMaxBytes} bytes a session start loads`);
     }
-    for (const f of build({ check: true })) add('error', f, 'stale; run node tools/build.mjs');
   }
+  for (const f of build({ check: true, notes })) add('error', f, 'stale; run node tools/build.mjs');
   lintCode(add);
   return found.sort((a, b) => (a.level === b.level ? 0 : a.level === 'error' ? -1 : 1));
 }
