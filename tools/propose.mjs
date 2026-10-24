@@ -2,7 +2,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
 import {
-  config, vaultPath, proposeDomains, inVaultFolder, readJsonSafe, writeText, appendJsonl, inboxFile, decisionsFile, proposalRows, statePath, withLock, safeId, today,
+  config, vaultPath, proposeDomains, inVaultFolder, readJsonSafe, writeText, appendJsonl, inboxFile, decisionsFile, proposalRows, recordedRows, statePath, withLock, safeId, today,
   inside, FILE_TOOLS, WRITEISH, toolCommand, toolFile, logError,
 } from './lib/vault.mjs';
 import {
@@ -32,6 +32,9 @@ const help = () => [
   "    stated       the user's words state the rule.",
   "                 quote: their exact words, at least 3 in one unbroken stretch",
   '    inferred     taste only: you generalized a correction. quote: as for stated',
+  "    pick         taste only: the user's recorded answer from an earlier session backs the rule.",
+  '                 pick: the id of a row in raw/picks/ (q-) or of an older user-written row in raw/inbox/ (c-, p-).',
+  "                 The row's own words are the evidence; no quote is needed, and these don't count toward the 3 per session.",
   '    failure      knowledge only: something worked only after a failure.',
   "                 error: one line of the error as a command or a failed tool call printed it in this session, yours or a subagent's.",
   "                 An error in a file a command only showed (cat, Get-Content), on a page, or in the call's own input doesn't count.",
@@ -97,6 +100,7 @@ const REFS = /^raw\/refs\/./;
 
 function evidence(f, p) {
   if (f.basis === 'failure') return { error: line(p, 'error'), fix: line(p, 'fix'), file: line(p, 'file') };
+  if (f.basis === 'pick') return { pick: line(p, 'pick') };
   if (f.basis !== 'source') return { quote: line(p, 'quote') };
   const e = { source: line(p, 'source'), source_date: line(p, 'source_date'), quote: line(p, 'quote') };
   if (!isUrl(e.source) && !REFS.test(e.source)) refuse('source must be a URL or a file under raw/refs/.');
@@ -196,7 +200,31 @@ function sourceHas(source, re, session) {
   return summary && 'summary';
 }
 
+// A pick's label is the user's answer verbatim, and an older captured row holds their message; either backs a rule
+// on its own, so the quote is the row's text and nothing has to be typed again.
+function checkPick(f, scope) {
+  const row = recordedRows().find(r => r.id === f.pick);
+  if (!row) refuse(`there's no row ${f.pick} in raw/picks/ or raw/inbox/.`);
+  if (row.domain && !scope.includes(row.domain) && f.domain !== 'global') refuse(`${f.pick} was recorded in ${row.domain}, not ${f.domain}.`);
+  if (typeof row.pick === 'string' && row.pick) {
+    f.quote = row.notes ? `${row.pick} — ${row.notes}` : row.pick;
+    const others = (row.options ?? []).map(o => o.label).filter(l => l !== row.pick);
+    f.pickLine = `"${f.quote}"${others.length ? `, picked over ${others.map(l => `"${l}"`).join(' and ')}` : ''}${row.question ? ` for "${row.question}"` : ''}`;
+    f.evidence = 'choice';
+  } else if (typeof row.text === 'string' && row.text.trim()) {
+    f.quote = row.text.trim();
+    f.pickLine = `"${f.quote}"`;
+    f.evidence = 'stated';
+  } else {
+    refuse(`${f.pick} holds no answer or message to quote.`);
+  }
+  f.pickDay = String(row.at ?? '').slice(0, 10) || today();
+  f.pickSession = String(row.session ?? '').slice(0, 8) || 'unknown';
+  return false;
+}
+
 function checkEvidence(f, session) {
+  if (f.basis === 'pick') return checkPick(f, f.domain === 'global' ? session.domains : [f.domain]);
   if (f.basis === 'failure') {
     if (wordCount(f.error) < 3) refuse('the error needs at least 3 words of what the tool printed.');
     if (!printed(finder(f.error), session)) {
@@ -331,6 +359,7 @@ function evidenceLine(f) {
   const head = `- ${f.day} · ${f.evidence} · session ${f.sid.slice(0, 8)}`;
   if (f.basis === 'failure') return `${head} · ${f.file} · "${f.error}" · fixed by: ${f.fix} (${f.id})`;
   if (f.basis === 'source') return `${head} · ${f.source} · dated ${f.source_date}${f.summary ? ' · summary' : ''} · "${f.quote}" (${f.id})`;
+  if (f.basis === 'pick') return `- ${f.pickDay} · ${f.evidence} · session ${f.pickSession} · ${f.pickLine} (${f.pick}; proposed as ${f.id})`;
   return `${head} · "${f.quote}" (${f.id})`;
 }
 
@@ -368,7 +397,7 @@ function propose(sid, p) {
   f.summary = checkEvidence(f, session);
 
   const at = new Date().toISOString();
-  Object.assign(f, { day: today(), evidence: f.basis === 'inferred' ? 'correction' : f.basis, id: `a-${crypto.randomBytes(4).toString('hex')}` });
+  Object.assign(f, { day: today(), evidence: f.evidence ?? (f.basis === 'inferred' ? 'correction' : f.basis), id: `a-${crypto.randomBytes(4).toString('hex')}` });
   const text = noteText(f);
   const n = parseNote(text, `wiki/${key}.md`);
   checkReadBack(n, f);
@@ -383,9 +412,10 @@ function propose(sid, p) {
   const topicOf = topicReader(f.domain, readLedger().rules);
   return withLock(statePath('ledger.lock'), () => {
     const rows = proposalRows();
-    if (rows.filter(r => r.session === sid).length >= MAX_PER_SESSION) refuse(`this session already proposed ${MAX_PER_SESSION} rules.`);
-    const earlier = rows.find(same);
-    if (earlier) refuse(`these words were already proposed as ${earlier.note}.`);
+    // Picks are bounded by what was recorded, so re-proposing them doesn't count toward the session's cap.
+    if (f.basis !== 'pick' && rows.filter(r => r.session === sid && r.pick === undefined).length >= MAX_PER_SESSION) refuse(`this session already proposed ${MAX_PER_SESSION} rules.`);
+    const earlier = rows.find(r => (f.basis === 'pick' ? r.pick === f.pick : same(r)));
+    if (earlier) refuse(f.basis === 'pick' ? `${f.pick} was already proposed as ${earlier.note}.` : `these words were already proposed as ${earlier.note}.`);
     if (readNote(key)) refuse(`wiki/${key}.md already exists. Pick another slug, or leave that note to the user.`);
     // Read under the lock, so a rule in replaces the user retired meanwhile is refused here.
     const { rules } = readLedger();
@@ -394,7 +424,7 @@ function propose(sid, p) {
     writeText(`${vaultPath('wiki', f.domain, f.slug)}.md`, text);
     appendJsonl(inboxFile(), [{
       id: f.id, at, source: 'agent', kind: f.evidence, text: said, ...(f.basis === 'failure' ? { fix: f.fix } : {}),
-      note: key, session: sid, transcript: session.transcript ?? null, cwd: session.cwd ?? null, domain: f.domain,
+      note: key, session: sid, transcript: session.transcript ?? null, cwd: session.cwd ?? null, domain: f.domain, ...(f.pick ? { pick: f.pick } : {}),
       ...(f.replaces.length ? { repeats: f.replaces, delivered: f.replaces.filter(k => wasShown(sid, k, rules[k].hash)) } : {}),
     }]);
     appendJsonl(decisionsFile(), [{ at, ids: [f.id], action: 'note', note: key }]);

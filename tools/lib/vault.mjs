@@ -126,6 +126,8 @@ function datedRows(folder) {
 }
 
 export const proposalRows = () => datedRows('inbox').filter(r => r.source === 'agent');
+// The user's recorded answers: picks, and the older inbox rows captured from their messages.
+export const recordedRows = () => [...datedRows('picks'), ...datedRows('inbox').filter(r => r.source !== 'agent')];
 
 export const decisionsFile = () => vaultPath('raw', 'decisions.jsonl');
 

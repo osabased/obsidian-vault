@@ -1,3 +1,13 @@
 {"at":"2026-10-19T19:37:02.436Z","ids":["c-1b578a64","c-e5e6c06b","c-a7bfc994","c-9179fe22","c-30793289","c-b30f0b4d","c-b81e281b","c-75428397"],"action":"dismiss","reason":"agent-written brief, not the user's words"}
 {"at":"2026-10-19T19:40:24.223Z","ids":["c-1f2ff33b","c-056410d9","c-1c35b49c","c-cccd4d26","c-eb0282ce","c-7cefeae4","c-a7358cfe"],"action":"dismiss","reason":"agent-written brief, not the user's words"}
 {"at":"2026-10-22T06:04:02.980Z","ids":["c-c23290a1","p-7c60c05f","p-d5e61746","q-43ef5370","q-ea46d2e7","q-22137590","q-18ccd73d","q-8523285c","q-9856a335","q-bd89c0f0","q-22137105","q-8cca182a","q-48164811","q-2c7fd13a","q-db9b0e07","q-bf9fc07f","q-b1cadf37","q-13755358","q-18937309","q-62c603f0","q-7f00d10c","q-cb960ca9"],"action":"dismiss","reason":"the session pass was removed; dismissed unreviewed"}
+{"at":"2026-10-24T02:15:06.544Z","ids":["a-858a959e"],"action":"note","note":"global/fan-out-agents-cheaper-model"}
+{"at":"2026-10-24T02:27:08.590Z","ids":["a-5bdf3ecf"],"action":"note","note":"global/close-against-the-standing-goal"}
+{"at":"2026-10-24T04:25:09.621Z","ids":["a-ae6ba102"],"action":"note","note":"roblox-ui/reusable-process-in-a-skill"}
+{"at":"2026-10-24T04:25:09.755Z","ids":["a-4c56b49d"],"action":"note","note":"roblox-ui/direction-and-final-review"}
+{"at":"2026-10-24T04:25:09.892Z","ids":["a-b5785b80"],"action":"note","note":"roblox-ui/style-tiles-once-options-for-major-screens"}
+{"at":"2026-10-24T04:25:10.033Z","ids":["a-12da54da"],"action":"note","note":"roblox-ui/reviewer-on-opus"}
+{"at":"2026-10-24T04:25:10.173Z","ids":["a-f18d3823"],"action":"note","note":"roblox-ui/theme-values-only"}
+{"at":"2026-10-24T04:25:10.314Z","ids":["a-fb55d51b"],"action":"note","note":"roblox-ui/undrawable-images-are-info"}
+{"at":"2026-10-24T04:25:10.445Z","ids":["a-fd4956ef"],"action":"note","note":"global/one-check-before-an-ab-eval"}
+{"at":"2026-10-24T04:25:10.583Z","ids":["a-0528aba2"],"action":"note","note":"roblox-ui/custom-scroll-bar-images"}
