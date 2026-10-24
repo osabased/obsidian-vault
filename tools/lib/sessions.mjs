@@ -6,23 +6,18 @@ const DAY = 86400e3;
 
 export const registry = id => statePath('sessions', `${id}.json`);
 
-// `loaded` records when each domain's always-on rules went into the session's context, so rules
-// confirmed later, or domains the session moves into, are delivered with the next prompt. `cwd` stays where
-// the session registered, so a move into the vault folder doesn't let it propose for every domain.
-export function touchSession(input, { loaded = [] } = {}) {
+// `cwd` stays where the session registered, so a move into the vault folder doesn't let it propose for every domain.
+export function touchSession(input) {
   const id = safeId(input.session_id);
   const file = registry(id);
   const prev = readJsonSafe(file) ?? {};
-  const now = new Date().toISOString();
   const entry = {
     session: String(input.session_id),
     transcript: input.transcript_path ?? prev.transcript ?? null,
     cwd: prev.cwd ?? input.cwd ?? null,
-    last_seen: now,
-    loaded: { ...prev.loaded, ...Object.fromEntries(loaded.map(d => [d, now])) },
+    last_seen: new Date().toISOString(),
   };
   writeJson(file, entry);
-  return { ...entry, id };
 }
 
 const marker = (kind, sid, key) => vaultPath('.state', kind, safeId(sid), shortHash(key));
@@ -39,7 +34,8 @@ function create(file, text) {
   }
 }
 
-function mark(kind, sid, key) {
+// True only for the call that made the marker, so two hooks racing deliver a rule once.
+export function mark(kind, sid, key) {
   try {
     create(marker(kind, sid, key), key);
     return true;
@@ -49,25 +45,14 @@ function mark(kind, sid, key) {
   }
 }
 
-export const markRepeat = (sid, id) => mark('repeats', sid, id);
+// Kept with the excerpt markers, so clearMarkers resets both.
+export const markAlways = (sid, key, r) => mark('excerpts', sid, `always|${key}|${r.hash}`);
 
 export function clearMarkers(sid) {
   for (const kind of ['gate', 'excerpts']) fs.rmSync(vaultPath('.state', kind, safeId(sid)), { recursive: true, force: true });
 }
 
-// Unlike the gate and excerpt markers, `shown` markers survive compaction, so a repeat can tell
-// whether the rule it repeats ever reached the agent in the wording confirmed now.
-export const markShown = (sid, key, hash) => mark('shown', sid, `${key}|${hash}`);
-export const wasShown = (sid, key, hash) => marked('shown', sid, `${key}|${hash}`);
-
-export function markDelivered(kind, sid, id, key, hash) {
-  if (!mark(kind, sid, id)) return false;
-  // Only registered sessions can propose, so only theirs need shown markers.
-  if (fs.existsSync(registry(safeId(sid)))) markShown(sid, key, hash);
-  return true;
-}
-
-const KINDS = ['gate', 'excerpts', 'shown', 'repeats'];
+const KINDS = ['gate', 'excerpts', 'repeats'];
 
 // The registry goes last, so a session whose markers can't be removed yet is tried again next time.
 function prune(id) {

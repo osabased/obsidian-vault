@@ -2,9 +2,9 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { parse } from './frontmatter.mjs';
 import { validGlob } from './glob.mjs';
-import { config, vaultPath, readJson, writeJson, writeText, shortHash, toPosix, today } from './vault.mjs';
+import { config, vaultPath, writeText, shortHash, toPosix, today } from './vault.mjs';
 
-export const LIST_FIELDS = ['applies_to', 'triggers', 'keywords', 'replaces'];
+export const LIST_FIELDS = ['applies_to', 'triggers', 'keywords'];
 export const KEY_RE = /^[a-z0-9-]+\/[a-z0-9-]+$/;
 export const BASES = { taste: ['stated', 'inferred', 'pick'], knowledge: ['stated', 'failure', 'source'] };
 export const wrongBasis = (kind, basis) => (kind === 'knowledge' ? "a knowledge rule's basis must be stated, failure or source"
@@ -13,7 +13,7 @@ export const isUrl = s => typeof s === 'string' && /^https?:\/\/\S+$/i.test(s);
 export const validDay = s => typeof s === 'string' && /^\d{4}-\d\d-\d\d$/.test(s) && !Number.isNaN(Date.parse(s)) && new Date(s).toISOString().startsWith(s);
 const KEBAB = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
 const HEAD = [
-  '# Taste rules (confirmed by the user)',
+  '# Taste rules',
   "Follow these unless the user's current request or the project's own instructions say otherwise. If an edit is refused with taste rules, apply them and retry the edit.",
 ];
 
@@ -22,7 +22,8 @@ export const byKey = ([a], [b]) => cmp(a, b);
 
 export function toKey(ref) {
   let s = String(ref).trim().replace(/^`+|`+$/g, '').trim().replace(/\.+$/, '');
-  const link = s.match(/^\[\[([^\]|#]+)[^\]]*\]\]$/);
+  // An unquoted [[link]] in the frontmatter reads as a list in a list, which leaves [link].
+  const link = s.match(/^\[\[?([^\]|#]+)[^\]]*\]\]?$/);
   if (link) s = link[1];
   return s.trim().replace(/\\/g, '/').replace(/^\.?\/?wiki\//i, '').replace(/\.md$/i, '').toLowerCase();
 }
@@ -35,6 +36,8 @@ export const escapeRegExp = s => String(s).replace(/[.*+?^${}()|[\]\\]/g, '\\$&'
 export const mentions = (word, text) => new RegExp(`(?<!\\w)${escapeRegExp(word)}(?!\\w)`, 'i').test(text);
 
 const asList = v => (v === null || v === undefined ? [] : Array.isArray(v) ? v.map(String) : null);
+// Obsidian writes a list-type property as a list even when it holds one link.
+const single = v => (Array.isArray(v) && v.length === 1 ? v[0] : v);
 
 function field(lead, name) {
   const m = lead.match(new RegExp(`^[ \\t]*(?:\\*\\*)?${name}(?::\\*\\*|\\*\\*:|:)[ \\t]*(.*)$`, 'm'));
@@ -45,6 +48,7 @@ export function parseNote(text, rel) {
   const { data, body, ok } = parse(text);
   const parts = rel.replace(/^wiki\//i, '').replace(/\.md$/i, '').split('/');
   const lead = body.split(/^## /m)[0];
+  const successor = single(data.superseded_by);
   const note = {
     rel,
     key: parts.join('/'),
@@ -55,16 +59,15 @@ export function parseNote(text, rel) {
     data,
     body,
     type: data.type,
-    status: data.status,
     kind: data.kind ?? 'taste',
     as_of: data.as_of ?? null,
     always: data.always === true,
+    superseded_by: typeof successor === 'string' && successor.trim() ? toKey(successor) : null,
     do: field(lead, 'Do'),
     not: field(lead, 'Not'),
     because: field(lead, 'Because'),
   };
   for (const f of LIST_FIELDS) note[f] = asList(data[f]);
-  if (note.replaces) note.replaces = note.replaces.map(toKey);
   return note;
 }
 
@@ -80,13 +83,6 @@ export const ruleTextParts = n => (n.kind === 'knowledge' ? 'Do, Not, Because an
 
 export const clip = (s, max) => (s.length <= max ? s : `${s.slice(0, max - 1).trimEnd()}…`);
 
-// Knowledge fields join the hash only for knowledge rules, so taste rules keep the hashes they were confirmed with.
-export const noteHash = n => shortHash(JSON.stringify({
-  domain: n.domain, do: n.do, not: n.not, because: n.because,
-  applies_to: n.applies_to ?? [], triggers: n.triggers ?? [], keywords: n.keywords ?? [], always: n.always,
-  ...(n.kind === 'knowledge' ? { kind: n.kind, as_of: n.as_of } : {}),
-}));
-
 export function noteErrors(n) {
   if (!n.ok) return ['no frontmatter'];
   const errs = [];
@@ -95,7 +91,6 @@ export function noteErrors(n) {
   if (n.domain && n.data.domain !== undefined && n.data.domain !== n.domain) errs.push(`domain is ${n.data.domain} but the note is in wiki/${n.domain}/`);
   if (n.data.domain === undefined) errs.push('no domain');
   if (n.type !== 'rule') return errs;
-  if (!['provisional', 'confirmed', 'outdated'].includes(n.status)) errs.push('status must be provisional, confirmed or outdated');
   if (!BASES[n.kind]) errs.push('kind must be taste or knowledge');
   else if (!BASES[n.kind].includes(n.data.basis)) errs.push(wrongBasis(n.kind, n.data.basis));
   if (n.kind === 'knowledge') {
@@ -110,14 +105,8 @@ export function noteErrors(n) {
   for (const g of n.applies_to ?? []) if (!validGlob(g)) errs.push(`bad glob in applies_to: ${g}`);
   for (const t of n.triggers ?? []) if (!tryRegex(t)) errs.push(`bad regex in triggers: ${t}`);
   if (n.data.always !== undefined && n.data.always !== null && typeof n.data.always !== 'boolean') errs.push('always must be true or false');
+  if (n.data.superseded_by != null && typeof single(n.data.superseded_by) !== 'string') errs.push('superseded_by must name one note');
   return errs;
-}
-
-// A domain rule reaches only its domain's sessions, so it can't stand in for a rule that reaches others.
-export function replaceProblem(n, t) {
-  const d = t.split('/')[0];
-  if (n.domain === 'global' || d === n.domain) return null;
-  return `a ${n.domain} rule can't replace ${t}, which ${d === 'global' ? 'applies in every project' : `is a ${d} rule`}`;
 }
 
 export function loadNotes() {
@@ -130,10 +119,14 @@ export function loadNotes() {
       if (e.name.startsWith('.')) continue;
       const full = path.join(dir, e.name);
       if (e.isDirectory()) walk(full);
-      else if (e.isFile() && /\.md$/i.test(e.name)) notes.push(parseNote(fs.readFileSync(full, 'utf8'), `wiki/${path.relative(root, full).replace(/\\/g, '/')}`));
+      else if (e.isFile() && /\.md$/i.test(e.name)) {
+        notes.push({ ...parseNote(fs.readFileSync(full, 'utf8'), `wiki/${path.relative(root, full).replace(/\\/g, '/')}`), saved: fs.statSync(full).mtimeMs });
+      }
     }
   };
   walk(root);
+  const resolve = resolver(notes);
+  for (const n of notes) if (n.superseded_by) n.superseded_by = resolve(n.superseded_by);
   return notes.sort((a, b) => cmp(a.key, b.key));
 }
 
@@ -147,12 +140,40 @@ export function readNote(key) {
   }
 }
 
-export function readLedger() {
-  const l = readJson(vaultPath('confirmed.json'), {});
-  return { version: 1, ...l, rules: l.rules ?? {}, retired: l.retired ?? {} };
+export const knownDomain = d => d === 'global' || Object.hasOwn(config().domains, d);
+
+// Why a rule note never reaches a session, or null when it does. A superseded note says so on its own.
+function undelivered(n) {
+  if (n.depth !== 2) return 'it is not directly in wiki/<domain>/';
+  if (!knownDomain(n.domain)) return `${n.domain} isn't a domain in taste.config.json`;
+  return noteErrors(n)[0] ?? null;
 }
 
-export const writeLedger = ledger => writeJson(vaultPath('confirmed.json'), ledger);
+const isLive = n => n.type === 'rule' && !n.superseded_by && !undelivered(n);
+
+// The rules in the vault, read from the notes as they are now.
+export function liveRules(notes = loadNotes()) {
+  const rules = {};
+  for (const n of notes.filter(isLive)) {
+    const text = ruleText(n);
+    rules[n.key] = {
+      domain: n.domain, topic: String(n.data.topic ?? '').trim().toLowerCase(), text,
+      // Only the delivered wording counts, so an edit to a rule's evidence or globs doesn't deliver it again.
+      hash: shortHash(text),
+      always: n.always, applies_to: n.applies_to, triggers: n.triggers, keywords: n.keywords,
+    };
+  }
+  return rules;
+}
+
+// The rules the hooks deliver. Obsidian saves a note every few seconds while the user types,
+// so a note saved in the last settleSeconds waits rather than reach sessions half-written.
+export function settledRules(notes = loadNotes()) {
+  const since = Date.now() - config().delivery.settleSeconds * 1000;
+  return liveRules(notes.filter(n => n.saved <= since));
+}
+
+export const ruleLine = (k, r) => `- ${k}: ${clip(r.text, config().delivery.maxRuleChars)}`;
 
 export function domainOrder(domains) {
   const known = Object.keys(config().domains);
@@ -163,36 +184,34 @@ export function domainOrder(domains) {
 export const domainTitle = d => (d === 'global' ? 'Every project' : config().domains[d]?.title ?? 'not in taste.config.json');
 
 const isRule = line => line.startsWith('- ');
-const alwaysEntries = ledger => Object.entries(ledger.rules).filter(([, r]) => r.always).sort(byKey);
+const alwaysEntries = rules => Object.entries(rules).filter(([, r]) => r.always).sort(byKey);
+export const alwaysIn = (rules, scope) => alwaysEntries(rules).filter(([, r]) => scope.includes(r.domain));
 
-function alwaysLines(ledger, domains) {
-  const { maxRuleChars } = config().delivery;
-  const entries = alwaysEntries(ledger);
+function alwaysLines(rules, domains) {
+  const entries = alwaysIn(rules, domains);
   const lines = [];
-  const keys = [];
   for (const d of domainOrder(domains)) {
     const mine = entries.filter(([, r]) => r.domain === d);
-    if (!mine.length) continue;
-    lines.push('', `## ${d}`, ...mine.map(([k, r]) => `- ${k}: ${clip(r.text, maxRuleChars)}`));
-    keys.push(...mine.map(([k]) => k));
+    if (mine.length) lines.push('', `## ${d}`, ...mine.map(([k, r]) => ruleLine(k, r)));
   }
-  return { lines, keys };
+  return lines;
 }
 
-export function alwaysSize(ledger, domains) {
-  const { lines } = alwaysLines(ledger, domains);
+export function alwaysSize(rules, domains) {
+  const lines = alwaysLines(rules, domains);
   if (!lines.length) return { lines: 0, bytes: 0 };
   const all = [...HEAD, ...lines];
   return { lines: all.length, bytes: Buffer.byteLength(all.join('\n')) };
 }
 
-export function alwaysContext(domains, ledger = readLedger()) {
-  const { lines, keys } = alwaysLines(ledger, domains);
-  if (!lines.length) return { text: '', keys: [] };
+export function alwaysContext(domains, rules = liveRules()) {
+  const lines = alwaysLines(rules, domains);
+  if (!lines.length) return '';
   const { activeMaxLines, activeMaxBytes } = config().delivery;
   const fits = xs => xs.length <= activeMaxLines && Buffer.byteLength(xs.join('\n')) <= activeMaxBytes;
-  if (fits([...HEAD, ...lines])) return { text: [...HEAD, ...lines].join('\n'), keys };
-  const tail = shown => ['', `(${keys.length - shown} more didn't fit. See ${toPosix(vaultPath('active.md'))}.)`];
+  if (fits([...HEAD, ...lines])) return [...HEAD, ...lines].join('\n');
+  const total = lines.filter(isRule).length;
+  const tail = shown => ['', `(${total - shown} more didn't fit. See ${toPosix(vaultPath('active.md'))}.)`];
   const out = [...HEAD];
   let shown = 0;
   for (const line of lines) {
@@ -202,25 +221,31 @@ export function alwaysContext(domains, ledger = readLedger()) {
     shown = next;
   }
   while (out.length > HEAD.length && !isRule(out.at(-1))) out.pop();
-  return { text: [...out, ...tail(shown)].join('\n'), keys: keys.slice(0, shown) };
+  return [...out, ...tail(shown)].join('\n');
 }
 
-export function renderActive(ledger) {
-  const { maxRuleChars } = config().delivery;
+export function renderActive(rules) {
   const out = [
     '# Always-on rules',
     '',
-    "Generated by tools/build.mjs from confirmed.json. Do not edit. Sessions load these at start: global rules in every project, the others in their domain's projects.",
+    "Generated by tools/build.mjs from the notes in wiki/. Do not edit. Sessions load these at start: global rules in every project, the others in their domain's projects.",
   ];
-  const entries = alwaysEntries(ledger);
-  if (!entries.length) out.push('', 'None confirmed yet.');
+  const entries = alwaysEntries(rules);
+  if (!entries.length) out.push('', 'None yet.');
   for (const d of domainOrder(entries.map(([, r]) => r.domain))) {
-    out.push('', `## ${d} · ${domainTitle(d)}`, '', ...entries.filter(([, r]) => r.domain === d).map(([k, r]) => `- ${k}: ${clip(r.text, maxRuleChars)}`));
+    out.push('', `## ${d} · ${domainTitle(d)}`, '', ...entries.filter(([, r]) => r.domain === d).map(([k, r]) => ruleLine(k, r)));
   }
   return `${out.join('\n')}\n`;
 }
 
 export const linkTo = key => `[[wiki/${key}|${key.split('/').at(-1)}]]`;
+
+// Obsidian writes a bare [[slug]] when no other note has that name.
+function resolver(notes) {
+  const bySlug = new Map();
+  for (const n of notes) bySlug.set(n.slug, bySlug.has(n.slug) ? null : n.key);
+  return k => (k.includes('/') ? k : bySlug.get(k) ?? k);
+}
 
 // An unclosed fence runs to the end of the note.
 const FENCES = /^ {0,3}(`{3,}|~{3,})[\s\S]*?(?:^ {0,3}\1[^\n]*$|(?![\s\S]))/gm;
@@ -230,13 +255,9 @@ function linksUnder(n, heading) {
   return [...part.matchAll(/\[\[[^\]]*\]\]/g)].map(m => toKey(m[0]));
 }
 
-// /ingest links a page and its rules both ways, but a link added by hand in Obsidian may be on one side only,
-// and Obsidian writes a bare [[slug]] when no other note has that name.
-function refPages(notes) {
+// /ingest links a page and its rules both ways, but a link added by hand in Obsidian may be on one side only.
+function refPages(notes, resolve) {
   const pages = new Set(notes.filter(n => n.type === 'page').map(n => n.key));
-  const bySlug = new Map();
-  for (const n of notes) bySlug.set(n.slug, bySlug.has(n.slug) ? null : n.key);
-  const resolve = k => (k.includes('/') ? k : bySlug.get(k) ?? k);
   const refs = new Map();
   const add = (rule, page) => refs.set(rule, (refs.get(rule) ?? new Set()).add(page));
   for (const n of notes) {
@@ -246,19 +267,19 @@ function refPages(notes) {
   return refs;
 }
 
-function indexLine(n, ledger, refs) {
+function indexLine(n, refs) {
   const link = linkTo(n.key);
   if (n.type === 'page') return `- ${link} · page`;
-  const entry = ledger.rules[n.key];
-  const changed = entry && entry.hash !== noteHash(n) ? ' · changed since confirmed' : '';
+  const why = n.superseded_by ? null : undelivered(n);
+  const gone = n.superseded_by ? ` · superseded by ${linkTo(n.superseded_by)}` : why ? ` · not delivered: ${why}` : '';
   const kind = n.kind === 'knowledge' ? ` · knowledge as of ${n.as_of ?? '(no date)'}` : '';
   const from = [...(refs.get(n.key) ?? [])].sort(cmp);
-  return `- ${link} · ${n.status ?? 'no status'}${changed}${kind} · Do: ${clip(n.do || '(missing)', 100)}${from.length ? ` · from ${from.map(linkTo).join(', ')}` : ''}`;
+  return `- ${link}${gone}${kind} · Do: ${clip(n.do || '(missing)', 100)}${from.length ? ` · from ${from.map(linkTo).join(', ')}` : ''}`;
 }
 
-export function renderIndex(notes, ledger) {
+export function renderIndex(notes) {
   const { domains } = config();
-  const refs = refPages(notes);
+  const refs = refPages(notes, resolver(notes));
   const out = ['# Index', '', 'Generated by tools/build.mjs from the notes in wiki/. Do not edit.'];
   const nested = notes.filter(n => n.depth > 1);
   const sections = domainOrder([...Object.keys(domains), ...nested.map(n => n.domain)])
@@ -279,15 +300,14 @@ export function renderIndex(notes, ledger) {
     }
     const rank = g => (topics.includes(g) ? topics.indexOf(g) : topics.length);
     for (const g of [...groups.keys()].sort((a, b) => rank(a) - rank(b) || cmp(a, b))) {
-      out.push('', `### ${g}`, '', ...groups.get(g).map(n => indexLine(n, ledger, refs)));
+      out.push('', `### ${g}`, '', ...groups.get(g).map(n => indexLine(n, refs)));
     }
   }
   return `${out.join('\n')}\n`;
 }
 
-export function build({ check = false } = {}) {
-  const ledger = readLedger();
-  const files = { 'active.md': renderActive(ledger), 'index.md': renderIndex(loadNotes(), ledger) };
+export function build({ check = false, notes = loadNotes() } = {}) {
+  const files = { 'active.md': renderActive(liveRules(notes)), 'index.md': renderIndex(notes) };
   const stale = [];
   for (const [name, text] of Object.entries(files)) {
     let current = '';

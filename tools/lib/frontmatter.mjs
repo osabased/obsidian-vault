@@ -1,6 +1,4 @@
 const ESCAPES = { n: '\n', t: '\t', '"': '"', '\\': '\\' };
-const PLAIN = /^[a-z][a-z0-9-]*$/i;
-const RESERVED = /^(?:true|false|null|yes|no|on|off)$/i;
 
 function quoted(s) {
   const q = s[0];
@@ -82,22 +80,4 @@ export function parse(text) {
     if (data[kv[1]] === null) list = kv[1];
   }
   return { data, body: lines.slice(end + 1).join('\n'), ok: true };
-}
-
-export function setKey(text, key, value) {
-  const eol = text.includes('\r\n') ? '\r\n' : '\n';
-  const lines = text.split(/\r?\n/);
-  const v = String(value);
-  const line = `${key}: ${PLAIN.test(v) && !RESERVED.test(v) ? v : `'${v.replace(/'/g, "''")}'`}`;
-  const end = closing(lines);
-  if (end < 0) return ['---', line, '---', ...lines].join(eol);
-  const at = lines.findIndex((l, i) => i > 0 && i < end && l.startsWith(`${key}:`));
-  if (at < 0) {
-    lines.splice(end, 0, line);
-  } else {
-    let stop = at + 1;
-    while (stop < end && /^(?:\s+\S|-(?:\s|$))/.test(lines[stop])) stop++;
-    lines.splice(at, stop - at, line);
-  }
-  return lines.join(eol);
 }

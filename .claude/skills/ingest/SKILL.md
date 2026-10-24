@@ -1,6 +1,6 @@
 ---
 name: ingest
-description: "Go through one source with the user (a reference, a judgment, a doc or changelog page). What they say about it becomes a ref page and proposed rules."
+description: "Go through one source with the user (a reference, a judgment, a doc or changelog page). What they say about it becomes a ref page and rules."
 disable-model-invocation: true
 ---
 
@@ -17,7 +17,7 @@ Work in the vault root. AGENTS.md has the ref page and rule formats. The user's 
    - Taste: basis `stated` or `inferred`, quoting their typed words.
    - Doc facts: `kind: knowledge`, basis `source`, quoting the page you read this session, by its URL. A file you copied into `raw/refs/` this session can't back one.
 
-   End your reply with the lines it prints. After their confirm or drop, propose the next.
+   End your reply with the lines it prints; the rule applies from then on. If the user doesn't want it, delete its note, and if they want it worded otherwise, edit it. Then propose the next.
 6. **Link** each rule you proposed under the page's `## Rules`, and the page under the rule note's `## Examples`. Run `node tools/lint.mjs` and fix any errors.
 
 Done when the page holds their words, each preference they stated is proposed or, once the session's 3 proposals are used, named in your last reply for another session, and lint shows no errors.
