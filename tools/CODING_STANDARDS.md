@@ -17,9 +17,9 @@ These keep the hooks safe to run in every session. Follow them when you change a
 ## State
 
 - Write files with `writeText` or `writeJson` (temp file, then rename). Append rows with `appendJsonl`, one call per batch.
-- Proposals go in dated files in `raw/inbox/` (`inboxFile()`) with an `a-` id, and `propose.mjs` adds a line to `log.md` (`appendLog()`) for each note it writes. Rows are never edited. Older rows in `raw/inbox/` and `raw/picks/` carry `c-`, `p-` and `q-` ids. Readers treat a missing folder as empty.
+- Proposals go in dated files in `raw/inbox/` (`inboxFile()`) with an `a-` id, and `propose.mjs` adds a line to `log.md` (`appendLog()`) for each note it writes, as `log.mjs` does for each page an agent writes. Rows are never edited. Older rows in `raw/inbox/` and `raw/picks/` carry `c-`, `p-` and `q-` ids. Readers treat a missing folder as empty.
 - `raw/` is append-only. `.state/` belongs to the hooks: use the helpers in `lib/sessions.mjs` for sessions and markers.
-- The hooks read the notes as they are now, through `settledRules()` in `lib/rules.mjs`, which leaves out notes saved in the last `delivery.settleSeconds`; `propose.mjs` writes its note with `writeSettled()` so it applies at once. `build()`, lint and the repeat check use `liveRules()`, which has every rule. A rule's hash covers only its delivered text, and the markers carry it, so a reworded rule reaches each session once more.
+- The hooks read the notes as they are now, through `settledNotes()` and `settledRules()` in `lib/rules.mjs`, which leave out notes saved in the last `delivery.settleSeconds`; `propose.mjs` writes its note with `writeSettled()` so it applies at once. `build()`, lint and the repeat check use `liveRules()`, which has every rule. A rule's hash covers only its delivered text, and the markers carry it, so a reworded rule reaches each session once more.
 
 ## Code
 

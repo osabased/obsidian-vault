@@ -3,7 +3,7 @@ type: rule
 domain: global
 kind: taste
 basis: inferred
-topic: code
+topic: workflow
 always: true
 applies_to: []
 triggers: []
@@ -15,7 +15,7 @@ keywords:
   - 'bigger picture'
   - 'goal'
 created: 2026-10-23
-updated: 2026-10-23
+updated: 2026-10-24
 ---
 
 **Do:** Before wrapping up, re-read the session's original goal and name its next unbuilt piece and the installed tool that fits it; propose that, not only the finished request.

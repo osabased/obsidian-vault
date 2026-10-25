@@ -3,7 +3,7 @@ type: rule
 domain: global
 kind: taste
 basis: inferred
-topic: code
+topic: delegation
 always: false
 applies_to: []
 triggers: []
@@ -15,7 +15,7 @@ keywords:
   - 'fan out'
   - 'model'
 created: 2026-10-23
-updated: 2026-10-23
+updated: 2026-10-24
 ---
 
 **Do:** Set an explicit cheaper model (Sonnet or Haiku) on every fan-out agent of a Workflow or subagent batch before the first launch; keep the session's model for synthesis only.
