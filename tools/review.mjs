@@ -1,6 +1,6 @@
 import fs from 'node:fs';
-import { vaultPath, plural, toPosix } from './lib/vault.mjs';
-import { clip } from './lib/rules.mjs';
+import { config, vaultPath, plural, toPosix } from './lib/vault.mjs';
+import { clip, normTopic, topicNotes } from './lib/rules.mjs';
 import { lint, tally } from './lib/lint.mjs';
 
 const USAGE = 'usage: node tools/review.mjs status';
@@ -29,7 +29,20 @@ function hookHealth() {
   return errors.length ? [`${plural(errors.length, 'hook error')} in ${toPosix(file)}`, `  newest: ${clip(errors.at(-1), 300)}`] : ['No hook errors.'];
 }
 
-const status = () => [lintLine(), '', 'Hook health', ...hookHealth()].join('\n');
+function emptyTopics() {
+  try {
+    const used = topicNotes();
+    const lines = Object.entries(config().domains).flatMap(([d, c]) => {
+      const empty = (c.topics ?? []).filter(t => !used.get(d)?.has(normTopic(t)));
+      return empty.length ? [`${d}: ${empty.join(', ')}`] : [];
+    });
+    return lines.length ? lines : ['None.'];
+  } catch (e) {
+    return [`failed: ${e.message}`];
+  }
+}
+
+const status = () => [lintLine(), '', 'Hook health', ...hookHealth(), '', 'Listed topics no rule has yet', ...emptyTopics()].join('\n');
 
 const [cmd, ...rest] = process.argv.slice(2);
 try {

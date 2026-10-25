@@ -74,6 +74,8 @@ export function parseNote(text, rel) {
     kind: data.kind ?? 'taste',
     as_of: data.as_of ?? null,
     always: data.always === true,
+    topic: typeof data.topic === 'string' ? normTopic(data.topic) : '',
+    summary: typeof data.summary === 'string' ? data.summary.trim() : '',
     superseded_by: typeof successor === 'string' && successor.trim() ? toKey(successor) : null,
     do: field(lead, 'Do'),
     not: field(lead, 'Not'),
@@ -169,17 +171,30 @@ function undelivered(n) {
 }
 
 const isLive = n => n.type === 'rule' && !n.superseded_by && !undelivered(n);
+export const isTopicPage = n => n.type === 'page' && n.data.source == null;
 
-// Each domain's live rules by topic, so lint and propose's help agree on which topics are in use.
-export function topicNotes(notes = loadNotes()) {
+export function byTopic(notes) {
   const used = new Map();
-  for (const n of notes.filter(isLive)) {
-    const t = normTopic(n.data.topic);
-    if (typeof n.data.topic !== 'string' || !t) continue;
+  for (const n of notes.filter(x => x.topic)) {
     const mine = used.get(n.domain) ?? used.set(n.domain, new Map()).get(n.domain);
-    mine.set(t, [...(mine.get(t) ?? []), n]);
+    mine.set(n.topic, [...(mine.get(n.topic) ?? []), n]);
   }
   return used;
+}
+
+// Each domain's live rules by topic, so lint and propose's help agree on which topics are in use.
+export const topicNotes = (notes = loadNotes()) => byTopic(notes.filter(isLive));
+
+// Each domain's topics: the ones taste.config.json lists, in its order, then the others its live rules and pages have.
+export function domainTopics(notes = loadNotes()) {
+  const { domains } = config();
+  const used = topicNotes(notes);
+  const pages = byTopic(notes.filter(n => n.type === 'page' && n.depth === 2 && !noteErrors(n).length));
+  return new Map([...new Set(['global', ...Object.keys(domains)])].map(d => {
+    const known = (domains[d]?.topics ?? []).map(normTopic).filter(Boolean);
+    const more = [...(used.get(d)?.keys() ?? []), ...(pages.get(d)?.keys() ?? [])].sort();
+    return [d, [...new Set([...known, ...more])]];
+  }));
 }
 
 // The rules in the vault, read from the notes as they are now.
@@ -188,7 +203,7 @@ export function liveRules(notes = loadNotes()) {
   for (const n of notes.filter(isLive)) {
     const text = ruleText(n);
     rules[n.key] = {
-      domain: n.domain, topic: normTopic(n.data.topic), text,
+      domain: n.domain, topic: n.topic, text,
       // Only the delivered wording counts, so an edit to a rule's evidence or globs doesn't deliver it again.
       hash: shortHash(text),
       always: n.always, applies_to: n.applies_to, triggers: n.triggers, keywords: n.keywords,
@@ -197,12 +212,14 @@ export function liveRules(notes = loadNotes()) {
   return rules;
 }
 
-// The rules the hooks deliver. Obsidian saves a note every few seconds while the user types,
-// so a note saved in the last settleSeconds waits rather than reach sessions half-written.
-export function settledRules(notes = loadNotes()) {
+// Obsidian saves a note every few seconds while the user types, so a note saved in the last settleSeconds
+// waits rather than reach sessions half-written.
+export function settledNotes(notes = loadNotes()) {
   const since = Date.now() - config().delivery.settleSeconds * 1000;
-  return liveRules(notes.filter(n => n.saved <= since));
+  return notes.filter(n => n.saved <= since);
 }
+
+export const settledRules = (notes = loadNotes()) => liveRules(settledNotes(notes));
 
 export const ruleLine = (k, r) => `- ${k}: ${clip(r.text, config().delivery.maxRuleChars)}`;
 
@@ -272,7 +289,7 @@ export function renderActive(rules) {
 export const linkTo = key => `[[wiki/${key}|${key.split('/').at(-1)}]]`;
 
 // Obsidian writes a bare [[slug]] when no other note has that name.
-function resolver(notes) {
+export function resolver(notes) {
   const bySlug = new Map();
   for (const n of notes) bySlug.set(n.slug, bySlug.has(n.slug) ? null : n.key);
   return k => (k.includes('/') ? k : bySlug.get(k) ?? k);
@@ -281,9 +298,19 @@ function resolver(notes) {
 // An unclosed fence runs to the end of the note.
 const FENCES = /^ {0,3}(`{3,}|~{3,})[\s\S]*?(?:^ {0,3}\1[^\n]*$|(?![\s\S]))/gm;
 
-function linksUnder(n, heading) {
-  const part = n.body.replace(FENCES, '').split(/^## /m).slice(1).find(s => s.split(/\r?\n/)[0].trim() === heading) ?? '';
-  return [...part.matchAll(/\[\[[^\]]*\]\]/g)].map(m => toKey(m[0]));
+const heading = s => s.split(/\r?\n/)[0].trim();
+const sections = n => n.body.replace(FENCES, '').split(/^## /m);
+// Inside a table Obsidian escapes the alias pipe as \|.
+const targets = text => [...text.matchAll(/\[\[[^\]]*\]\]/g)].map(m => m[0].slice(2, -2).split(/\\?[|#]/)[0].trim());
+
+export const linksUnder = (n, title) => targets(sections(n).slice(1).find(s => heading(s) === title) ?? '').map(toKey);
+
+// The user's quoted words are left out: a broken link there could be fixed only by editing them.
+const QUOTED = ['evidence', 'you said'];
+
+export function noteLinks(n) {
+  const [lead, ...rest] = sections(n);
+  return [lead, ...rest.filter(s => !QUOTED.includes(heading(s).toLowerCase()))].flatMap(s => targets(s.replace(/`[^`\n]*`/g, '')));
 }
 
 // /ingest links a page and its rules both ways, but a link added by hand in Obsidian may be on one side only.
@@ -300,7 +327,7 @@ function refPages(notes, resolve) {
 
 function indexLine(n, refs) {
   const link = linkTo(n.key);
-  if (n.type === 'page') return `- ${link} · page`;
+  if (n.type === 'page') return `- ${link} · ${isTopicPage(n) ? 'topic page' : 'ref page'} · ${n.summary ? clip(n.summary, 150) : '(no summary)'}`;
   const why = n.superseded_by ? null : undelivered(n);
   const gone = n.superseded_by ? ` · superseded by ${linkTo(n.superseded_by)}` : why ? ` · not delivered: ${why}` : '';
   const kind = n.kind === 'knowledge' ? ` · knowledge as of ${n.as_of ?? '(no date)'}` : '';
@@ -308,10 +335,11 @@ function indexLine(n, refs) {
   return `- ${link}${gone}${kind} · Do: ${clip(n.do || '(missing)', 100)}${from.length ? ` · from ${from.map(linkTo).join(', ')}` : ''}`;
 }
 
-// Pages and rules with no topic get sections of their own after the topics, so no topic a rule names can merge with them.
-// Their headings are capitalized and topic headings lowercase, so they can't read the same either.
-const PAGES = Symbol('Ref pages');
+// Notes with no topic get a section of their own after the topics, so no topic a note names can merge with it.
+// Its heading is capitalized and topic headings lowercase, so they can't read the same either.
 const NO_TOPIC = Symbol('No topic');
+// A topic's pages come before its rules: sessions read the pages, and the hooks deliver the rules.
+const pagesFirst = (a, b) => (b.type === 'page') - (a.type === 'page') || cmp(a.key, b.key);
 
 export function renderIndex(notes) {
   const { domains } = config();
@@ -331,12 +359,12 @@ export function renderIndex(notes) {
     const topics = (domains[d]?.topics ?? []).map(normTopic);
     const groups = new Map();
     for (const n of mine) {
-      const g = n.type === 'page' ? PAGES : (typeof n.data.topic === 'string' && normTopic(n.data.topic)) || NO_TOPIC;
+      const g = n.topic || NO_TOPIC;
       groups.set(g, [...(groups.get(g) ?? []), n]);
     }
-    const rank = g => (g === PAGES ? topics.length + 2 : g === NO_TOPIC ? topics.length + 1 : topics.includes(g) ? topics.indexOf(g) : topics.length);
+    const rank = g => (g === NO_TOPIC ? topics.length + 1 : topics.includes(g) ? topics.indexOf(g) : topics.length);
     for (const g of [...groups.keys()].sort((a, b) => rank(a) - rank(b) || cmp(a, b))) {
-      out.push('', `### ${typeof g === 'symbol' ? g.description : g}`, '', ...groups.get(g).map(n => indexLine(n, refs)));
+      out.push('', `### ${typeof g === 'symbol' ? g.description : g}`, '', ...groups.get(g).sort(pagesFirst).map(n => indexLine(n, refs)));
     }
   }
   return `${out.join('\n')}\n`;

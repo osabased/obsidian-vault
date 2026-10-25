@@ -4,7 +4,7 @@ import {
   config, vaultPath, proposeDomains, readJsonSafe, writeSettled, appendJsonl, appendLog, inboxFile, proposalRows, recordedRows, statePath, withLock, safeId, today, toPosix,
 } from './lib/vault.mjs';
 import {
-  KEY_RE, BASES, wrongBasis, parseNote, noteErrors, ruleText, ruleTextParts, readNote, liveRules, build, mentions, isUrl, validDay, byKey, normTopic, topicNotes, vaultFile, joinList,
+  KEY_RE, BASES, wrongBasis, parseNote, noteErrors, ruleText, ruleTextParts, readNote, liveRules, build, mentions, isUrl, validDay, byKey, normTopic, domainTopics, vaultFile, joinList,
 } from './lib/rules.mjs';
 import { normGlob } from './lib/glob.mjs';
 import { registry, marked, mark } from './lib/sessions.mjs';
@@ -22,7 +22,7 @@ const help = () => [
   "               that your training gets wrong or doesn't know",
   '  do, not      one line each',
   "  because      the user's reason, or for knowledge the cause; empty rather than invented",
-  "  topic        a short topic; reuse one the domain's rules have, or one of its listed topics:",
+  "  topic        a short topic; reuse one the domain's rules or pages have, or one of its listed topics:",
   ...topicLines(),
   '  basis        and what to cite for it, written into the note as given:',
   "    stated       the user's words state the rule. quote: their words",
@@ -52,16 +52,7 @@ const help = () => [
   "A knowledge rule's as_of is set for you: the source_date for a source, today otherwise.",
 ].join('\n');
 
-function topicLines() {
-  const { domains } = config();
-  const used = topicNotes();
-  return [...new Set(['global', ...Object.keys(domains)])].flatMap(d => {
-    const listed = domains[d]?.topics ?? [];
-    const known = listed.map(normTopic);
-    const more = [...(used.get(d)?.keys() ?? [])].filter(t => !known.includes(t)).sort();
-    return listed.length || more.length ? [`                 ${d}: ${[...listed, ...more].join(', ')}`] : [];
-  });
-}
+const topicLines = () => [...domainTopics()].flatMap(([d, topics]) => (topics.length ? [`                 ${d}: ${topics.join(', ')}`] : []));
 
 class UsageError extends Error {}
 class Refused extends Error {}

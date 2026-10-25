@@ -1,5 +1,5 @@
 import { runHook, domainsFor, inVaultFolder, vaultPath, toPosix, logError } from '../lib/vault.mjs';
-import { alwaysContext, alwaysIn, loadNotes, settledRules, build } from '../lib/rules.mjs';
+import { alwaysContext, alwaysIn, loadNotes, settledNotes, liveRules, build, domainTopics, joinList } from '../lib/rules.mjs';
 import { touchSession, clearMarkers, markAlways, tidy } from '../lib/sessions.mjs';
 
 function proposeNote(sid) {
@@ -16,17 +16,31 @@ function proposeNote(sid) {
   ].join(' ');
 }
 
+function indexNote(scope, notes) {
+  const all = domainTopics(notes);
+  const topics = [...new Set(scope.flatMap(d => all.get(d) ?? []))];
+  if (!topics.length) return '';
+  return [
+    `Taste vault: when the task touches ${joinList(topics, 'or')}, read \`${toPosix(vaultPath('index.md'))}\` and the pages it lists under those topics.`,
+    `File a useful answer that draws on the vault back as a page, as \`${toPosix(vaultPath('AGENTS.md'))}\` says under Pages.`,
+  ].join(' ');
+}
+
 runHook('session-start', input => {
   try { tidy(); } catch (e) { logError('tidy', e); }
   const doms = domainsFor(input.cwd).map(d => d.domain);
   // Compaction can drop the rules the gate and excerpts already showed, so they show them again.
   if (input.session_id && (input.source === 'compact' || input.source === 'clear')) clearMarkers(input.session_id);
-  const scope = ['global', ...doms];
+  const scope = [...doms, 'global'];
   const notes = loadNotes();
   // Notes edited in Obsidian go live without a build, and the always rules that don't fit point to active.md.
   try { build({ notes }); } catch (e) { logError('build', e); }
-  const rules = settledRules(notes);
+  const ready = settledNotes(notes);
+  const rules = liveRules(ready);
   const always = alwaysContext(scope, rules);
+  // A bad topics list in the config costs this line only, not the always rules.
+  let index = '';
+  try { index = indexNote(scope, ready); } catch (e) { logError('index note', e); }
   let propose = '';
   // Vault sessions register so /ingest can propose; the skill tells them how, so they get no note.
   if (input.session_id && (doms.length || inVaultFolder(input.cwd))) {
@@ -35,6 +49,6 @@ runHook('session-start', input => {
     for (const [k, r] of alwaysIn(rules, scope)) markAlways(input.session_id, k, r);
     if (doms.length) propose = proposeNote(input.session_id);
   }
-  const context = [always, propose].filter(Boolean).join('\n\n');
+  const context = [always, index, propose].filter(Boolean).join('\n\n');
   return context ? { hookSpecificOutput: { hookEventName: 'SessionStart', additionalContext: context } } : null;
 });
