@@ -1,11 +1,12 @@
 import { runHook, config, domainsFor, inVaultFolder } from '../lib/vault.mjs';
 import { settledRules, alwaysIn, ruleLine, cmp, mentions } from '../lib/rules.mjs';
-import { touchSession, marked, mark, markAlways } from '../lib/sessions.mjs';
+import { touchSession, marked, mark, markAlways, markShown } from '../lib/sessions.mjs';
 
 // Session start marks the always rules it loads, so these are the ones written, reworded or settled since,
 // or the ones of a domain the session moved into.
 function late(sid, scope, rules) {
   const due = alwaysIn(rules, scope).filter(([k, r]) => markAlways(sid, k, r));
+  for (const [k] of due) markShown(sid, k);
   return due.length ? ['Taste rules that apply for the rest of this session:', ...due.map(([k, r]) => ruleLine(k, r))].join('\n') : '';
 }
 
@@ -18,7 +19,10 @@ function excerpts(input, scope, rules) {
     .filter(h => h.score > 0)
     .sort((a, b) => b.score - a.score || cmp(a.k, b.k))
     .slice(0, config().delivery.maxPromptExcerpts);
-  for (const h of hits) mark('excerpts', sid, `${h.k}|${h.r.hash}`);
+  for (const h of hits) {
+    mark('excerpts', sid, `${h.k}|${h.r.hash}`);
+    markShown(sid, h.k);
+  }
   return hits.length ? ['Taste rules that may apply to this request:', ...hits.map(h => ruleLine(h.k, h.r))].join('\n') : '';
 }
 

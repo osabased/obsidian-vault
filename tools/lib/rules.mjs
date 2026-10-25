@@ -1,8 +1,8 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { parse } from './frontmatter.mjs';
-import { validGlob } from './glob.mjs';
-import { config, vaultPath, writeText, shortHash, toPosix, today } from './vault.mjs';
+import { validGlob, overlapping } from './glob.mjs';
+import { config, vaultPath, writeText, shortHash, toPosix, today, inside } from './vault.mjs';
 
 export const LIST_FIELDS = ['applies_to', 'triggers', 'keywords'];
 export const KEY_RE = /^[a-z0-9-]+\/[a-z0-9-]+$/;
@@ -221,6 +221,31 @@ export function settledNotes(notes = loadNotes()) {
 
 export const settledRules = (notes = loadNotes()) => liveRules(settledNotes(notes));
 
+// For each pair of two domains' project folders where one holds the other, the folder each domain's globs sit under
+// when both are read from the outer one, since the gate matches a domain's globs from its own folder.
+function nestedFolders(da, db) {
+  const projects = d => config().domains[d]?.projects ?? [];
+  return projects(da).flatMap(pa => projects(db).flatMap(pb => {
+    const bUnderA = inside(pa, pb);
+    if (bUnderA !== null) return [['', bUnderA]];
+    const aUnderB = inside(pb, pa);
+    return aUnderB !== null ? [[aUnderB, '']] : [];
+  }));
+}
+
+// The globs two rules on one topic share, when both can gate one file: a domain's rules meet its own and global's,
+// and another domain's when their project folders nest.
+export function sharedFiles(a, b) {
+  if (!a.topic || a.topic !== b.topic) return null;
+  const [as, bs] = [a.applies_to ?? [], b.applies_to ?? []];
+  if (a.domain === b.domain || [a.domain, b.domain].includes('global')) return overlapping(as, bs);
+  for (const folders of nestedFolders(a.domain, b.domain)) {
+    const pair = overlapping(as, bs, folders);
+    if (pair) return pair;
+  }
+  return null;
+}
+
 export const ruleLine = (k, r) => `- ${k}: ${clip(r.text, config().delivery.maxRuleChars)}`;
 
 export function domainOrder(domains) {
@@ -235,31 +260,35 @@ const isRule = line => line.startsWith('- ');
 const alwaysEntries = rules => Object.entries(rules).filter(([, r]) => r.always).sort(byKey);
 export const alwaysIn = (rules, scope) => alwaysEntries(rules).filter(([, r]) => scope.includes(r.domain));
 
+// The keys go in the order their rule lines do.
 function alwaysLines(rules, domains) {
   const entries = alwaysIn(rules, domains);
   const lines = [];
+  const keys = [];
   for (const d of domainOrder(domains)) {
     const mine = entries.filter(([, r]) => r.domain === d);
-    if (mine.length) lines.push('', `## ${d}`, ...mine.map(([k, r]) => ruleLine(k, r)));
+    if (!mine.length) continue;
+    lines.push('', `## ${d}`, ...mine.map(([k, r]) => ruleLine(k, r)));
+    keys.push(...mine.map(([k]) => k));
   }
-  return lines;
+  return { lines, keys };
 }
 
 export function alwaysSize(rules, domains) {
-  const lines = alwaysLines(rules, domains);
+  const { lines } = alwaysLines(rules, domains);
   if (!lines.length) return { lines: 0, bytes: 0 };
   const all = [...HEAD, ...lines];
   return { lines: all.length, bytes: Buffer.byteLength(all.join('\n')) };
 }
 
+// The always rules' block for a session start, and the rules it holds: rules that don't fit are left to active.md.
 export function alwaysContext(domains, rules = liveRules()) {
-  const lines = alwaysLines(rules, domains);
-  if (!lines.length) return '';
+  const { lines, keys } = alwaysLines(rules, domains);
+  if (!lines.length) return { text: '', keys: [] };
   const { activeMaxLines, activeMaxBytes } = config().delivery;
   const fits = xs => xs.length <= activeMaxLines && Buffer.byteLength(xs.join('\n')) <= activeMaxBytes;
-  if (fits([...HEAD, ...lines])) return [...HEAD, ...lines].join('\n');
-  const total = lines.filter(isRule).length;
-  const tail = shown => ['', `(${total - shown} more didn't fit. See ${toPosix(vaultPath('active.md'))}.)`];
+  if (fits([...HEAD, ...lines])) return { text: [...HEAD, ...lines].join('\n'), keys };
+  const tail = shown => ['', `(${keys.length - shown} more didn't fit. See ${toPosix(vaultPath('active.md'))}.)`];
   const out = [...HEAD];
   let shown = 0;
   for (const line of lines) {
@@ -269,7 +298,8 @@ export function alwaysContext(domains, rules = liveRules()) {
     shown = next;
   }
   while (out.length > HEAD.length && !isRule(out.at(-1))) out.pop();
-  return [...out, ...tail(shown)].join('\n');
+  // The lines kept are the first ones, so the rules shown are the first keys.
+  return { text: [...out, ...tail(shown)].join('\n'), keys: keys.slice(0, shown) };
 }
 
 export function renderActive(rules) {
@@ -304,6 +334,12 @@ const sections = n => n.body.replace(FENCES, '').split(/^## /m);
 const targets = text => [...text.matchAll(/\[\[[^\]]*\]\]/g)].map(m => m[0].slice(2, -2).split(/\\?[|#]/)[0].trim());
 
 export const linksUnder = (n, title) => targets(sections(n).slice(1).find(s => heading(s) === title) ?? '').map(toKey);
+
+// The session prefixes the Evidence lines give, first seen first.
+export function evidenceSessions(n) {
+  const evidence = sections(n).slice(1).find(s => heading(s).toLowerCase() === 'evidence') ?? '';
+  return [...new Set([...evidence.matchAll(/^- [^·\n]*· [^·\n]*· session ([^\s·]+)/gm)].map(m => m[1]))];
+}
 
 // The user's quoted words are left out: a broken link there could be fixed only by editing them.
 const QUOTED = ['evidence', 'you said'];

@@ -5,9 +5,10 @@ import {
 } from './lib/vault.mjs';
 import {
   KEY_RE, BASES, wrongBasis, parseNote, noteErrors, ruleText, ruleTextParts, readNote, liveRules, build, mentions, isUrl, validDay, byKey, normTopic, domainTopics, vaultFile, joinList,
+  sharedFiles,
 } from './lib/rules.mjs';
 import { normGlob } from './lib/glob.mjs';
-import { registry, marked, mark } from './lib/sessions.mjs';
+import { registry, marked, mark, wasShown } from './lib/sessions.mjs';
 
 const RUN = 'usage: node tools/propose.mjs <session-id> < rule.json';
 const USAGE = `${RUN}\n       node tools/propose.mjs --help lists the fields of rule.json`;
@@ -44,9 +45,11 @@ const help = () => [
   '  triggers     regexes tested against the new text of an edit; when given, the rule applies only if one matches',
   '               A taste rule needs keywords or applies_to. A knowledge rule needs applies_to and takes no keywords.',
   "               always: true is the user's to set in Obsidian, so propose.mjs refuses it.",
+  '  repeats      optional, the key of the rule in the vault this one repeats, like roblox-ui/flat-buttons:',
+  "               propose.mjs adds this rule's Evidence line to that note and writes no new one",
   '',
-  'If the rule may repeat ones in the vault, propose.mjs lists them and refuses once. If it repeats one, update',
-  'that note instead; if not, propose it again.',
+  'If the rule may repeat ones in the vault, propose.mjs lists them and refuses once. If it repeats one, propose',
+  'it again with repeats set to that rule; if not, propose it again as it is.',
   '',
   "A knowledge rule's as_of is set for you: the source_date for a source, today otherwise.",
 ].join('\n');
@@ -190,12 +193,12 @@ function checkRepeats(f, text, scope, rules, same) {
   const inTopic = new Set(topic.map(([k]) => k));
   const others = all.filter(([k]) => !inTopic.has(k));
   const alike = others.slice(0, SHORTLIST).sort(byKey);
-  const shown = [...topic, ...alike];
-  const ids = [...shown.map(([k, r]) => `${f.slug}|${k}|${r.hash}`), ...(same ? [`${f.slug}|words|${same.id}`] : [])];
+  const listedRules = [...topic, ...alike];
+  const ids = [...listedRules.map(([k, r]) => `${f.slug}|${k}|${r.hash}`), ...(same ? [`${f.slug}|words|${same.id}`] : [])];
   if (ids.every(id => marked('repeats', f.sid, id))) return [...all.filter(([k]) => inTopic.has(k)), ...alike].sort(byKey).map(([k]) => k);
   for (const id of ids) mark('repeats', f.sid, id);
   const more = others.length - alike.length;
-  const item = ([k, r]) => `- ${k}: ${r.text}`;
+  const item = ([k, r]) => `- ${k}: ${r.text} [${wasShown(f.sid, k) ? 'shown' : 'not shown'} in this session]`;
   const it = same ? 'It' : 'it';
   const listed = topic.length ? [
     `${it} may repeat rules already in the vault.`,
@@ -207,9 +210,21 @@ function checkRepeats(f, text, scope, rules, same) {
     ...(same ? [`these words already back ${same.note}${gone(same.note)}.`] : []),
     ...listed,
     ...(more ? [`${more} more match less closely and aren't listed.`] : []),
-    listed.length ? `If it repeats one, update that note in ${toPosix(vaultPath('wiki'))} instead. If it says something new, propose it again.`
-      : "If this rule says something that one doesn't, propose it again.",
+    ...(listed.length ? [
+      `If it repeats one, propose it again with "repeats": "<that rule's key>", and propose.mjs adds its evidence to that note.`,
+      "If that rule was shown in this session and you still needed correcting, suggest to the user how its wording or triggers could change. If it wasn't shown, add the keywords or applies_to that would have brought it up.",
+      'If it says something new, propose it again as it is.',
+    ] : ["If this rule says something that one doesn't, propose it again."]),
   ].join('\n'));
+}
+
+// Named once the rule is written, since a global rule or another domain's can gate the same files without being on
+// the repeat list.
+function sameFiles(f, rules) {
+  const mine = { domain: f.domain, topic: normTopic(f.topic), applies_to: f.applies_to };
+  const near = Object.entries(rules).sort(byKey).filter(([, r]) => sharedFiles(r, mine)).map(([k]) => k);
+  const one = near.length === 1;
+  return near.length ? `On ${f.topic}, ${joinList(near, 'and')} cover${one ? 's' : ''} files this rule covers too. Check the new rule doesn't contradict ${one ? 'it' : 'them'}. ` : '';
 }
 
 function gone(key) {
@@ -234,7 +249,8 @@ const yaml = s => (/^[a-z0-9-]+$/i.test(s) ? s : `'${s.replace(/'/g, "''")}'`);
 const yamlList = (name, xs) => (xs.length ? [`${name}:`, ...xs.map(x => `  - '${x.replace(/'/g, "''")}'`)] : [`${name}: []`]);
 
 // A pick is cited from the day and session it was recorded in.
-const evidenceLine = (f, e) => `- ${e.day ?? f.day} · ${e.label ?? e.kind} · session ${e.session ?? f.sid.slice(0, 8)} · ${e.cite} (${e.pick ? `${e.pick}; proposed as ` : ''}${f.id})`;
+const citation = (f, e) => `- ${e.day ?? f.day} · ${e.label ?? e.kind} · session ${e.session ?? f.sid.slice(0, 8)} · ${e.cite}`;
+const evidenceLine = (f, e) => `${citation(f, e)} (${e.pick ? `${e.pick}; proposed as ` : ''}${f.id})`;
 
 const noteText = (f, e) => [
   '---', 'type: rule', `domain: ${f.domain}`, `kind: ${f.kind}`, `basis: ${f.basis}`, ...(f.as_of ? [`as_of: ${f.as_of}`] : []),
@@ -244,6 +260,36 @@ const noteText = (f, e) => [
   `**Do:** ${f.do}`, `**Not:** ${f.not}`, `**Because:**${f.because ? ` ${f.because}` : ''}`, '',
   '## Examples', '', '## Evidence', evidenceLine(f, e), '',
 ].join('\n');
+
+// Below the section's last line, in the note's own line endings, so its Evidence stays in the order it came in.
+function withEvidence(text, entry) {
+  const eol = text.includes('\r\n') ? '\r\n' : '\n';
+  const lines = text.split(/\r?\n/);
+  const start = lines.findIndex(l => /^## evidence\s*$/i.test(l));
+  if (start < 0) return `${text.trimEnd()}${eol}${eol}## Evidence${eol}${entry}${eol}`;
+  const next = lines.findIndex((l, i) => i > start && l.startsWith('## '));
+  let last = (next < 0 ? lines.length : next) - 1;
+  while (last > start && !lines[last].trim()) last--;
+  lines.splice(last + 1, 0, entry);
+  return lines.join(eol);
+}
+
+// Saved settled, so the rule keeps reaching sessions just when the user has corrected the agent on it.
+function addEvidence(f, e, scope, rules, same, row) {
+  const target = f.repeats;
+  if (!rules[target] || !scope.includes(rules[target].domain)) refuse(`repeats names ${target}, which isn't a delivered rule in ${joinList(scope, 'or')}. Give the key of a rule the refusal listed.`);
+  if (same?.note === target) refuse(`these words already back ${target}.`);
+  const file = `${vaultPath('wiki', ...target.split('/'))}.md`;
+  writeSettled(file, withEvidence(fs.readFileSync(file, 'utf8'), evidenceLine(f, e)));
+  appendJsonl(inboxFile(), [row(target)]);
+  appendLog([`added evidence to ${target} · session ${f.sid.slice(0, 8)}`]);
+  return [
+    `Added the Evidence line to wiki/${target}.md. End your reply with these two lines as they are:`,
+    '',
+    `**Rule backed again** ${target}: ${rules[target].text}`,
+    `Its note has a new Evidence line. To change or remove it, edit ${toPosix(file)}.`,
+  ].join('\n');
+}
 
 function propose(sid, p) {
   const session = sessionOf(sid);
@@ -265,6 +311,8 @@ function propose(sid, p) {
   if (always) refuse("always is the user's to set in Obsidian. Give the rule keywords or applies_to instead.");
   if (f.kind === 'taste' && !f.applies_to.length && !f.keywords.length) refuse('give it keywords or applies_to, or nothing will deliver it.');
   const scope = f.domain === 'global' ? domains : [f.domain, 'global'];
+  f.repeats = line(p, 'repeats', false);
+  if (f.repeats && !KEY_RE.test(f.repeats)) refuse('repeats must be a rule key like roblox-ui/flat-buttons.');
   const e = evidence(f, p);
   if (f.kind === 'knowledge') f.as_of = e.date ?? today();
 
@@ -283,18 +331,21 @@ function propose(sid, p) {
     // Any later session can re-propose a recorded answer, so each one backs a single rule.
     const earlier = e.pick && rows.find(r => r.pick === e.pick);
     if (earlier) refuse(`${e.pick} was already proposed as ${earlier.note}.`);
-    if (readNote(key)) refuse(`wiki/${key}.md already exists. Pick another slug, or leave that note to the user.`);
     // One correction can back two rules, so the same words refuse once and the retry goes through.
     // One error can show several facts, so a failure matches an earlier one only with the same fix.
     const same = rows.find(r => normText(r.text ?? '') === normText(e.said) && (!e.fix || normText(r.fix ?? '') === normText(e.fix)));
     // Read under the lock, so a proposal written meanwhile is on the list.
-    const overlaps = checkRepeats(f, ruleText(n), scope, liveRules(), same);
+    const rules = liveRules();
+    const row = note => ({
+      id: f.id, at, source: 'agent', kind: e.kind, text: e.said, ...(e.fix ? { fix: e.fix } : {}),
+      note, session: sid, transcript: session.transcript ?? null, cwd: session.cwd ?? null, domain: rules[note]?.domain ?? f.domain, ...(e.pick ? { pick: e.pick } : {}),
+    });
+    if (f.repeats) return addEvidence(f, e, scope, rules, same, row);
+    if (readNote(key)) refuse(`wiki/${key}.md already exists. Pick another slug, or leave that note to the user.`);
+    const overlaps = checkRepeats(f, ruleText(n), scope, rules, same);
     const file = `${vaultPath('wiki', f.domain, f.slug)}.md`;
     writeSettled(file, text);
-    appendJsonl(inboxFile(), [{
-      id: f.id, at, source: 'agent', kind: e.kind, text: e.said, ...(e.fix ? { fix: e.fix } : {}),
-      note: key, session: sid, transcript: session.transcript ?? null, cwd: session.cwd ?? null, domain: f.domain, ...(e.pick ? { pick: e.pick } : {}),
-    }]);
+    appendJsonl(inboxFile(), [row(key)]);
     appendLog([`wrote ${key} · session ${sid.slice(0, 8)}`]);
     build();
     const reply = [
@@ -302,7 +353,7 @@ function propose(sid, p) {
       ...(overlaps.length ? [`It may overlap ${joinList(overlaps, 'and')}.`] : []),
       `It applies from now on. To change or remove it, edit or delete ${toPosix(file)}.`,
     ];
-    return [`Wrote wiki/${key}.md. End your reply with these ${['two', 'three'][reply.length - 2]} lines as they are:`, '', ...reply].join('\n');
+    return [`Wrote wiki/${key}.md. ${sameFiles(f, rules)}End your reply with these ${['two', 'three'][reply.length - 2]} lines as they are:`, '', ...reply].join('\n');
   });
 }
 
