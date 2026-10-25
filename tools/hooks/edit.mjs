@@ -2,7 +2,7 @@ import fs from 'node:fs';
 import { runHook, config, domainsFor, inside, vaultRel, toPosix, cwdOf, FILE_TOOLS, toolFile } from '../lib/vault.mjs';
 import { settledRules, ruleLine, tryRegex, cmp } from '../lib/rules.mjs';
 import { bestMatch, specificity, bySpecificity } from '../lib/glob.mjs';
-import { marked, mark } from '../lib/sessions.mjs';
+import { marked, mark, markShown } from '../lib/sessions.mjs';
 
 function vaultGuard(file, cwd) {
   const rel = vaultRel(file, cwd);
@@ -55,7 +55,10 @@ function gate(input, file, cwd) {
     if (shown.length && [head, ...shown.map(s => s.line), line, foot].join('\n').length > maxBlockChars) break;
     shown.push({ ...hit, line });
   }
-  for (const s of shown) mark('gate', sid, s.id);
+  for (const s of shown) {
+    mark('gate', sid, s.id);
+    markShown(sid, s.key);
+  }
   return [head, ...shown.map(s => s.line), foot].join('\n');
 }
 

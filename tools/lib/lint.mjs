@@ -11,11 +11,10 @@ export const tally = found => {
   return `${plural(errors, 'error')}, ${plural(found.length - errors, 'warning')}`;
 };
 
-export function lint() {
+export function lint(notes = loadNotes()) {
   const found = [];
   const add = (level, file, msg) => found.push({ level, file, msg });
   const { domains, delivery, knowledge } = config();
-  const notes = loadNotes();
   const keys = new Set(notes.map(n => n.key));
   const slugs = new Map();
   for (const n of notes) slugs.set(n.slug, (slugs.get(n.slug) ?? 0) + 1);

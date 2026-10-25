@@ -1,6 +1,6 @@
 import fs from 'node:fs';
 import path from 'node:path';
-import { vaultPath, statePath, stateDir, readJsonSafe, writeJson, safeId, shortHash, logError, hookErrors, errorsLog } from './vault.mjs';
+import { vaultPath, statePath, stateDir, readJsonSafe, writeJson, safeId, shortHash, logError, guarded, hookErrors, errorsLog } from './vault.mjs';
 
 const DAY = 86400e3;
 
@@ -48,6 +48,41 @@ export function mark(kind, sid, key) {
 // Kept with the excerpt markers, so clearMarkers resets both.
 export const markAlways = (sid, key, r) => mark('excerpts', sid, `always|${key}|${r.hash}`);
 
+// Two markers, both keyed by the rule alone, so a rule reworded since still counts as shown. The delivered one is
+// kept through compaction, so /lint can tell a rule a session was shown from one nothing brought up; the excerpt one
+// goes with compaction, so propose.mjs calls a rule shown only while it may still be in context. A failed write costs
+// the bookkeeping, not the delivery it records.
+export const markShown = (sid, key) => guarded('mark shown', () => {
+  mark('delivered', sid, key);
+  mark('excerpts', sid, `shown|${key}`);
+});
+export const wasShown = (sid, key) => marked('excerpts', sid, `shown|${key}`);
+
+const registeredIds = () => fs.readdirSync(stateDir('sessions')).filter(n => n.endsWith('.json')).map(n => n.slice(0, -'.json'.length));
+
+// tidy() may prune a session mid-read, and other tools drop files like desktop.ini into folders.
+const stray = e => ['ENOENT', 'ENOTDIR', 'EISDIR'].includes(e.code);
+
+function shownKeys(id) {
+  const dir = vaultPath('.state', 'delivered', id);
+  const keys = new Set();
+  let files = [];
+  try { files = fs.readdirSync(dir); } catch (e) { if (!stray(e)) throw e; }
+  for (const f of files) {
+    try { keys.add(fs.readFileSync(path.join(dir, f), 'utf8')); } catch (e) { if (!stray(e)) throw e; }
+  }
+  return keys;
+}
+
+// The registered sessions, with their folder and when they were last seen, and the others the hooks recorded
+// deliveries for, each with the rules it was shown.
+export function trackedSessions() {
+  return [...new Set([...registeredIds(), ...fs.readdirSync(stateDir('delivered'))])].map(id => {
+    const entry = readJsonSafe(registry(id));
+    return { id, keys: shownKeys(id), cwd: entry?.cwd ?? null, last: entry?.last_seen ?? null };
+  });
+}
+
 export function clearMarkers(sid) {
   for (const kind of ['gate', 'excerpts']) fs.rmSync(vaultPath('.state', kind, safeId(sid)), { recursive: true, force: true });
 }
@@ -73,7 +108,7 @@ export function errorsSinceLint() {
   return size > seen ? hookErrors(errorsLog(), seen) : [...hookErrors(errorsLog('.1'), seen), ...hookErrors()];
 }
 
-const KINDS = ['gate', 'excerpts', 'repeats'];
+const KINDS = ['gate', 'excerpts', 'repeats', 'delivered'];
 
 // The registry goes last, so a session whose markers can't be removed yet is tried again next time.
 function prune(id) {
@@ -89,7 +124,7 @@ export function tidy() {
   const stampFile = statePath('tidy.json');
   if (Date.now() - Date.parse(readJsonSafe(stampFile)?.at) < DAY) return;
   writeJson(stampFile, { at: new Date().toISOString() });
-  const registered = new Set(fs.readdirSync(stateDir('sessions')).filter(n => n.endsWith('.json')).map(n => n.slice(0, -'.json'.length)));
+  const registered = new Set(registeredIds());
   for (const id of new Set([...registered, ...KINDS.flatMap(kind => fs.readdirSync(stateDir(kind)))])) {
     try {
       const seen = registered.has(id) ? Date.parse(readJsonSafe(registry(id))?.last_seen) : markersChanged(id);
