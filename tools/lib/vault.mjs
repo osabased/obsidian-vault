@@ -176,11 +176,7 @@ export function logError(name, e) {
 export const cwdOf = input => input.cwd || process.cwd();
 
 export const FILE_TOOLS = ['Edit', 'Write', 'MultiEdit', 'NotebookEdit'];
-const SHELL_TOOLS = ['Bash', 'PowerShell'];
-export const toolCommand = (name, input) => (SHELL_TOOLS.includes(name) ? String(input.command ?? '') : null);
 export const toolFile = (name, input) => (name === 'NotebookEdit' ? input.notebook_path : input.file_path);
-// `2>&1`, `=>`, `->` and `>=` contain `>` but write no file.
-export const WRITEISH = /(?<![\d&=-])>(?![&=])|\btee\b|\bsed\s+-i|\bmv\b|\bcp\b|\brm\b|\bdel\b|Set-Content|Add-Content|Out-File|Remove-Item|Move-Item|Copy-Item|New-Item|writeFile|appendFile|WriteAllText|\bperl\s+-[a-z]*i/i;
 
 // Hooks fail open: a broken vault must never block the user's session.
 export function runHook(name, fn) {
