@@ -5,7 +5,9 @@ kind: taste
 basis: pick
 topic: code
 always: false
-applies_to: []
+applies_to:
+  - 'scripts/check.sh'
+  - 'src/client/UI/**/*.luau'
 triggers: []
 keywords:
   - 'theme'

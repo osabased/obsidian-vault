@@ -8,7 +8,7 @@ disable-model-invocation: true
 
 Work in the vault root. AGENTS.md has the note and page formats. A rule applies as soon as its note is written, so fixing the wiki changes the notes themselves.
 
-1. **Status.** Run `node tools/review.mjs status`. Tell the user its lint tally, any hook errors, quoting the newest, and the listed topics no rule has yet: taste not captured, not a fault.
+1. **Status.** Run `node tools/review.mjs status`, which also records this run, quieting the session-start error line and reminder. Tell the user its lint tally, any hook errors, quoting the newest, and the listed topics no rule has yet: taste not captured, not a fault.
 2. **Lint.** Run `node tools/build.mjs`, then `node tools/lint.mjs`. For each error and warning, say what it means and the fix you propose. Name the rules with an empty **Because:** in one line; only the user can give their reason.
    - A rule that index.md marks `not delivered` reaches no session until its error is fixed.
    - A topic page lint calls stale needs rereading against the rule that changed.

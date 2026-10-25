@@ -40,11 +40,10 @@ const help = () => [
   '                 source_date: when the source was published or last updated, as YYYY-MM-DD',
   "                 quote: the source's words",
   '  keywords     words a request about it would use',
-  '  applies_to   globs from the project root',
+  '  applies_to   globs from the project root; give them to a rule about code or files',
   '  triggers     regexes tested against the new text of an edit; when given, the rule applies only if one matches',
-  '  always       true for short rules that matter in nearly every session',
-  '               A taste rule needs keywords, applies_to or always: true. A knowledge rule needs applies_to',
-  '               and takes no keywords or always.',
+  '               A taste rule needs keywords or applies_to. A knowledge rule needs applies_to and takes no keywords.',
+  "               always: true is the user's to set in Obsidian, so propose.mjs refuses it.",
   '',
   'If the rule may repeat ones in the vault, propose.mjs lists them and refuses once. If it repeats one, update',
   'that note instead; if not, propose it again.',
@@ -223,7 +222,7 @@ const sameList = (a, b) => Array.isArray(a) && a.length === b.length && a.every(
 function checkReadBack(n, f) {
   const fields = [
     ['domain', n.data.domain === f.domain], ['kind', n.kind === f.kind], ['basis', n.data.basis === f.basis],
-    ['as_of', n.as_of === (f.as_of ?? null)], ['topic', n.data.topic === f.topic], ['always', n.data.always === f.always],
+    ['as_of', n.as_of === (f.as_of ?? null)], ['topic', n.data.topic === f.topic],
     ['applies_to', sameList(n.applies_to, f.applies_to)], ['triggers', sameList(n.triggers, f.triggers)], ['keywords', sameList(n.keywords, f.keywords)],
     ['do', n.do === f.do], ['not', n.not === f.not], ['because', n.because === f.because],
   ];
@@ -239,7 +238,7 @@ const evidenceLine = (f, e) => `- ${e.day ?? f.day} · ${e.label ?? e.kind} · s
 
 const noteText = (f, e) => [
   '---', 'type: rule', `domain: ${f.domain}`, `kind: ${f.kind}`, `basis: ${f.basis}`, ...(f.as_of ? [`as_of: ${f.as_of}`] : []),
-  `topic: ${yaml(f.topic)}`, `always: ${f.always}`,
+  `topic: ${yaml(f.topic)}`, 'always: false',
   ...yamlList('applies_to', f.applies_to), ...yamlList('triggers', f.triggers), ...yamlList('keywords', f.keywords),
   `created: ${f.day}`, `updated: ${f.day}`, '---', '',
   `**Do:** ${f.do}`, `**Not:** ${f.not}`, `**Because:**${f.because ? ` ${f.because}` : ''}`, '',
@@ -259,9 +258,12 @@ function propose(sid, p) {
   f.basis = line(p, 'basis');
   if (!BASES[f.kind].includes(f.basis)) refuse(`${wrongBasis(f.kind, f.basis)}.`);
   Object.assign(f, { do: line(p, 'do'), not: line(p, 'not'), because: line(p, 'because', false) });
-  Object.assign(f, { applies_to: list(p, 'applies_to'), triggers: list(p, 'triggers'), keywords: list(p, 'keywords'), always: p.always ?? false });
-  if (typeof f.always !== 'boolean') refuse('always must be true or false.');
-  if (f.kind === 'taste' && !f.always && !f.applies_to.length && !f.keywords.length) refuse('give it keywords, applies_to or always: true, or nothing will deliver it.');
+  Object.assign(f, { applies_to: list(p, 'applies_to'), triggers: list(p, 'triggers'), keywords: list(p, 'keywords') });
+  const always = p.always ?? false;
+  if (typeof always !== 'boolean') refuse('always must be true or false.');
+  // The user chose to set always: true by hand; the note carries always: false for them to flip.
+  if (always) refuse("always is the user's to set in Obsidian. Give the rule keywords or applies_to instead.");
+  if (f.kind === 'taste' && !f.applies_to.length && !f.keywords.length) refuse('give it keywords or applies_to, or nothing will deliver it.');
   const scope = f.domain === 'global' ? domains : [f.domain, 'global'];
   const e = evidence(f, p);
   if (f.kind === 'knowledge') f.as_of = e.date ?? today();

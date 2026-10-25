@@ -1,6 +1,6 @@
-import { runHook, domainsFor, inVaultFolder, vaultPath, toPosix, logError } from '../lib/vault.mjs';
-import { alwaysContext, alwaysIn, loadNotes, settledNotes, liveRules, build, domainTopics, joinList } from '../lib/rules.mjs';
-import { touchSession, clearMarkers, markAlways, tidy } from '../lib/sessions.mjs';
+import { runHook, domainsFor, inVaultFolder, vaultPath, toPosix, guarded, config, plural, clock } from '../lib/vault.mjs';
+import { alwaysContext, alwaysIn, loadNotes, settledNotes, liveRules, build, domainTopics, joinList, clip } from '../lib/rules.mjs';
+import { touchSession, clearMarkers, markAlways, tidy, errorsSinceLint, daysSinceLint } from '../lib/sessions.mjs';
 
 function proposeNote(sid) {
   const script = toPosix(vaultPath('tools', 'propose.mjs'));
@@ -10,6 +10,8 @@ function proposeNote(sid) {
     "Leave out what the project's CLAUDE.md or `.claude/rules/` already say.",
     'If the user corrects you on something a rule already covers, propose it anyway; propose.mjs lists the rules it may repeat.',
     'Propose only from what happened in this session, never from a brief, a skill or the task itself.',
+    'A rule applies as soon as propose.mjs writes it; the user edits or deletes its note to change it.',
+    "Give a rule about code or files `applies_to` globs, so the edits it covers bring it up; `always` is the user's to set.",
     `\`node "${script}" --help\` lists the fields.`,
     `Pipe the rule as JSON to \`node "${script}" ${sid}\` from the Bash tool with a quoted heredoc, since PowerShell turns curly quotes and dashes into ?.`,
     'Then end your reply with the lines it prints.',
@@ -26,21 +28,33 @@ function indexNote(scope, notes) {
   ].join(' ');
 }
 
+function errorsNote() {
+  const errors = errorsSinceLint();
+  if (!errors.length) return '';
+  const { at, message } = errors.at(-1);
+  const logged = `${plural(errors.length, 'error')} ${errors.length === 1 ? 'was' : 'were'} logged`;
+  return `Taste vault: ${logged} in \`.state/errors.log\` since /lint last ran, the newest at ${clock(new Date(at))}: \`${clip(message, 200)}\`. Tell the user; /lint in \`${toPosix(vaultPath())}\` shows the count and the newest.`;
+}
+
+function lintNote() {
+  const days = daysSinceLint();
+  if (days !== null && days < config().lint.remindAfterDays) return '';
+  return `Taste vault: /lint ${days === null ? "hasn't run yet" : `last ran ${plural(days, 'day')} ago`}. Remind the user to run /lint in \`${toPosix(vaultPath())}\`.`;
+}
+
 runHook('session-start', input => {
-  try { tidy(); } catch (e) { logError('tidy', e); }
+  guarded('tidy', tidy);
   const doms = domainsFor(input.cwd).map(d => d.domain);
   // Compaction can drop the rules the gate and excerpts already showed, so they show them again.
   if (input.session_id && (input.source === 'compact' || input.source === 'clear')) clearMarkers(input.session_id);
   const scope = [...doms, 'global'];
   const notes = loadNotes();
   // Notes edited in Obsidian go live without a build, and the always rules that don't fit point to active.md.
-  try { build({ notes }); } catch (e) { logError('build', e); }
+  guarded('build', () => build({ notes }));
   const ready = settledNotes(notes);
   const rules = liveRules(ready);
   const always = alwaysContext(scope, rules);
-  // A bad topics list in the config costs this line only, not the always rules.
-  let index = '';
-  try { index = indexNote(scope, ready); } catch (e) { logError('index note', e); }
+  const index = guarded('index note', () => indexNote(scope, ready));
   let propose = '';
   // Vault sessions register so /ingest can propose; the skill tells them how, so they get no note.
   if (input.session_id && (doms.length || inVaultFolder(input.cwd))) {
@@ -49,6 +63,8 @@ runHook('session-start', input => {
     for (const [k, r] of alwaysIn(rules, scope)) markAlways(input.session_id, k, r);
     if (doms.length) propose = proposeNote(input.session_id);
   }
-  const context = [always, index, propose].filter(Boolean).join('\n\n');
+  // Compaction and /clear start the context again within one session, which already heard these lines.
+  const health = ['compact', 'clear'].includes(input.source) ? [] : [guarded('hook errors', errorsNote), guarded('lint reminder', lintNote)];
+  const context = [always, index, propose, ...health].filter(Boolean).join('\n\n');
   return context ? { hookSpecificOutput: { hookEventName: 'SessionStart', additionalContext: context } } : null;
 });

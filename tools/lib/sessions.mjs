@@ -1,6 +1,6 @@
 import fs from 'node:fs';
 import path from 'node:path';
-import { vaultPath, statePath, stateDir, readJsonSafe, writeJson, safeId, shortHash, logError } from './vault.mjs';
+import { vaultPath, statePath, stateDir, readJsonSafe, writeJson, safeId, shortHash, logError, hookErrors, errorsLog } from './vault.mjs';
 
 const DAY = 86400e3;
 
@@ -50,6 +50,27 @@ export const markAlways = (sid, key, r) => mark('excerpts', sid, `always|${key}|
 
 export function clearMarkers(sid) {
   for (const kind of ['gate', 'excerpts']) fs.rmSync(vaultPath('.state', kind, safeId(sid)), { recursive: true, force: true });
+}
+
+const lastLint = () => readJsonSafe(vaultPath('.state', 'lint.json')) ?? {};
+const fileSize = file => fs.statSync(file, { throwIfNoEntry: false })?.size ?? 0;
+
+// /lint's status step records how far errors.log went, so session start repeats the errors after that until the user
+// runs /lint again, and a session nobody reads can't use them up.
+export const lintRan = () => writeJson(vaultPath('.state', 'lint.json'), { at: new Date().toISOString(), errors: fileSize(errorsLog()) });
+
+export function daysSinceLint() {
+  const at = Date.parse(lastLint().at);
+  return Number.isNaN(at) ? null : Math.floor((Date.now() - at) / DAY);
+}
+
+// logError moves a full log to errors.log.1, so a log shorter than /lint saw has rotated since, and the end of
+// errors.log.1 holds the rest /lint didn't see.
+export function errorsSinceLint() {
+  const seen = Number(lastLint().errors) || 0;
+  const size = fileSize(errorsLog());
+  if (size === seen) return [];
+  return size > seen ? hookErrors(errorsLog(), seen) : [...hookErrors(errorsLog('.1'), seen), ...hookErrors()];
 }
 
 const KINDS = ['gate', 'excerpts', 'repeats'];

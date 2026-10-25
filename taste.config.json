@@ -16,5 +16,8 @@
   },
   "knowledge": {
     "staleAfterDays": 180
+  },
+  "lint": {
+    "remindAfterDays": 14
   }
 }
