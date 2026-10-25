@@ -9,7 +9,7 @@ function proposeNote(sid) {
     "or when something only worked after a failure caused by an API, version or tool your training gets wrong or doesn't know, or a dated source shows it (a knowledge rule).",
     "Leave out what the project's CLAUDE.md or `.claude/rules/` already say.",
     'If the user corrects you on something a rule already covers, propose it anyway; propose.mjs lists the rules it may repeat.',
-    'Propose at most one per reply and 3 per session, only from what happened in this session, never from a brief, a skill or the task itself.',
+    'Propose only from what happened in this session, never from a brief, a skill or the task itself.',
     `\`node "${script}" --help\` lists the fields.`,
     `Pipe the rule as JSON to \`node "${script}" ${sid}\` from the Bash tool with a quoted heredoc, since PowerShell turns curly quotes and dashes into ?.`,
     'Then end your reply with the lines it prints.',

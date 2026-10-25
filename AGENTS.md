@@ -56,9 +56,9 @@ updated: 2026-10-19
 ```
 
 - `kind`: `taste` (the default) or `knowledge`, a fact about an API, version or tool that training gets wrong or doesn't know. Knowledge rules reach the agent only on matching edits, so they need `applies_to` and take no `keywords` or `always`.
-- `basis`: `stated` when the user said it, `inferred` when you generalized it from their corrections, `pick` when a recorded answer from an earlier session backs it (a `q-` row in `raw/picks/`, or an older `c-`/`p-` row in `raw/inbox/` that holds the user's own words). Knowledge rules use `stated`, `failure` (something worked only after a failure) or `source` (a dated source shows it).
+- `basis`: `stated` when the user said it, `inferred` when you generalized it from their corrections, `pick` when a recorded answer from an earlier session backs it (a `q-` row in `raw/picks/`, or an older `c-`/`p-` row in `raw/inbox/` that holds the user's own words), `reading` when your own reading of what you saw backs it. Knowledge rules use `stated`, `failure` (something worked only after a failure) or `source` (a dated source shows it).
 - `as_of`: knowledge rules only, the day the fact was last checked, as YYYY-MM-DD: the source's date, or the day it was proposed. Delivery shows it, and lint warns once it is more than 180 days old (`knowledge.staleAfterDays` in `taste.config.json`). Taste rules never expire.
-- `topic`: one of the domain's topics in `taste.config.json`.
+- `topic`: a short topic, ideally one the domain's other rules have or `taste.config.json` lists for it. Lint warns on a topic only one rule in its domain has that the config doesn't list, and on a listed topic no rule has.
 - `always`: only for short rules that matter in nearly every session.
 - `applies_to`: globs relative to the project root. `**` crosses folders, `*` doesn't, `{a,b}` picks one. Matching ignores case and worktree folders.
 - `triggers`: optional regexes tested against the new text of an edit. When present, the rule applies only if one matches.
@@ -66,7 +66,7 @@ updated: 2026-10-19
 - `superseded_by`: optional, the note that replaces this one, as a link or a key like `roblox-ui/new-slug`. The old note stays in the vault and the index, and the hooks stop delivering it. Deleting a note retires its rule too.
 - Single-quote globs and regexes so Obsidian reads them as text.
 - `**Do:**` and `**Not:**` are required, one line each. Pair every "never X" with an "instead Y". `**Because:**` gives the user's reason; leave it empty rather than invent one. Keep the three lines under 300 characters together, counting the "As of" date a knowledge rule is delivered with.
-- `## Evidence` has one line per source: date, kind (`stated` or `correction`; `choice` for a pick), the first 8 characters of the session id, the user's exact words, and the proposal id. A `choice` line also names the options the user passed over and the question, and ends with the pick's id and the proposal id. A `failure` line gives the file, the error as a tool printed it and `fixed by:` the fix; a `source` line gives the URL or `raw/refs/` file, `dated` its date, `summary` when the quote comes from a WebFetch summary rather than the page, and its exact words.
+- `## Evidence` has one line per source: date, kind (`stated` or `correction`; `choice` for a pick), the first 8 characters of the session id, the user's exact words, and the proposal id. A `choice` line also names the options the user passed over and the question, and ends with the pick's id and the proposal id. A `failure` line gives the file, the error as a tool printed it and `fixed by:` the fix; a `source` line gives the URL or `raw/refs/` file, `dated` its date, and its exact words. An `agent's reading` line gives your reading in your own words, unquoted.
 - Link notes with `[[wiki/<domain>/<slug>|<slug>]]`.
 
 ## Ref pages
@@ -96,7 +96,7 @@ What the source shows, by topic, in the agent's words.
 - `source`: a URL, or a file under `raw/` that exists.
 - `source_date`: optional, when the source was published or last updated, as YYYY-MM-DD.
 - `## You said`: the user's exact words about the source, one line each with the date and the first 8 characters of the session id. Empty when they said nothing.
-- `## Agent's reading`: the agent's description. It never backs a rule.
+- `## Agent's reading`: the agent's description. It backs a rule only as `basis: reading`, so the rule's note labels it as the agent's.
 - `## Rules`: the rules written from the page. Each links back under its `## Examples`.
 
 ## What belongs here
@@ -105,19 +105,19 @@ The vault holds one-line Do/Not rules and the ref pages behind them. Procedures,
 
 ## Operations
 
-- **Propose**: in domain sessions the start hook tells you how to propose a rule with `tools/propose.mjs` when the user corrects you, or when a failure or a dated source shows a fact your training gets wrong. In this folder, `/ingest` does, for any domain. `node tools/propose.mjs --help` lists the fields. It writes the note, which applies from then on, and you end your reply with the lines it prints, so the user sees the rule and can edit or delete it. When the rule may repeat ones in the vault, it lists them and refuses once: update the note it repeats instead, or propose again if it says something new.
-- **Re-propose a recorded answer**: a pick or an older captured message that was never turned into a rule can back one from any later session: `basis: pick` with the row's id in `pick`. The row's words are the evidence, so nothing has to be typed again, and these proposals don't count toward a session's three. A row backs one note; proposing it again is refused.
+- **Propose**: in domain sessions the start hook tells you how to propose a rule with `tools/propose.mjs` when the user corrects you, or when a failure or a dated source shows a fact your training gets wrong. In this folder, a session proposes for any domain, as `/ingest` does. `node tools/propose.mjs --help` lists the fields. It writes the note, which applies from then on, and you end your reply with the lines it prints, so the user sees the rule and can edit or delete it. When the rule may repeat ones in the vault, it lists them and refuses once: update the note it repeats instead, or propose again if it says something new.
+- **Re-propose a recorded answer**: a pick or an older captured message that was never turned into a rule can back one from any later session: `basis: pick` with the row's id in `pick`. The row's words are the evidence, so nothing has to be typed again. A row backs one note; proposing it again is refused.
 - **Ingest**: the user runs `/ingest` in this folder with a source: a file under `raw/refs/` or `raw/judgments/`, or a URL. You go through it together; what they say about it becomes a ref page and rules.
 - **Review**: the user runs `/taste-review` in this folder for a check-up: lint and hook errors.
-- **Query**: when asked what the user prefers, read `index.md`, then the notes. Every rule there is the user's taste; a rule with `basis: inferred` is your generalization of their corrections, so say so when you lean on one.
+- **Query**: when asked what the user prefers, read `index.md`, then the notes. Every rule there is the user's taste; a rule with `basis: inferred` is your generalization of their corrections, and one with `basis: reading` is your reading of what they showed you, so say so when you lean on either.
 - **Lint**: `node tools/lint.mjs` checks the notes and the generated files. The pre-commit hook rebuilds the generated files and runs it.
 
 ## Evidence
 
 - A stated preference or a correction from one session is enough for a rule.
+- Cite what backs each rule as it is: the user's words, the error a tool printed and its fix, a dated source and its words, or your own reading. `tools/propose.mjs` writes the citation as given and checks none of it, so quote only the user's or the source's exact words, and give anything else as your reading.
 - When evidence conflicts, show the user both sides and let them decide.
-- A knowledge rule needs a failure that a command or a failed tool call printed in the session where it was fixed, or a source with its date: a URL fetched in that session, or a file in `raw/refs/` that the session didn't write. A subagent's tool calls count; its report doesn't. An error in a file a command only showed or on a browser page doesn't count, and neither do words the agent gave the tool.
-- The user's own taste beats general best practice. Write only rules they expressed, or ones a recorded failure or a dated source backs.
+- The user's own taste beats general best practice. Write rules they expressed, ones a failure or a dated source backs, or your reading of what they showed you, labelled as yours.
 
 ## Never
 

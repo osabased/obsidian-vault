@@ -6,10 +6,12 @@ import { config, vaultPath, writeText, shortHash, toPosix, today } from './vault
 
 export const LIST_FIELDS = ['applies_to', 'triggers', 'keywords'];
 export const KEY_RE = /^[a-z0-9-]+\/[a-z0-9-]+$/;
-export const BASES = { taste: ['stated', 'inferred', 'pick'], knowledge: ['stated', 'failure', 'source'] };
-export const wrongBasis = (kind, basis) => (kind === 'knowledge' ? "a knowledge rule's basis must be stated, failure or source"
-  : BASES.knowledge.includes(basis) ? `basis ${basis} is for knowledge rules; set kind: knowledge` : 'basis must be stated, inferred or pick');
+export const BASES = { taste: ['stated', 'inferred', 'pick', 'reading'], knowledge: ['stated', 'failure', 'source'] };
+const orList = xs => `${xs.slice(0, -1).join(', ')} or ${xs.at(-1)}`;
+export const wrongBasis = (kind, basis) => (kind === 'knowledge' ? `a knowledge rule's basis must be ${orList(BASES.knowledge)}`
+  : BASES.knowledge.includes(basis) ? `basis ${basis} is for knowledge rules; set kind: knowledge` : `basis must be ${orList(BASES.taste)}`);
 export const isUrl = s => typeof s === 'string' && /^https?:\/\/\S+$/i.test(s);
+export const normTopic = s => String(s ?? '').trim().toLowerCase();
 export const validDay = s => typeof s === 'string' && /^\d{4}-\d\d-\d\d$/.test(s) && !Number.isNaN(Date.parse(s)) && new Date(s).toISOString().startsWith(s);
 const KEBAB = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
 const HEAD = [
@@ -28,11 +30,21 @@ export function toKey(ref) {
   return s.trim().replace(/\\/g, '/').replace(/^\.?\/?wiki\//i, '').replace(/\.md$/i, '').toLowerCase();
 }
 
+// A file's path from the vault root as the disk spells it, so each file has one spelling; null when there's no such file.
+export function vaultFile(rel) {
+  try {
+    const real = fs.realpathSync.native(vaultPath(rel));
+    return fs.statSync(real).isFile() ? path.relative(fs.realpathSync.native(vaultPath()), real).split(path.sep).join('/') : null;
+  } catch {
+    return null;
+  }
+}
+
 export function tryRegex(source) {
   try { return new RegExp(source); } catch { return null; }
 }
 
-export const escapeRegExp = s => String(s).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+const escapeRegExp = s => String(s).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 export const mentions = (word, text) => new RegExp(`(?<!\\w)${escapeRegExp(word)}(?!\\w)`, 'i').test(text);
 
 const asList = v => (v === null || v === undefined ? [] : Array.isArray(v) ? v.map(String) : null);
@@ -151,13 +163,25 @@ function undelivered(n) {
 
 const isLive = n => n.type === 'rule' && !n.superseded_by && !undelivered(n);
 
+// Each domain's live rules by topic, so lint and propose's help agree on which topics are in use.
+export function topicNotes(notes = loadNotes()) {
+  const used = new Map();
+  for (const n of notes.filter(isLive)) {
+    const t = normTopic(n.data.topic);
+    if (typeof n.data.topic !== 'string' || !t) continue;
+    const mine = used.get(n.domain) ?? used.set(n.domain, new Map()).get(n.domain);
+    mine.set(t, [...(mine.get(t) ?? []), n]);
+  }
+  return used;
+}
+
 // The rules in the vault, read from the notes as they are now.
 export function liveRules(notes = loadNotes()) {
   const rules = {};
   for (const n of notes.filter(isLive)) {
     const text = ruleText(n);
     rules[n.key] = {
-      domain: n.domain, topic: String(n.data.topic ?? '').trim().toLowerCase(), text,
+      domain: n.domain, topic: normTopic(n.data.topic), text,
       // Only the delivered wording counts, so an edit to a rule's evidence or globs doesn't deliver it again.
       hash: shortHash(text),
       always: n.always, applies_to: n.applies_to, triggers: n.triggers, keywords: n.keywords,
@@ -277,6 +301,10 @@ function indexLine(n, refs) {
   return `- ${link}${gone}${kind} · Do: ${clip(n.do || '(missing)', 100)}${from.length ? ` · from ${from.map(linkTo).join(', ')}` : ''}`;
 }
 
+// Pages and rules with no topic get sections of their own after the topics, so no topic a rule names can merge with them.
+const PAGES = Symbol('ref pages');
+const NO_TOPIC = Symbol('(no topic)');
+
 export function renderIndex(notes) {
   const { domains } = config();
   const refs = refPages(notes, resolver(notes));
@@ -292,15 +320,15 @@ export function renderIndex(notes) {
       out.push('', 'No notes yet.');
       continue;
     }
-    const topics = domains[d]?.topics ?? [];
+    const topics = (domains[d]?.topics ?? []).map(normTopic);
     const groups = new Map();
     for (const n of mine) {
-      const g = n.type === 'page' ? 'pages' : (typeof n.data.topic === 'string' && n.data.topic) || 'no topic';
+      const g = n.type === 'page' ? PAGES : (typeof n.data.topic === 'string' && normTopic(n.data.topic)) || NO_TOPIC;
       groups.set(g, [...(groups.get(g) ?? []), n]);
     }
-    const rank = g => (topics.includes(g) ? topics.indexOf(g) : topics.length);
+    const rank = g => (g === PAGES ? topics.length + 2 : g === NO_TOPIC ? topics.length + 1 : topics.includes(g) ? topics.indexOf(g) : topics.length);
     for (const g of [...groups.keys()].sort((a, b) => rank(a) - rank(b) || cmp(a, b))) {
-      out.push('', `### ${g}`, '', ...groups.get(g).map(n => indexLine(n, refs)));
+      out.push('', `### ${typeof g === 'symbol' ? g.description : g}`, '', ...groups.get(g).map(n => indexLine(n, refs)));
     }
   }
   return `${out.join('\n')}\n`;

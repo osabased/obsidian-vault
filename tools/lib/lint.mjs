@@ -2,7 +2,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { isBuiltin } from 'node:module';
 import { config, vaultPath, plural, today } from './vault.mjs';
-import { loadNotes, noteErrors, ruleText, ruleTextParts, liveRules, knownDomain, alwaysSize, build, isUrl, validDay } from './rules.mjs';
+import { loadNotes, noteErrors, ruleText, ruleTextParts, liveRules, knownDomain, alwaysSize, build, isUrl, validDay, normTopic, topicNotes, vaultFile } from './rules.mjs';
 
 export const tally = found => {
   const errors = found.filter(f => f.level === 'error').length;
@@ -29,8 +29,7 @@ export function lint() {
     if (n.data.status !== undefined) add('warn', n.rel, 'status does nothing. To stop a rule, delete its note or set superseded_by');
     if (n.data.replaces !== undefined) add('warn', n.rel, 'replaces does nothing. Set superseded_by on the note it replaces instead');
     if (!n.because) add('warn', n.rel, 'empty **Because:**');
-    const topics = domains[n.domain]?.topics;
-    if (topics && !topics.includes(n.data.topic)) add('warn', n.rel, `topic should be one of ${topics.join(', ')}`);
+    if (typeof n.data.topic !== 'string' || !n.data.topic.trim()) add('warn', n.rel, 'no topic. Give it a short one, so the repeat check lists it with the rules on its topic');
     if (n.do && n.not && ruleText(n).length > delivery.maxRuleChars) {
       add('warn', n.rel, `${ruleTextParts(n)} come to ${ruleText(n).length} characters; the hooks cut them at ${delivery.maxRuleChars}`);
     }
@@ -40,6 +39,7 @@ export function lint() {
     }
   }
 
+  lintTopics(notes, domains, add);
   const rules = liveRules(notes);
   for (const d of Object.keys(domains)) {
     const size = alwaysSize(rules, ['global', d]);
@@ -52,16 +52,28 @@ export function lint() {
   return found.sort((a, b) => (a.level === b.level ? 0 : a.level === 'error' ? -1 : 1));
 }
 
-const realFile = file => {
-  try { return fs.statSync(file).isFile() ? fs.realpathSync.native(file) : null; } catch { return null; }
-};
+// The model picks topics freely, so a topic only one rule has, and that its domain doesn't list, is likely a typo
+// or a near-duplicate. A listed topic no rule has is an orphan. Global has no list to check a one-off against.
+function lintTopics(notes, domains, add) {
+  const used = topicNotes(notes);
+  for (const [d, c] of Object.entries(domains)) {
+    const mine = used.get(d) ?? new Map();
+    const listed = (c.topics ?? []).map(normTopic);
+    for (const [t, [n, ...more]] of mine) {
+      if (more.length || listed.includes(t)) continue;
+      const others = [...new Set([...listed, ...[...mine.keys()].filter(k => k !== t)])];
+      const fix = others.length ? ` Use one of ${others.join(', ')}, or add it to the list` : '';
+      add('warn', n.rel, `no other ${d} rule has topic ${n.data.topic.trim()}, and taste.config.json doesn't list it.${fix}`);
+    }
+    for (const t of c.topics ?? []) if (!mine.has(normTopic(t))) add('warn', 'taste.config.json', `${d} lists topic ${t}, which no rule has`);
+  }
+}
 
 // /ingest finds the sources no page names yet by comparing paths, so each file has one spelling.
 function lintPage(n, add) {
   const { source, source_date: dated } = n.data;
   if (!isUrl(source)) {
-    const real = typeof source === 'string' ? realFile(vaultPath(source)) : null;
-    const rel = real ? path.relative(fs.realpathSync.native(vaultPath()), real).split(path.sep).join('/') : '';
+    const rel = (typeof source === 'string' && vaultFile(source)) || '';
     if (!rel.startsWith('raw/')) add('error', n.rel, 'source must be a URL or a file under raw/ that exists');
     else if (rel !== source) add('error', n.rel, `write source as ${rel}, the path from the vault root`);
   }

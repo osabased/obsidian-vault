@@ -26,7 +26,6 @@ These keep the hooks safe to run in every session. Follow them when you change a
 - Code that two entry points share goes in `tools/lib/`; the rest stays in its entry point.
 - Command-line scripts: usage errors exit 2, failures exit 1.
 - Comments only for a non-obvious why. No docstrings, banner comments or TODOs.
-- Read the user's words from a transcript through `typedMessages()` in `lib/transcript.mjs`. It keeps user entries whose `turnOrigin` and `origin.kind` are each "human" or absent but not both absent (slash-command echoes are unmarked, and a brief can produce them), and the prompts of `queued_command` attachments with `origin.kind` "human" (messages sent mid-turn). Briefs, task notifications and peer messages are not the user's words. For a slash command the user typed, it keeps only the text of `<command-args>`. Evidence for knowledge rules comes from the tool calls and results of the session and its subagents, through `toolActivity()` in the same file.
 - No test-only code. Tests change behavior through `taste.config.json`.
 
 ## What lint enforces

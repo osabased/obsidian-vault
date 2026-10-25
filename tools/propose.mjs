@@ -1,50 +1,44 @@
 import fs from 'node:fs';
-import path from 'node:path';
 import crypto from 'node:crypto';
 import {
-  config, vaultPath, proposeDomains, inVaultFolder, readJsonSafe, writeSettled, appendJsonl, appendLog, inboxFile, proposalRows, recordedRows, statePath, withLock, safeId, today, toPosix,
-  inside, FILE_TOOLS, WRITEISH, toolCommand, toolFile,
+  config, vaultPath, proposeDomains, readJsonSafe, writeSettled, appendJsonl, appendLog, inboxFile, proposalRows, recordedRows, statePath, withLock, safeId, today, toPosix,
 } from './lib/vault.mjs';
 import {
-  KEY_RE, BASES, wrongBasis, parseNote, noteErrors, ruleText, ruleTextParts, readNote, liveRules, build, escapeRegExp, mentions, isUrl, validDay, byKey,
+  KEY_RE, BASES, wrongBasis, parseNote, noteErrors, ruleText, ruleTextParts, readNote, liveRules, build, mentions, isUrl, validDay, byKey, normTopic, topicNotes, vaultFile,
 } from './lib/rules.mjs';
 import { normGlob } from './lib/glob.mjs';
 import { registry, marked, mark } from './lib/sessions.mjs';
-import { typedMessages, toolActivity } from './lib/transcript.mjs';
 
 const RUN = 'usage: node tools/propose.mjs <session-id> < rule.json';
 const USAGE = `${RUN}\n       node tools/propose.mjs --help lists the fields of rule.json`;
-const MAX_PER_SESSION = 3;
 
 const help = () => [
   RUN,
   '',
   'rule.json is an object with these fields:',
-  "  domain       this session's domain (any domain after /ingest in the vault folder), or global for every project",
+  "  domain       this session's domain (any domain in the vault folder), or global for every project",
   '  slug         lowercase-kebab-case',
   '  kind         "taste" (the default), or "knowledge" for a fact about an API, version or tool',
   "               that your training gets wrong or doesn't know",
   '  do, not      one line each',
   "  because      the user's reason, or for knowledge the cause; empty rather than invented",
-  "  topic        one of the domain's topics:",
-  ...Object.entries(config().domains).map(([d, c]) => `                 ${d}: ${(c.topics ?? []).join(', ')}`),
-  '  basis        with the evidence it needs:',
-  "    stated       the user's words state the rule.",
-  "                 quote: their exact words, at least 3 in one unbroken stretch",
-  '    inferred     taste only: you generalized a correction. quote: as for stated',
+  "  topic        a short topic; reuse one the domain's rules have, or one of its listed topics:",
+  ...topicLines(),
+  '  basis        and what to cite for it, written into the note as given:',
+  "    stated       the user's words state the rule. quote: their words",
+  '    inferred     taste only: you generalized a correction. quote: the words you generalized',
   "    pick         taste only: the user's recorded answer from an earlier session backs the rule.",
   '                 pick: the id of a row in raw/picks/ (q-) or of an older user-written row in raw/inbox/ (c-, p-).',
-  "                 The row's own words are the evidence; no quote is needed, and these don't count toward the 3 per session.",
+  "                 The row's own words are cited; a row backs one rule.",
+  "    reading      taste only: your own reading of what you saw, labelled as yours. reading: what you saw, in one line",
   '    failure      knowledge only: something worked only after a failure.',
-  "                 error: one line of the error as a command or a failed tool call printed it in this session, yours or a subagent's.",
-  "                 An error in a file a command only showed (cat, Get-Content), on a page, or in the call's own input doesn't count.",
+  '                 error: one line of the error as it was printed',
   '                 fix: what fixed it, in one line',
   '                 file: the file you fixed, from the project root',
   '    source       knowledge only: a dated source shows it.',
-  "                 source: a URL you or a subagent fetched in this session, or a raw/refs/ file this session didn't write",
+  '                 source: its URL, or a file under raw/refs/',
   '                 source_date: when the source was published or last updated, as YYYY-MM-DD',
-  "                 quote: its exact words, at least 3 in one unbroken stretch, not ones you gave the tool. A quote found only in a WebFetch",
-  "                 result is marked as coming from a summary, not the page's own words.",
+  "                 quote: the source's words",
   '  keywords     words a request about it would use',
   '  applies_to   globs from the project root',
   '  triggers     regexes tested against the new text of an edit; when given, the rule applies only if one matches',
@@ -57,6 +51,17 @@ const help = () => [
   '',
   "A knowledge rule's as_of is set for you: the source_date for a source, today otherwise.",
 ].join('\n');
+
+function topicLines() {
+  const { domains } = config();
+  const used = topicNotes();
+  return [...new Set(['global', ...Object.keys(domains)])].flatMap(d => {
+    const listed = domains[d]?.topics ?? [];
+    const known = listed.map(normTopic);
+    const more = [...(used.get(d)?.keys() ?? [])].filter(t => !known.includes(t)).sort();
+    return listed.length || more.length ? [`                 ${d}: ${[...listed, ...more].join(', ')}`] : [];
+  });
+}
 
 class UsageError extends Error {}
 class Refused extends Error {}
@@ -90,160 +95,55 @@ function sessionOf(sid) {
   const entry = readJsonSafe(registry(safeId(sid)));
   const domains = proposeDomains(entry?.cwd);
   if (!domains.length) refuse(`the taste vault has no session ${sid} from a domain's project folder or the vault folder. Pass the session id from the taste vault's note at session start, or $CLAUDE_CODE_SESSION_ID in the vault folder.`);
-  if (inVaultFolder(entry.cwd) && !typedMessages(entry.transcript).some(m => m.command === 'ingest')) {
-    refuse('a session in the vault folder proposes only after the user types /ingest in it.');
-  }
   return { ...entry, domains };
 }
 
 const REFS = /^raw\/refs\/./;
 
 function evidence(f, p) {
-  if (f.basis === 'failure') return { error: line(p, 'error'), fix: line(p, 'fix'), file: line(p, 'file') };
-  if (f.basis === 'pick') return { pick: line(p, 'pick') };
-  if (f.basis !== 'source') return { quote: line(p, 'quote') };
-  const e = { source: line(p, 'source'), source_date: line(p, 'source_date'), quote: line(p, 'quote') };
-  if (!isUrl(e.source) && !REFS.test(e.source)) refuse('source must be a URL or a file under raw/refs/.');
-  if (!validDay(e.source_date)) refuse('source_date must be a date as YYYY-MM-DD.');
-  if (e.source_date > today()) refuse("source_date can't be in the future.");
-  return e;
-}
-
-const normText = s => String(s)
-  .toLowerCase()
-  .replace(/[‘’ʼ]/g, "'")
-  .replace(/[“”]/g, '"')
-  .replace(/\s+/g, ' ')
-  .trim();
-const wordCount = s => normText(s).split(' ').filter(w => /[\p{L}\p{N}]/u.test(w)).length;
-const finder = s => new RegExp(`(?<![\\p{L}\\p{N}])${escapeRegExp(normText(s))}(?![\\p{L}\\p{N}])`, 'u');
-
-const URLS = /https?:\/\/[^\s"'`<>()\\]+/g;
-const sameUrl = (a, b) => a.replace(/[.,;:!?]+$/, '').replace(/\/$/, '') === b.replace(/\/$/, '');
-const HEREDOC = /<<-?\s*(['"]?)(\w+)\1[^\n]*\n[\s\S]*?^\s*\2\s*$|@(['"])\s*\n[\s\S]*?^\3@/gm;
-const FETCHERS = /^(?:curl|wget|iwr|irm|Invoke-WebRequest|Invoke-RestMethod)$/i;
-const SHOWS = /^(?:cat|type|head|tail|less|more|sed|awk|grep|egrep|fgrep|rg|findstr|jq|cd|echo|printf|Get-Content|gc|Select-String|sls|Select-Object|Write-Output|Write-Host)$/i;
-// Downloads and unpacked archives write files without a redirect.
-const SAVES = /\s(?:-[a-z]*o|--output|-OutFile)\b|\b(?:wget|tar|unzip|7z|Expand-Archive|git\s+clone)\b/i;
-// The browser tools take the URL in one call and return the page's text from another, headed by its URL.
-const PAGE_URL = /^Title: [^\n]*\nURL: (\S+)\n/;
-
-// A heredoc's lines are text the command was given, not commands it ran.
-const segments = cmd => cmd.replace(HEREDOC, '').split(/&&|\|\||[|;\n]/).map(s => s.trim()).filter(Boolean);
-const program = s => s.replace(/^(?:\$\w+\s*=\s*)?[(&]?\s*/, '').split(/[\s)]/)[0].replace(/\.exe$/i, '');
-const urlFields = x => (x && typeof x === 'object' ? Object.entries(x).flatMap(([k, v]) => (k === 'url' && typeof v === 'string' ? [v] : urlFields(v))) : []);
-const strings = x => (typeof x === 'string' ? [x] : x && typeof x === 'object' ? Object.values(x).flatMap(strings) : []);
-// An echo, a failed Edit or a WebFetch prompt hands back words the agent wrote.
-const echoes = (a, re) => strings(a.input).some(s => re.test(normText(s)));
-const pageUrl = a => (a.name?.startsWith('mcp__') ? a.preview.match(PAGE_URL)?.[1] ?? null : null);
-
-// A search, a brief or a mention in another command can name a URL without reading it.
-function fetched(a) {
-  const cmd = toolCommand(a.name, a.input);
-  if (cmd === null) return urlFields(a.input);
-  return segments(cmd).filter(s => FETCHERS.test(program(s))).flatMap(s => s.match(URLS) ?? []);
-}
-
-// A file the agent showed, a page, or a subagent's report can quote an error that never happened here.
-function ran(a) {
-  const cmd = toolCommand(a.name, a.input);
-  if (cmd !== null) return !segments(cmd).every(s => SHOWS.test(program(s)));
-  return a.error || (a.name?.startsWith('mcp__') && pageUrl(a) === null);
-}
-
-function printed(re, session) {
-  for (const a of toolActivity(session.transcript)) if (a.type === 'result' && ran(a) && !echoes(a, re) && re.test(normText(a.text))) return true;
-  return false;
-}
-
-function wrote(file, session) {
-  const at = s => `(?<![\\w.-])${escapeRegExp(s)}`;
-  const folders = (inside(vaultPath('raw'), file) ?? '').split('/').slice(0, -1);
-  // A command that writes the file names it, or ends a path with a folder the file is in.
-  const named = new RegExp([`${at(path.basename(file))}(?![\\w.-])`, ...folders.map(d => `${at(d)}[\\\\/]*(?=$|[\\s"'\`;|&)])`)].join('|'), 'im');
-  for (const a of toolActivity(session.transcript)) {
-    if (a.type !== 'call') continue;
-    const p = toolFile(a.name, a.input);
-    if (FILE_TOOLS.includes(a.name) && typeof p === 'string' && inside(file, p, session.cwd) === '') return true;
-    const cmd = toolCommand(a.name, a.input);
-    if (cmd !== null && named.test(cmd) && (WRITEISH.test(cmd) || SAVES.test(cmd))) return true;
+  if (f.basis === 'pick') return pickEvidence(line(p, 'pick'), f.domain);
+  if (f.basis === 'failure') {
+    const [error, fix, file] = ['error', 'fix', 'file'].map(name => line(p, name));
+    return { kind: 'failure', said: error, fix, cite: `${file} · "${error}" · fixed by: ${fix}` };
   }
-  return false;
-}
-
-function refsHas(source, re, session) {
-  const file = vaultPath(source);
-  if (!inside(vaultPath('raw', 'refs'), file)) refuse('source must be a file under raw/refs/.');
-  let text;
-  try { text = fs.readFileSync(file, 'utf8'); } catch { refuse(`there's no file at ${source} in the vault.`); }
-  if (wrote(file, session)) refuse(`${source} was written in this session, so it can't back a rule. Cite the URL it came from instead.`);
-  return re.test(normText(text));
-}
-
-// WebFetch answers with a model's summary of the page, so a quote found only there is marked as one.
-function sourceHas(source, re, session) {
-  if (REFS.test(source)) return refsHas(source, re, session);
-  const ids = new Set();
-  let read = false;
-  let summary = false;
-  for (const a of toolActivity(session.transcript)) {
-    if (a.type === 'call') {
-      if (fetched(a).some(u => sameUrl(u, source))) ids.add(a.id);
-    } else if (ids.has(a.id) || sameUrl(pageUrl(a) ?? '', source)) {
-      read = true;
-      if (echoes(a, re) || !re.test(normText(a.text))) continue;
-      if (a.name !== 'WebFetch') return 'page';
-      summary = true;
-    }
+  // Unquoted, so it doesn't read as anyone's words.
+  if (f.basis === 'reading') {
+    const reading = line(p, 'reading');
+    return { kind: 'reading', label: "agent's reading", said: reading, cite: reading };
   }
-  if (!read) refuse(`no tool read ${source} in this session. Fetch it first, then quote what it shows.`);
-  return summary && 'summary';
+  if (f.basis !== 'source') {
+    const quote = line(p, 'quote');
+    return { kind: f.basis === 'inferred' ? 'correction' : 'stated', said: quote, cite: `"${quote}"` };
+  }
+  const [source, date, quote] = ['source', 'source_date', 'quote'].map(name => line(p, name));
+  if (!isUrl(source) && !REFS.test(source)) refuse('source must be a URL or a file under raw/refs/.');
+  let cited = source;
+  if (REFS.test(source)) {
+    // Cited as the disk spells it, so each file has one spelling.
+    cited = vaultFile(source);
+    if (cited === null) refuse(`there's no file at ${source} in the vault.`);
+    if (!/^raw\/refs\/./i.test(cited)) refuse('source must be a file under raw/refs/.');
+  }
+  if (!validDay(date)) refuse('source_date must be a date as YYYY-MM-DD.');
+  if (date > today()) refuse("source_date can't be in the future.");
+  return { kind: 'source', said: quote, date, cite: `${cited} · dated ${date} · "${quote}"` };
 }
 
 // A pick's label is the user's answer verbatim, and an older captured row holds their message; either backs a rule
-// on its own, so the quote is the row's text and nothing has to be typed again.
-function checkPick(f, scope) {
-  const row = recordedRows().find(r => r.id === f.pick);
-  if (!row) refuse(`there's no row ${f.pick} in raw/picks/ or raw/inbox/.`);
-  if (row.domain && !scope.includes(row.domain) && f.domain !== 'global') refuse(`${f.pick} was recorded in ${row.domain}, not ${f.domain}.`);
+// on its own, so the row's text is cited and nothing has to be typed again.
+function pickEvidence(id, domain) {
+  const row = recordedRows().find(r => r.id === id);
+  if (!row) refuse(`there's no row ${id} in raw/picks/ or raw/inbox/.`);
+  if (row.domain && row.domain !== domain && domain !== 'global') refuse(`${id} was recorded in ${row.domain}, not ${domain}.`);
+  const from = { pick: id, day: String(row.at ?? '').slice(0, 10) || today(), session: String(row.session ?? '').slice(0, 8) || 'unknown' };
   if (typeof row.pick === 'string' && row.pick) {
-    f.quote = row.notes ? `${row.pick} — ${row.notes}` : row.pick;
+    const said = row.notes ? `${row.pick} — ${row.notes}` : row.pick;
     const others = (row.options ?? []).map(o => o.label).filter(l => l !== row.pick);
-    f.pickLine = `"${f.quote}"${others.length ? `, picked over ${others.map(l => `"${l}"`).join(' and ')}` : ''}${row.question ? ` for "${row.question}"` : ''}`;
-    f.evidence = 'choice';
-  } else if (typeof row.text === 'string' && row.text.trim()) {
-    f.quote = row.text.trim();
-    f.pickLine = `"${f.quote}"`;
-    f.evidence = 'stated';
-  } else {
-    refuse(`${f.pick} holds no answer or message to quote.`);
+    const cite = `"${said}"${others.length ? `, picked over ${others.map(l => `"${l}"`).join(' and ')}` : ''}${row.question ? ` for "${row.question}"` : ''}`;
+    return { ...from, kind: 'choice', said, cite };
   }
-  f.pickDay = String(row.at ?? '').slice(0, 10) || today();
-  f.pickSession = String(row.session ?? '').slice(0, 8) || 'unknown';
-  return false;
-}
-
-function checkEvidence(f, session) {
-  if (f.basis === 'pick') return checkPick(f, f.domain === 'global' ? session.domains : [f.domain]);
-  if (f.basis === 'failure') {
-    if (wordCount(f.error) < 3) refuse('the error needs at least 3 words of what the tool printed.');
-    if (!printed(finder(f.error), session)) {
-      refuse("the error isn't in anything a command or a failed tool call printed in this session. Copy one line of it as it was printed; an error quoted in a file, a page, a report or the call's own input doesn't count.");
-    }
-    return false;
-  }
-  const whose = f.basis === 'source' ? "the source's" : "the user's";
-  if (wordCount(f.quote) < 3) refuse(`the quote needs at least 3 of ${whose} words.`);
-  const re = finder(f.quote);
-  if (f.basis === 'source') {
-    const found = sourceHas(f.source, re, session);
-    if (!found) refuse(`the quote isn't in what this session read from ${f.source}. Quote one unbroken stretch of it; words you gave the tool don't count.`);
-    return found === 'summary';
-  }
-  if (!typedMessages(session.transcript).some(m => re.test(normText(m.text)))) {
-    refuse("the quote isn't in anything the user typed in this session. Quote one unbroken stretch of their own words; briefs, skills and task text don't count.");
-  }
-  return false;
+  if (typeof row.text === 'string' && row.text.trim()) return { ...from, kind: 'stated', said: row.text.trim(), cite: `"${row.text.trim()}"` };
+  refuse(`${id} holds no answer or message to quote.`);
 }
 
 const andList = xs => (xs.length < 2 ? xs.join('') : `${xs.slice(0, -1).join(', ')} and ${xs.at(-1)}`);
@@ -252,6 +152,12 @@ const OVERLAP = 0.2;
 const STOPWORDS = new Set(('a all an and any are as at be because but by can cant didnt do doesnt dont for from in is isnt it its must never not of on or '
   + 'should that the their theirs them these they this those to use was we were with wont you your yours').split(' '));
 // Apostrophes go first so "don't" reads as the stopword dont rather than as don, which every Not line shares.
+const normText = s => String(s)
+  .toLowerCase()
+  .replace(/[‘’ʼ]/g, "'")
+  .replace(/\s+/g, ' ')
+  .trim();
+
 const words = s => new Set((normText(s).replace(/'/g, '').match(/[\p{L}\p{N}]+/gu) ?? [])
   .filter(w => w.length > 2 && !STOPWORDS.has(w) && !/^\p{N}+$/u.test(w))
   .map(w => (w.length > 3 ? w.replace(/s$/, '') : w)));
@@ -266,9 +172,9 @@ const globKey = g => normGlob(g).toLowerCase();
 const SHORTLIST = 5;
 const TOPIC_LIST = 20;
 
-// While a topic holds few rules the agent judges them all, words shared or not. Global topics are free text, so case doesn't count.
+// While a topic holds few rules the agent judges them all, words shared or not. Topics are free text, so case doesn't count.
 function onTopic(f, rules) {
-  const mine = Object.entries(rules).filter(([, r]) => r.domain === f.domain && r.topic === f.topic.toLowerCase());
+  const mine = Object.entries(rules).filter(([, r]) => r.domain === f.domain && r.topic === normTopic(f.topic));
   return mine.length <= TOPIC_LIST ? mine.sort(byKey) : [];
 }
 
@@ -329,21 +235,16 @@ function checkReadBack(n, f) {
 const yaml = s => (/^[a-z0-9-]+$/i.test(s) ? s : `'${s.replace(/'/g, "''")}'`);
 const yamlList = (name, xs) => (xs.length ? [`${name}:`, ...xs.map(x => `  - '${x.replace(/'/g, "''")}'`)] : [`${name}: []`]);
 
-function evidenceLine(f) {
-  const head = `- ${f.day} · ${f.evidence} · session ${f.sid.slice(0, 8)}`;
-  if (f.basis === 'failure') return `${head} · ${f.file} · "${f.error}" · fixed by: ${f.fix} (${f.id})`;
-  if (f.basis === 'source') return `${head} · ${f.source} · dated ${f.source_date}${f.summary ? ' · summary' : ''} · "${f.quote}" (${f.id})`;
-  if (f.basis === 'pick') return `- ${f.pickDay} · ${f.evidence} · session ${f.pickSession} · ${f.pickLine} (${f.pick}; proposed as ${f.id})`;
-  return `${head} · "${f.quote}" (${f.id})`;
-}
+// A pick is cited from the day and session it was recorded in.
+const evidenceLine = (f, e) => `- ${e.day ?? f.day} · ${e.label ?? e.kind} · session ${e.session ?? f.sid.slice(0, 8)} · ${e.cite} (${e.pick ? `${e.pick}; proposed as ` : ''}${f.id})`;
 
-const noteText = f => [
+const noteText = (f, e) => [
   '---', 'type: rule', `domain: ${f.domain}`, `kind: ${f.kind}`, `basis: ${f.basis}`, ...(f.as_of ? [`as_of: ${f.as_of}`] : []),
   `topic: ${yaml(f.topic)}`, `always: ${f.always}`,
   ...yamlList('applies_to', f.applies_to), ...yamlList('triggers', f.triggers), ...yamlList('keywords', f.keywords),
   `created: ${f.day}`, `updated: ${f.day}`, '---', '',
   `**Do:** ${f.do}`, `**Not:** ${f.not}`, `**Because:**${f.because ? ` ${f.because}` : ''}`, '',
-  '## Examples', '', '## Evidence', evidenceLine(f), '',
+  '## Examples', '', '## Evidence', evidenceLine(f, e), '',
 ].join('\n');
 
 function propose(sid, p) {
@@ -356,8 +257,6 @@ function propose(sid, p) {
   f.kind = line(p, 'kind', false) || 'taste';
   if (!BASES[f.kind]) refuse('kind must be taste or knowledge.');
   f.topic = line(p, 'topic');
-  const topics = config().domains[f.domain]?.topics;
-  if (topics && !topics.includes(f.topic)) refuse(`topic must be one of ${topics.join(', ')}.`);
   f.basis = line(p, 'basis');
   if (!BASES[f.kind].includes(f.basis)) refuse(`${wrongBasis(f.kind, f.basis)}.`);
   Object.assign(f, { do: line(p, 'do'), not: line(p, 'not'), because: line(p, 'because', false) });
@@ -365,13 +264,12 @@ function propose(sid, p) {
   if (typeof f.always !== 'boolean') refuse('always must be true or false.');
   if (f.kind === 'taste' && !f.always && !f.applies_to.length && !f.keywords.length) refuse('give it keywords, applies_to or always: true, or nothing will deliver it.');
   const scope = f.domain === 'global' ? domains : [f.domain, 'global'];
-  Object.assign(f, evidence(f, p));
-  if (f.kind === 'knowledge') f.as_of = f.source_date ?? today();
-  f.summary = checkEvidence(f, session);
+  const e = evidence(f, p);
+  if (f.kind === 'knowledge') f.as_of = e.date ?? today();
 
   const at = new Date().toISOString();
-  Object.assign(f, { day: today(), evidence: f.evidence ?? (f.basis === 'inferred' ? 'correction' : f.basis), id: `a-${crypto.randomBytes(4).toString('hex')}` });
-  const text = noteText(f);
+  Object.assign(f, { day: today(), id: `a-${crypto.randomBytes(4).toString('hex')}` });
+  const text = noteText(f, e);
   const n = parseNote(text, `wiki/${key}.md`);
   checkReadBack(n, f);
   const [err] = noteErrors(n);
@@ -379,33 +277,34 @@ function propose(sid, p) {
   const { maxRuleChars } = config().delivery;
   if (ruleText(n).length > maxRuleChars) refuse(`${ruleTextParts(n)} come to ${ruleText(n).length} characters; keep them under ${maxRuleChars} together.`);
 
-  const said = f.basis === 'failure' ? f.error : f.quote;
-  // One error can show several facts, so a failure repeats an earlier one only if its fix does too.
-  const same = r => normText(r.text) === normText(said) && (f.basis !== 'failure' || normText(r.fix ?? '') === normText(f.fix));
   return withLock(statePath('propose.lock'), () => {
     const rows = proposalRows();
-    // Picks are bounded by what was recorded, so re-proposing them doesn't count toward the session's cap.
-    if (f.basis !== 'pick' && rows.filter(r => r.session === sid && r.pick === undefined).length >= MAX_PER_SESSION) refuse(`this session already proposed ${MAX_PER_SESSION} rules.`);
-    const earlier = rows.find(r => (f.basis === 'pick' ? r.pick === f.pick : same(r)));
-    if (earlier) refuse(f.basis === 'pick' ? `${f.pick} was already proposed as ${earlier.note}.` : `these words were already proposed as ${earlier.note}.`);
+    // Any later session can re-propose a recorded answer, so each one backs a single rule.
+    const earlier = e.pick && rows.find(r => r.pick === e.pick);
+    if (earlier) refuse(`${e.pick} was already proposed as ${earlier.note}.`);
     if (readNote(key)) refuse(`wiki/${key}.md already exists. Pick another slug, or leave that note to the user.`);
+    // One correction can back two rules, so the same words refuse once and the retry goes through.
+    // One error can show several facts, so a failure matches an earlier one only with the same fix.
+    const same = rows.find(r => normText(r.text ?? '') === normText(e.said) && (!e.fix || normText(r.fix ?? '') === normText(e.fix)));
+    if (same && mark('repeats', f.sid, `${f.slug}|words|${same.id}`)) {
+      refuse(`these words already back ${same.note}${readNote(same.note) ? '' : ', which has since been deleted'}. If this rule says something that one doesn't, propose it again.`);
+    }
     // Read under the lock, so a proposal written meanwhile is on the list.
     const overlaps = checkRepeats(f, ruleText(n), scope, liveRules());
     const file = `${vaultPath('wiki', f.domain, f.slug)}.md`;
     writeSettled(file, text);
     appendJsonl(inboxFile(), [{
-      id: f.id, at, source: 'agent', kind: f.evidence, text: said, ...(f.basis === 'failure' ? { fix: f.fix } : {}),
-      note: key, session: sid, transcript: session.transcript ?? null, cwd: session.cwd ?? null, domain: f.domain, ...(f.pick ? { pick: f.pick } : {}),
+      id: f.id, at, source: 'agent', kind: e.kind, text: e.said, ...(e.fix ? { fix: e.fix } : {}),
+      note: key, session: sid, transcript: session.transcript ?? null, cwd: session.cwd ?? null, domain: f.domain, ...(e.pick ? { pick: e.pick } : {}),
     }]);
     appendLog([`wrote ${key} · session ${sid.slice(0, 8)}`]);
     build();
     const reply = [
       `**New ${f.kind === 'knowledge' ? 'knowledge rule' : 'rule'}** ${key}: ${ruleText(n)}`,
-      ...(f.summary ? [`The quote comes from a WebFetch summary of ${f.source}, not the page's own words.`] : []),
       ...(overlaps.length ? [`It may overlap ${andList(overlaps)}.`] : []),
       `It applies from now on. To change or remove it, edit or delete ${toPosix(file)}.`,
     ];
-    return [`Wrote wiki/${key}.md. End your reply with these ${['two', 'three', 'four'][reply.length - 2]} lines as they are:`, '', ...reply].join('\n');
+    return [`Wrote wiki/${key}.md. End your reply with these ${['two', 'three'][reply.length - 2]} lines as they are:`, '', ...reply].join('\n');
   });
 }
 
