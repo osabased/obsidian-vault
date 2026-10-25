@@ -7,9 +7,9 @@ import { config, vaultPath, writeText, shortHash, toPosix, today } from './vault
 export const LIST_FIELDS = ['applies_to', 'triggers', 'keywords'];
 export const KEY_RE = /^[a-z0-9-]+\/[a-z0-9-]+$/;
 export const BASES = { taste: ['stated', 'inferred', 'pick', 'reading'], knowledge: ['stated', 'failure', 'source'] };
-const orList = xs => `${xs.slice(0, -1).join(', ')} or ${xs.at(-1)}`;
-export const wrongBasis = (kind, basis) => (kind === 'knowledge' ? `a knowledge rule's basis must be ${orList(BASES.knowledge)}`
-  : BASES.knowledge.includes(basis) ? `basis ${basis} is for knowledge rules; set kind: knowledge` : `basis must be ${orList(BASES.taste)}`);
+export const joinList = (xs, word) => (xs.length < 2 ? xs.join('') : `${xs.slice(0, -1).join(', ')} ${word} ${xs.at(-1)}`);
+export const wrongBasis = (kind, basis) => (kind === 'knowledge' ? `a knowledge rule's basis must be ${joinList(BASES.knowledge, 'or')}`
+  : BASES.knowledge.includes(basis) ? `basis ${basis} is for knowledge rules; set kind: knowledge` : `basis must be ${joinList(BASES.taste, 'or')}`);
 export const isUrl = s => typeof s === 'string' && /^https?:\/\/\S+$/i.test(s);
 export const normTopic = s => String(s ?? '').trim().toLowerCase();
 export const validDay = s => typeof s === 'string' && /^\d{4}-\d\d-\d\d$/.test(s) && !Number.isNaN(Date.parse(s)) && new Date(s).toISOString().startsWith(s);
@@ -95,7 +95,14 @@ export const ruleTextParts = n => (n.kind === 'knowledge' ? 'Do, Not, Because an
 
 export const clip = (s, max) => (s.length <= max ? s : `${s.slice(0, max - 1).trimEnd()}…`);
 
+// Lint, its topic count and liveRules each ask about the same parsed notes, so each note is checked once.
+const checked = new WeakMap();
 export function noteErrors(n) {
+  if (!checked.has(n)) checked.set(n, checkNote(n));
+  return checked.get(n);
+}
+
+function checkNote(n) {
   if (!n.ok) return ['no frontmatter'];
   const errs = [];
   if (!KEBAB.test(n.slug) || (n.domain && !KEBAB.test(n.domain))) errs.push('file and folder names must be lowercase-kebab-case');
@@ -302,8 +309,9 @@ function indexLine(n, refs) {
 }
 
 // Pages and rules with no topic get sections of their own after the topics, so no topic a rule names can merge with them.
-const PAGES = Symbol('ref pages');
-const NO_TOPIC = Symbol('(no topic)');
+// Their headings are capitalized and topic headings lowercase, so they can't read the same either.
+const PAGES = Symbol('Ref pages');
+const NO_TOPIC = Symbol('No topic');
 
 export function renderIndex(notes) {
   const { domains } = config();

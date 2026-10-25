@@ -29,7 +29,7 @@ export function lint() {
     if (n.data.status !== undefined) add('warn', n.rel, 'status does nothing. To stop a rule, delete its note or set superseded_by');
     if (n.data.replaces !== undefined) add('warn', n.rel, 'replaces does nothing. Set superseded_by on the note it replaces instead');
     if (!n.because) add('warn', n.rel, 'empty **Because:**');
-    if (typeof n.data.topic !== 'string' || !n.data.topic.trim()) add('warn', n.rel, 'no topic. Give it a short one, so the repeat check lists it with the rules on its topic');
+    if (!n.superseded_by && (typeof n.data.topic !== 'string' || !n.data.topic.trim())) add('warn', n.rel, 'no topic. Give it a short one, so the repeat check lists it with the rules on its topic');
     if (n.do && n.not && ruleText(n).length > delivery.maxRuleChars) {
       add('warn', n.rel, `${ruleTextParts(n)} come to ${ruleText(n).length} characters; the hooks cut them at ${delivery.maxRuleChars}`);
     }
