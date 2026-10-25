@@ -8,13 +8,14 @@ export const vaultPath = (...xs) => path.join(ROOT, ...xs);
 const DEFAULTS = {
   delivery: { maxRulesPerEdit: 3, maxRuleChars: 300, maxBlockChars: 1200, maxPromptExcerpts: 3, activeMaxLines: 60, activeMaxBytes: 4096, settleSeconds: 60 },
   knowledge: { staleAfterDays: 180 },
+  lint: { remindAfterDays: 14 },
 };
 
 let loaded;
 export function config() {
   if (!loaded) {
     const c = readJson(vaultPath('taste.config.json'), {});
-    loaded = { domains: c.domains ?? {}, delivery: { ...DEFAULTS.delivery, ...c.delivery }, knowledge: { ...DEFAULTS.knowledge, ...c.knowledge } };
+    loaded = { domains: c.domains ?? {}, ...Object.fromEntries(Object.entries(DEFAULTS).map(([k, d]) => [k, { ...d, ...c[k] }])) };
   }
   return loaded;
 }
@@ -122,7 +123,7 @@ export const plural = (n, word) => `${n} ${word}${n === 1 ? '' : 's'}`;
 
 const pad = n => String(n).padStart(2, '0');
 export const today = (d = new Date()) => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
-const clock = (d = new Date()) => `${today(d)} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
+export const clock = (d = new Date()) => `${today(d)} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
 
 export const inboxFile = () => vaultPath('raw', 'inbox', `${today()}.jsonl`);
 
@@ -171,6 +172,29 @@ export function logError(name, e) {
     try { if (big()) withLock(`${file}.lock`, () => { if (big()) fs.renameSync(file, `${file}.1`); }); } catch {}
     fs.appendFileSync(file, `${new Date().toISOString()} ${name}: ${e?.stack ?? e}\n`);
   } catch {}
+}
+
+// A hook section that fails, like a line built from a malformed config, costs its own result, not the rest of the hook.
+export function guarded(name, fn, fallback = '') {
+  try { return fn(); } catch (e) { logError(name, e); return fallback; }
+}
+
+const ENTRY = /^(\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d\.\d{3}Z) (.*)$/;
+
+export const errorsLog = (suffix = '') => vaultPath('.state', `errors.log${suffix}`);
+
+export function hookErrors(file = errorsLog(), from = 0) {
+  let buf;
+  try {
+    buf = fs.readFileSync(file);
+  } catch (e) {
+    if (e.code !== 'ENOENT') throw e;
+    return [];
+  }
+  return buf.subarray(from).toString('utf8').split(/\r?\n/).flatMap(l => {
+    const m = l.match(ENTRY);
+    return m ? [{ at: m[1], message: m[2] }] : [];
+  });
 }
 
 export const cwdOf = input => input.cwd || process.cwd();

@@ -1,11 +1,9 @@
-import fs from 'node:fs';
-import { config, vaultPath, plural, toPosix } from './lib/vault.mjs';
+import { config, plural, toPosix, guarded, hookErrors, errorsLog } from './lib/vault.mjs';
 import { clip, normTopic, topicNotes } from './lib/rules.mjs';
 import { lint, tally } from './lib/lint.mjs';
+import { lintRan } from './lib/sessions.mjs';
 
 const USAGE = 'usage: node tools/review.mjs status';
-
-const ISO = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}/;
 
 class UsageError extends Error {}
 
@@ -18,15 +16,10 @@ function lintLine() {
 }
 
 function hookHealth() {
-  const file = vaultPath('.state', 'errors.log');
-  let text = '';
-  try {
-    text = fs.readFileSync(file, 'utf8');
-  } catch (e) {
-    if (e.code !== 'ENOENT') throw e;
-  }
-  const errors = text.split(/\r?\n/).filter(l => ISO.test(l));
-  return errors.length ? [`${plural(errors.length, 'hook error')} in ${toPosix(file)}`, `  newest: ${clip(errors.at(-1), 300)}`] : ['No hook errors.'];
+  const errors = hookErrors();
+  if (!errors.length) return ['No hook errors.'];
+  const { at, message } = errors.at(-1);
+  return [`${plural(errors.length, 'hook error')} in ${toPosix(errorsLog())}`, `  newest: ${clip(`${at} ${message}`, 300)}`];
 }
 
 function emptyTopics() {
@@ -46,8 +39,11 @@ const status = () => [lintLine(), '', 'Hook health', ...hookHealth(), '', 'Liste
 
 const [cmd, ...rest] = process.argv.slice(2);
 try {
-  if (cmd === 'status' && !rest.length) console.log(status());
-  else throw new UsageError();
+  if (cmd !== 'status' || rest.length) throw new UsageError();
+  console.log(status());
+  // /lint runs status first, so this is what quiets the session-start error line and reminder. A failed stamp is
+  // logged, and session start reports it.
+  guarded('lint stamp', lintRan);
 } catch (e) {
   if (e instanceof UsageError) {
     console.error(USAGE);

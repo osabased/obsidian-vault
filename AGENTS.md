@@ -7,7 +7,6 @@ The user's taste, kept as a small wiki so Claude Code can apply it. The agent wr
 - `raw/` holds sources and is append-only.
   - `raw/inbox/<date>.jsonl`: rules the agent proposed in session (`source: agent`, `a-` ids), written by `tools/propose.mjs`. Older rows, with `c-` and `p-` ids, are preferences captured from sessions before proposals existed.
   - `raw/picks/<date>.jsonl`: questions the agent asked in domain sessions and the user's answers, word for word, with `q-` ids, captured alongside those older rows.
-  - `raw/decisions.jsonl`: what became of older inbox and pick rows, by id. Nothing adds to it now.
   - `raw/judgments/`: the user's picks between design options, verbatim and dated ("B over A because…"), usually with the user's reason. You may add a new file here when the user makes a pick.
   - `raw/refs/`: references the user collects. You may add new files here.
 - `wiki/<domain>/<slug>.md`: one rule per note, or a page: a ref page (`ref-<slug>.md`) for one source, or a topic page. Domains and their project folders are in `taste.config.json`. Rules in `wiki/global/` apply in every project.
@@ -27,6 +26,8 @@ A note `tools/propose.mjs` writes applies at once. A note saved any other way ap
 Each session gets a rule once, and again after its Do, Not or Because changes, or a knowledge rule's `as_of`. A note with a lint error, or with `superseded_by`, is never delivered; `index.md` marks the first kind `not delivered` with its error.
 
 Pages aren't delivered. Every session start names the topics of global and the session's domains (the listed ones, then the others rules and pages have) and points to `index.md`, so the agent reads the pages on a topic its task touches.
+
+A new or resumed session also hears, in one line each, how many errors were logged in `.state/errors.log` since `/lint` last ran, and when `/lint` last ran once it has gone `lint.remindAfterDays` (14 by default, in `taste.config.json`) without a run. Both lines repeat until `/lint` runs.
 
 ## Rule notes
 
@@ -61,7 +62,7 @@ updated: 2026-10-19
 - `basis`: `stated` when the user said it, `inferred` when you generalized it from their corrections, `pick` when a recorded answer from an earlier session backs it (a `q-` row in `raw/picks/`, or an older `c-`/`p-` row in `raw/inbox/` that holds the user's own words), `reading` when your own reading of what you saw backs it. Knowledge rules use `stated`, `failure` (something worked only after a failure) or `source` (a dated source shows it).
 - `as_of`: knowledge rules only, the day the fact was last checked, as YYYY-MM-DD: the source's date, or the day it was proposed. Delivery shows it, and lint warns once it is more than 180 days old (`knowledge.staleAfterDays` in `taste.config.json`). Taste rules never expire.
 - `topic`: a short topic, ideally one the domain's other rules have or `taste.config.json` lists for it. Lint warns on a rule with no topic unless it's superseded. Among delivered rules, it also warns on a topic only one rule in its domain has that the config doesn't list. Global topics aren't checked against the config. `/lint` reports the listed topics no rule has yet.
-- `always`: only for short rules that matter in nearly every session.
+- `always`: only for short rules that matter in nearly every session. The user sets it in Obsidian; `tools/propose.mjs` refuses it.
 - `applies_to`: globs relative to the project root. `**` crosses folders, `*` doesn't, `{a,b}` picks one. Matching ignores case and worktree folders.
 - `triggers`: optional regexes tested against the new text of an edit. When present, the rule applies only if one matches.
 - `keywords`: optional words or phrases that bring the rule up from a prompt.
@@ -123,7 +124,7 @@ The vault holds one-line Do/Not rules and the pages behind them. Procedures, how
 - **Ingest**: the user runs `/ingest` in this folder with a source: a file under `raw/refs/` or `raw/judgments/`, or a URL. You go through it together; what they say about it becomes a ref page and rules, and every topic it touches gets its topic page updated.
 - **Query**: when asked what the user prefers, or when a task touches a topic the session start names, read `index.md`, then the pages and notes on the topic. Every rule there is the user's taste; a rule with `basis: inferred` is your generalization of their corrections, and one with `basis: reading` is your reading of what they showed you, so say so when you lean on either.
 - **File back**: when an answer drawn from the vault would help a later session, from any session, add it to the topic's page, or start the page if the topic has none, then log it with `tools/log.mjs`.
-- **Lint**: the user runs `/lint` in this folder for a check of the whole wiki: lint findings, hook errors, contradictions, repeats, listed topics no rule has yet, and stale pages. `node tools/lint.mjs` on its own checks the notes and the generated files; the pre-commit hook rebuilds the generated files and runs it.
+- **Lint**: the user runs `/lint` in this folder for a check of the whole wiki: lint findings, hook errors, contradictions, repeats, listed topics no rule has yet, and stale pages. Its first step, `node tools/review.mjs status`, records the run, which quiets the session-start error line and reminder. `node tools/lint.mjs` on its own checks the notes and the generated files; the pre-commit hook rebuilds the generated files and runs it.
 
 ## Evidence
 

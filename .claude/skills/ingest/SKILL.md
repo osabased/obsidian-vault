@@ -16,6 +16,7 @@ Work in the vault root. AGENTS.md has the page and rule formats. The user's type
 5. **Propose** a rule for each thing they said, the clearest first, with `tools/propose.mjs` (`node tools/propose.mjs --help` lists the fields). Pipe the JSON from the Bash tool with a quoted heredoc to `node tools/propose.mjs "$CLAUDE_CODE_SESSION_ID"`.
    - Taste: basis `stated` or `inferred`, quoting their typed words, or `reading` for what you saw in the source yourself, in your words.
    - Doc facts: `kind: knowledge`, basis `source`, quoting the page you read, by its URL; for a file you copied into `raw/refs/`, cite the URL it came from.
+   - Give a rule about code or files `applies_to` globs from the project root; `always` is the user's to set.
 
    End your reply with the lines it prints; the rule applies from then on. If the user doesn't want it, delete its note, and if they want it worded otherwise, edit it. Then propose the next.
 6. **Update the topic pages.** For each topic the source touched, find the topic's page in `index.md` (the page under that topic marked `topic page`) and add what the source and the user's words show, linking the new rules under `## Rules`. Start the page if the topic has none. Set `updated` to today on every page you change.
