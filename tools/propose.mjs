@@ -4,7 +4,7 @@ import {
   config, vaultPath, proposeDomains, readJsonSafe, writeSettled, appendJsonl, appendLog, inboxFile, proposalRows, recordedRows, statePath, withLock, safeId, today, toPosix,
 } from './lib/vault.mjs';
 import {
-  KEY_RE, BASES, wrongBasis, parseNote, noteErrors, ruleText, ruleTextParts, readNote, liveRules, build, mentions, isUrl, validDay, byKey, normTopic, topicNotes, vaultFile,
+  KEY_RE, BASES, wrongBasis, parseNote, noteErrors, ruleText, ruleTextParts, readNote, liveRules, build, mentions, isUrl, validDay, byKey, normTopic, topicNotes, vaultFile, joinList,
 } from './lib/rules.mjs';
 import { normGlob } from './lib/glob.mjs';
 import { registry, marked, mark } from './lib/sessions.mjs';
@@ -98,7 +98,7 @@ function sessionOf(sid) {
   return { ...entry, domains };
 }
 
-const REFS = /^raw\/refs\/./;
+const REFS = /^raw\/refs\/./i;
 
 function evidence(f, p) {
   if (f.basis === 'pick') return pickEvidence(line(p, 'pick'), f.domain);
@@ -122,7 +122,7 @@ function evidence(f, p) {
     // Cited as the disk spells it, so each file has one spelling.
     cited = vaultFile(source);
     if (cited === null) refuse(`there's no file at ${source} in the vault.`);
-    if (!/^raw\/refs\/./i.test(cited)) refuse('source must be a file under raw/refs/.');
+    if (!REFS.test(cited)) refuse('source must be a file under raw/refs/.');
   }
   if (!validDay(date)) refuse('source_date must be a date as YYYY-MM-DD.');
   if (date > today()) refuse("source_date can't be in the future.");
@@ -146,15 +146,14 @@ function pickEvidence(id, domain) {
   refuse(`${id} holds no answer or message to quote.`);
 }
 
-const andList = xs => (xs.length < 2 ? xs.join('') : `${xs.slice(0, -1).join(', ')} and ${xs.at(-1)}`);
-
 const OVERLAP = 0.2;
 const STOPWORDS = new Set(('a all an and any are as at be because but by can cant didnt do doesnt dont for from in is isnt it its must never not of on or '
   + 'should that the their theirs them these they this those to use was we were with wont you your yours').split(' '));
-// Apostrophes go first so "don't" reads as the stopword dont rather than as don, which every Not line shares.
+// Curly quotes read as straight ones. Apostrophes go first so "don't" reads as the stopword dont rather than as don, which every Not line shares.
 const normText = s => String(s)
   .toLowerCase()
   .replace(/[‘’ʼ]/g, "'")
+  .replace(/[“”]/g, '"')
   .replace(/\s+/g, ' ')
   .trim();
 
@@ -194,29 +193,38 @@ function lookalikes(f, text, scope, rules) {
   return close.sort((a, b) => b.score - a.score || byKey(a.entry, b.entry)).map(c => c.entry);
 }
 
-// The retry goes through once every rule on the list was shown for this proposal.
-function checkRepeats(f, text, scope, rules) {
+// The retry goes through once every rule on the list, and the note its words back, was shown for this proposal.
+function checkRepeats(f, text, scope, rules, same) {
   const topic = onTopic(f, rules);
   const all = lookalikes(f, text, scope, rules);
   const inTopic = new Set(topic.map(([k]) => k));
   const others = all.filter(([k]) => !inTopic.has(k));
   const alike = others.slice(0, SHORTLIST).sort(byKey);
   const shown = [...topic, ...alike];
-  const id = ([k, r]) => `${f.slug}|${k}|${r.hash}`;
-  if (shown.every(e => marked('repeats', f.sid, id(e)))) return [...all.filter(([k]) => inTopic.has(k)), ...alike].sort(byKey).map(([k]) => k);
-  for (const e of shown) mark('repeats', f.sid, id(e));
+  const ids = [...shown.map(([k, r]) => `${f.slug}|${k}|${r.hash}`), ...(same ? [`${f.slug}|words|${same.id}`] : [])];
+  if (ids.every(id => marked('repeats', f.sid, id))) return [...all.filter(([k]) => inTopic.has(k)), ...alike].sort(byKey).map(([k]) => k);
+  for (const id of ids) mark('repeats', f.sid, id);
   const more = others.length - alike.length;
   const item = ([k, r]) => `- ${k}: ${r.text}`;
+  const it = same ? 'It' : 'it';
+  const listed = topic.length ? [
+    `${it} may repeat rules already in the vault.`,
+    `Every ${f.domain} rule on ${f.topic}:`,
+    ...topic.map(item),
+    ...(alike.length ? ['Others that share words, globs or keywords:', ...alike.map(item)] : []),
+  ] : alike.length ? [`${it} may repeat these rules:`, ...alike.map(item)] : [];
   refuse([
-    ...(topic.length ? [
-      'it may repeat rules already in the vault.',
-      `Every ${f.domain} rule on ${f.topic}:`,
-      ...topic.map(item),
-      ...(alike.length ? ['Others that share words, globs or keywords:', ...alike.map(item)] : []),
-    ] : ['it may repeat these rules:', ...alike.map(item)]),
+    ...(same ? [`these words already back ${same.note}${gone(same.note)}.`] : []),
+    ...listed,
     ...(more ? [`${more} more match less closely and aren't listed.`] : []),
-    `If it repeats one, update that note in ${toPosix(vaultPath('wiki'))} instead. If it says something new, propose it again.`,
+    listed.length ? `If it repeats one, update that note in ${toPosix(vaultPath('wiki'))} instead. If it says something new, propose it again.`
+      : "If this rule says something that one doesn't, propose it again.",
   ].join('\n'));
+}
+
+function gone(key) {
+  const n = readNote(key);
+  return !n ? ', which has since been deleted' : n.superseded_by ? ', which has since been retired' : '';
 }
 
 const sameList = (a, b) => Array.isArray(a) && a.length === b.length && a.every((x, i) => x === b[i]);
@@ -251,7 +259,7 @@ function propose(sid, p) {
   const session = sessionOf(sid);
   const domains = [...session.domains, 'global'];
   const f = { sid, domain: line(p, 'domain'), slug: line(p, 'slug') };
-  if (!domains.includes(f.domain)) refuse(`domain must be ${domains.join(' or ')}.`);
+  if (!domains.includes(f.domain)) refuse(`domain must be ${joinList(domains, 'or')}.`);
   const key = `${f.domain}/${f.slug}`;
   if (!KEY_RE.test(key)) refuse('slug must be lowercase-kebab-case.');
   f.kind = line(p, 'kind', false) || 'taste';
@@ -286,11 +294,8 @@ function propose(sid, p) {
     // One correction can back two rules, so the same words refuse once and the retry goes through.
     // One error can show several facts, so a failure matches an earlier one only with the same fix.
     const same = rows.find(r => normText(r.text ?? '') === normText(e.said) && (!e.fix || normText(r.fix ?? '') === normText(e.fix)));
-    if (same && mark('repeats', f.sid, `${f.slug}|words|${same.id}`)) {
-      refuse(`these words already back ${same.note}${readNote(same.note) ? '' : ', which has since been deleted'}. If this rule says something that one doesn't, propose it again.`);
-    }
     // Read under the lock, so a proposal written meanwhile is on the list.
-    const overlaps = checkRepeats(f, ruleText(n), scope, liveRules());
+    const overlaps = checkRepeats(f, ruleText(n), scope, liveRules(), same);
     const file = `${vaultPath('wiki', f.domain, f.slug)}.md`;
     writeSettled(file, text);
     appendJsonl(inboxFile(), [{
@@ -301,7 +306,7 @@ function propose(sid, p) {
     build();
     const reply = [
       `**New ${f.kind === 'knowledge' ? 'knowledge rule' : 'rule'}** ${key}: ${ruleText(n)}`,
-      ...(overlaps.length ? [`It may overlap ${andList(overlaps)}.`] : []),
+      ...(overlaps.length ? [`It may overlap ${joinList(overlaps, 'and')}.`] : []),
       `It applies from now on. To change or remove it, edit or delete ${toPosix(file)}.`,
     ];
     return [`Wrote wiki/${key}.md. End your reply with these ${['two', 'three'][reply.length - 2]} lines as they are:`, '', ...reply].join('\n');
