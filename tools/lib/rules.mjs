@@ -2,7 +2,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { parse } from './frontmatter.mjs';
 import { validGlob, overlapping } from './glob.mjs';
-import { config, vaultPath, writeText, shortHash, toPosix, today, inside } from './vault.mjs';
+import { config, vaultPath, shortHash, toPosix, today, inside } from './vault.mjs';
 
 export const LIST_FIELDS = ['applies_to', 'triggers', 'keywords'];
 export const KEY_RE = /^[a-z0-9-]+\/[a-z0-9-]+$/;
@@ -13,7 +13,7 @@ export const wrongBasis = (kind, basis) => (kind === 'knowledge' ? `a knowledge 
 export const isUrl = s => typeof s === 'string' && /^https?:\/\/\S+$/i.test(s);
 export const normTopic = s => String(s ?? '').trim().toLowerCase();
 export const validDay = s => typeof s === 'string' && /^\d{4}-\d\d-\d\d$/.test(s) && !Number.isNaN(Date.parse(s)) && new Date(s).toISOString().startsWith(s);
-const KEBAB = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
+export const KEBAB = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
 const HEAD = [
   '# Taste rules',
   "Follow these unless the user's current request or the project's own instructions say otherwise. If an edit is refused with taste rules, apply them and retry the edit.",
@@ -206,7 +206,7 @@ export function liveRules(notes = loadNotes()) {
       domain: n.domain, topic: n.topic, text,
       // Only the delivered wording counts, so an edit to a rule's evidence or globs doesn't deliver it again.
       hash: shortHash(text),
-      always: n.always, applies_to: n.applies_to, triggers: n.triggers, keywords: n.keywords,
+      kind: n.kind, always: n.always, applies_to: n.applies_to, triggers: n.triggers, keywords: n.keywords,
     };
   }
   return rules;
@@ -404,17 +404,4 @@ export function renderIndex(notes) {
     }
   }
   return `${out.join('\n')}\n`;
-}
-
-export function build({ check = false, notes = loadNotes() } = {}) {
-  const files = { 'active.md': renderActive(liveRules(notes)), 'index.md': renderIndex(notes) };
-  const stale = [];
-  for (const [name, text] of Object.entries(files)) {
-    let current = '';
-    try { current = fs.readFileSync(vaultPath(name), 'utf8').replace(/\r\n/g, '\n'); } catch {}
-    if (current === text) continue;
-    stale.push(name);
-    if (!check) writeText(vaultPath(name), text);
-  }
-  return stale;
 }

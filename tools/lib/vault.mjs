@@ -9,6 +9,7 @@ const DEFAULTS = {
   delivery: { maxRulesPerEdit: 3, maxRuleChars: 300, maxBlockChars: 1200, maxPromptExcerpts: 3, activeMaxLines: 60, activeMaxBytes: 4096, settleSeconds: 60 },
   knowledge: { staleAfterDays: 180 },
   lint: { remindAfterDays: 14 },
+  picks: { maxSheetBytes: 3_000_000 },
 };
 
 let loaded;
@@ -111,6 +112,20 @@ export function appendJsonl(file, rows) {
   fs.appendFileSync(file, rows.map(r => `${JSON.stringify(r)}\n`).join(''));
 }
 
+// Never over a file already there, so a sheet copied the same day under the same name gets the next number.
+export function copyNew(src, dir, stem, ext) {
+  fs.mkdirSync(dir, { recursive: true });
+  for (let n = 1; ; n++) {
+    const file = path.join(dir, `${stem}${n === 1 ? '' : `-${n}`}${ext}`);
+    try {
+      fs.copyFileSync(src, file, fs.constants.COPYFILE_EXCL);
+      return file;
+    } catch (e) {
+      if (e.code !== 'EEXIST') throw e;
+    }
+  }
+}
+
 export function readJsonl(file) {
   let text = '';
   try { text = fs.readFileSync(file, 'utf8'); } catch {}
@@ -123,20 +138,26 @@ export const plural = (n, word) => `${n} ${word}${n === 1 ? '' : 's'}`;
 
 const pad = n => String(n).padStart(2, '0');
 export const today = (d = new Date()) => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+// Rows stamp `at` in UTC and files are named for the local day, so a row's day is read as a local day too.
+export const localDay = at => (Number.isNaN(Date.parse(at)) ? '' : today(new Date(at)));
 export const clock = (d = new Date()) => `${today(d)} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
 
 export const inboxFile = () => vaultPath('raw', 'inbox', `${today()}.jsonl`);
+export const picksFile = () => vaultPath('raw', 'picks', `${today()}.jsonl`);
 
-function datedRows(folder) {
+export function datedFiles(folder) {
   const dir = vaultPath('raw', folder);
   let files = [];
   try { files = fs.readdirSync(dir).filter(f => f.endsWith('.jsonl')).sort(); } catch {}
-  return files.flatMap(f => readJsonl(path.join(dir, f)));
+  return files.map(f => ({ file: `raw/${folder}/${f}`, rows: readJsonl(path.join(dir, f)) }));
 }
 
+const datedRows = folder => datedFiles(folder).flatMap(f => f.rows);
+
 export const proposalRows = () => datedRows('inbox').filter(r => r.source === 'agent');
+export const pickRows = () => datedRows('picks');
 // The user's recorded answers: picks, and the older inbox rows captured from their messages.
-export const recordedRows = () => [...datedRows('picks'), ...datedRows('inbox').filter(r => r.source !== 'agent')];
+export const recordedRows = () => [...pickRows(), ...datedRows('inbox').filter(r => r.source !== 'agent')];
 
 export function appendLog(lines) {
   const file = vaultPath('log.md');

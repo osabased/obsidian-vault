@@ -1,6 +1,7 @@
 import path from 'node:path';
 import { appendLog, vaultRel } from './lib/vault.mjs';
-import { KEY_RE, readNote, toKey, build } from './lib/rules.mjs';
+import { KEY_RE, readNote, toKey } from './lib/rules.mjs';
+import { build } from './lib/build.mjs';
 
 const USAGE = 'usage: node tools/log.mjs wiki/<domain>/<slug>.md, or the page\'s full path';
 

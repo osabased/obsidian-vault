@@ -1,7 +1,8 @@
-import { config, plural, toPosix, guarded, hookErrors, errorsLog, domainsFor, today } from './lib/vault.mjs';
+import { config, plural, toPosix, guarded, hookErrors, errorsLog, domainsFor, localDay } from './lib/vault.mjs';
 import { clip, normTopic, topicNotes, loadNotes, liveRules, evidenceSessions, validDay, byKey, cmp, sharedFiles } from './lib/rules.mjs';
 import { lint, tally } from './lib/lint.mjs';
 import { lintRan, trackedSessions } from './lib/sessions.mjs';
+import { subjectRows, laterRows, newestFirst, projectName } from './lib/picks.mjs';
 
 const USAGE = 'usage: node tools/review.mjs status';
 
@@ -66,9 +67,6 @@ function correctedAgain() {
   });
 }
 
-// last_seen is in UTC and created in local time, so both are compared as local days.
-const localDay = at => (Number.isNaN(Date.parse(at)) ? '' : today(new Date(at)));
-
 // Counts the registered sessions in the rule's domain, active since it was written, that aren't in its Evidence.
 function neverShown() {
   const registered = tracked().filter(t => t.cwd !== null);
@@ -91,12 +89,20 @@ function globPairs() {
   }));
 }
 
+function provisional() {
+  const rows = subjectRows();
+  const later = laterRows(rows);
+  return newestFirst(rows.filter(r => r.status === 'provisional' && !later.has(r.id)))
+    .map(r => `- ${localDay(r.at)} · ${projectName(r.project)}/${r.subject} · ${r.question}: "${r.pick}" (${r.id})`);
+}
+
 const status = () => [
   lintLine(), '', 'Hook health', ...hookHealth(),
   ...section('Listed topics no rule has yet', emptyTopics),
   ...section('Rules corrected again in later sessions', correctedAgain),
   ...section('Rules no session was shown', neverShown),
   ...section('Rules on one topic whose globs overlap', globPairs),
+  ...section('Provisional picks not yet confirmed', provisional),
 ].join('\n');
 
 const [cmd, ...rest] = process.argv.slice(2);

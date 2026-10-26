@@ -1,14 +1,17 @@
 import fs from 'node:fs';
 import crypto from 'node:crypto';
 import {
-  config, vaultPath, proposeDomains, readJsonSafe, writeSettled, appendJsonl, appendLog, inboxFile, proposalRows, recordedRows, statePath, withLock, safeId, today, toPosix,
+  config, vaultPath, proposeDomains, writeSettled, appendJsonl, appendLog, inboxFile, proposalRows, recordedRows, statePath, withLock, today, localDay, toPosix, guarded,
 } from './lib/vault.mjs';
 import {
-  KEY_RE, BASES, wrongBasis, parseNote, noteErrors, ruleText, ruleTextParts, readNote, liveRules, build, mentions, isUrl, validDay, byKey, normTopic, domainTopics, vaultFile, joinList,
+  KEY_RE, BASES, wrongBasis, parseNote, noteErrors, ruleText, ruleTextParts, readNote, liveRules, mentions, isUrl, validDay, byKey, normTopic, domainTopics, vaultFile, joinList,
   sharedFiles,
 } from './lib/rules.mjs';
+import { build } from './lib/build.mjs';
 import { normGlob } from './lib/glob.mjs';
-import { registry, marked, mark, wasShown } from './lib/sessions.mjs';
+import { ownEntry, marked, mark, wasShown } from './lib/sessions.mjs';
+import { subjectRows, laterRows, endedBy } from './lib/picks.mjs';
+import { UsageError, readInput, refuser, failure, line as field } from './lib/input.mjs';
 
 const RUN = 'usage: node tools/propose.mjs <session-id> < rule.json';
 const USAGE = `${RUN}\n       node tools/propose.mjs --help lists the fields of rule.json`;
@@ -30,7 +33,7 @@ const help = () => [
   '    inferred     taste only: you generalized a correction. quote: the words you generalized',
   "    pick         taste only: the user's recorded answer from an earlier session backs the rule.",
   '                 pick: the id of a row in raw/picks/ (q-) or of an older user-written row in raw/inbox/ (c-, p-).',
-  "                 The row's own words are cited; a row backs one rule.",
+  "                 The row's own words are cited; a row backs one rule. A provisional, replaced or confirmed pick backs none.",
   "    reading      taste only: your own reading of what you saw, labelled as yours. reading: what you saw, in one line",
   '    failure      knowledge only: something worked only after a failure.',
   '                 error: one line of the error as it was printed',
@@ -56,25 +59,8 @@ const help = () => [
 
 const topicLines = () => [...domainTopics()].flatMap(([d, topics]) => (topics.length ? [`                 ${d}: ${topics.join(', ')}`] : []));
 
-class UsageError extends Error {}
-class Refused extends Error {}
-
-const refuse = msg => { throw new Refused(`Not proposed: ${msg}`); };
-
-function readInput() {
-  let p;
-  try { p = JSON.parse(fs.readFileSync(0, 'utf8').replace(/^﻿/, '')); } catch { throw new UsageError(); }
-  if (!p || typeof p !== 'object' || Array.isArray(p)) throw new UsageError();
-  return p;
-}
-
-function line(p, name, required = true) {
-  const v = p[name] ?? '';
-  if (typeof v !== 'string') refuse(`${name} must be a string.`);
-  if (required && !v.trim()) refuse(`${name} is missing.`);
-  if (/[\r\n]/.test(v.trim())) refuse(`${name} must be one line.`);
-  return v.trim();
-}
+const refuse = refuser('Not proposed');
+const line = (p, name, required) => field(refuse, p, name, required);
 
 function list(p, name) {
   const v = p[name] ?? [];
@@ -83,9 +69,7 @@ function list(p, name) {
 }
 
 function sessionOf(sid) {
-  const own = process.env.CLAUDE_CODE_SESSION_ID;
-  if (own && own !== sid) refuse(`${sid} isn't this session, which is ${own}.`);
-  const entry = readJsonSafe(registry(safeId(sid)));
+  const entry = ownEntry(sid, refuse);
   const domains = proposeDomains(entry?.cwd);
   if (!domains.length) refuse(`the taste vault has no session ${sid} from a domain's project folder or the vault folder. Pass the session id from the taste vault's note at session start, or $CLAUDE_CODE_SESSION_ID in the vault folder.`);
   return { ...entry, domains };
@@ -128,10 +112,15 @@ function pickEvidence(id, domain) {
   const row = recordedRows().find(r => r.id === id);
   if (!row) refuse(`there's no row ${id} in raw/picks/ or raw/inbox/.`);
   if (row.domain && row.domain !== domain && domain !== 'global') refuse(`${id} was recorded in ${row.domain}, not ${domain}.`);
-  const from = { pick: id, day: String(row.at ?? '').slice(0, 10) || today(), session: String(row.session ?? '').slice(0, 8) || 'unknown' };
+  // A reversed or confirmed pick no longer stands on its own, and a provisional one is the agent's choice, not the user's.
+  const by = laterRows(subjectRows()).get(id);
+  if (by?.how === 'replaces') refuse(`${id} was replaced by ${by.id}, so it no longer stands.`);
+  if (by) refuse(`${id} was ${endedBy(by)}. Propose from that row.`);
+  if (row.status === 'provisional') refuse(`${id} is provisional: an agent picked it, not the user. Propose from the row that confirms it.`);
+  const from = { pick: id, day: localDay(row.at) || today(), session: String(row.session ?? '').slice(0, 8) || 'unknown' };
   if (typeof row.pick === 'string' && row.pick) {
     const said = row.notes ? `${row.pick} — ${row.notes}` : row.pick;
-    const others = (row.options ?? []).map(o => o.label).filter(l => l !== row.pick);
+    const others = (Array.isArray(row.options) ? row.options : []).map(o => o?.label).filter(l => typeof l === 'string' && l !== row.pick);
     const cite = `"${said}"${others.length ? `, picked over ${others.map(l => `"${l}"`).join(' and ')}` : ''}${row.question ? ` for "${row.question}"` : ''}`;
     return { ...from, kind: 'choice', said, cite };
   }
@@ -347,7 +336,8 @@ function propose(sid, p) {
     writeSettled(file, text);
     appendJsonl(inboxFile(), [row(key)]);
     appendLog([`wrote ${key} · session ${sid.slice(0, 8)}`]);
-    build();
+    // The note is written by now, so a failed build costs the generated files, not the reply that names the rule.
+    guarded('build', build);
     const reply = [
       `**New ${f.kind === 'knowledge' ? 'knowledge rule' : 'rule'}** ${key}: ${ruleText(n)}`,
       ...(overlaps.length ? [`It may overlap ${joinList(overlaps, 'and')}.`] : []),
@@ -363,14 +353,7 @@ try {
   else if (!sid || rest.length) throw new UsageError();
   else console.log(propose(sid, readInput()));
 } catch (e) {
-  if (e instanceof UsageError) {
-    console.error(USAGE);
-    process.exitCode = 2;
-  } else if (e instanceof Refused) {
-    console.error(e.message);
-    process.exitCode = 1;
-  } else {
-    console.error(`propose failed: ${e.message}`);
-    process.exitCode = 1;
-  }
+  const f = failure(e, 'propose', USAGE);
+  console.error(f.message);
+  process.exitCode = f.code;
 }

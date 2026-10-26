@@ -1,4 +1,4 @@
-import { build } from './lib/rules.mjs';
+import { build } from './lib/build.mjs';
 
 const args = process.argv.slice(2);
 const check = args[0] === '--check';
