@@ -1,6 +1,6 @@
 ---
 name: ingest
-description: "Go through one source with the user (a reference, a judgment, a doc or changelog page). What they say about it becomes pages and rules."
+description: "Go through one source with the user (a reference, a doc or changelog page). What they say about it becomes pages and rules."
 disable-model-invocation: true
 ---
 
@@ -8,7 +8,7 @@ disable-model-invocation: true
 
 Work in the vault root. AGENTS.md has the page and rule formats. The user's typed words about the source are the evidence.
 
-1. **Source.** Take the one source the user named: a file under `raw/refs/` or `raw/judgments/`, or a URL. Copy a file from elsewhere into `raw/refs/` under a new name first. If they named none, list the files in those two folders that no page's `source` names yet, and ask which.
+1. **Source.** Take the one source the user named: a file under `raw/refs/`, or a URL. Copy a file from elsewhere into `raw/refs/` under a new name first. If they named none, list the files in `raw/refs/` that no page's `source` names yet, and ask which.
 2. **Read it** in full. For a URL, the browser's `get_page_text` gives the page's own words, which a knowledge rule can quote; WebFetch gives a summary.
 3. **Say back** what it shows, a line or two per topic of the domain (`node tools/propose.mjs --help` lists the ones its rules and pages have and the ones it lists), labelled as your reading. Ask what they like and dislike in it and why, and wait for the answer.
    - For a doc or changelog, say instead which of its facts your training gets wrong or doesn't know, with its date, and ask which matter to them. How-tos (steps, setup, API usage) belong in the project's skills, for Roblox the osaskills `roblox-*` skills: tell the user so.

@@ -3,7 +3,8 @@
     "roblox-ui": {
       "title": "Roblox game UI",
       "projects": ["C:/Users/Lowle/OneDrive/Desktop/roblox-ui"],
-      "topics": ["layout", "color", "typography", "motion", "components", "feedback", "code"]
+      "topics": ["layout", "color", "typography", "motion", "components", "feedback", "code"],
+      "showSkipTopics": ["code"]
     }
   },
   "delivery": {

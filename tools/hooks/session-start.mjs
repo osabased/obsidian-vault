@@ -1,5 +1,6 @@
 import { runHook, domainsFor, inVaultFolder, vaultPath, toPosix, guarded, config, plural, clock } from '../lib/vault.mjs';
-import { alwaysContext, alwaysIn, loadNotes, settledNotes, liveRules, build, domainTopics, joinList, clip } from '../lib/rules.mjs';
+import { alwaysContext, alwaysIn, loadNotes, settledNotes, liveRules, domainTopics, joinList, clip } from '../lib/rules.mjs';
+import { build } from '../lib/build.mjs';
 import { touchSession, clearMarkers, markAlways, markShown, tidy, errorsSinceLint, daysSinceLint } from '../lib/sessions.mjs';
 
 function proposeNote(sid) {
@@ -15,6 +16,16 @@ function proposeNote(sid) {
     `\`node "${script}" --help\` lists the fields.`,
     `Pipe the rule as JSON to \`node "${script}" ${sid}\` from the Bash tool with a quoted heredoc, since PowerShell turns curly quotes and dashes into ?.`,
     'Then end your reply with the lines it prints.',
+  ].join(' ');
+}
+
+function pickNote(sid) {
+  const script = toPosix(vaultPath('tools', 'pick.mjs'));
+  return [
+    'Taste vault: when the user picks between options you showed them, or comments on one piece of work, record it by piping JSON',
+    `to \`node "${script}" ${sid}\` the same way; a pick you make alone while the user is away is provisional.`,
+    `Before building or reviewing a piece that has picks, run \`node "${script}" show ${sid} <subject>\` and keep to what it prints.`,
+    `\`node "${script}" --help\` lists the fields.`,
   ].join(' ');
 }
 
@@ -56,6 +67,7 @@ runHook('session-start', input => {
   const always = alwaysContext(scope, rules);
   const index = guarded('index note', () => indexNote(scope, ready));
   let propose = '';
+  let pick = '';
   // Vault sessions register so /ingest can propose; the skill tells them how, so they get no note.
   if (input.session_id && (doms.length || inVaultFolder(input.cwd))) {
     touchSession(input);
@@ -63,10 +75,13 @@ runHook('session-start', input => {
     // deliver what didn't fit here.
     for (const k of always.keys) markShown(input.session_id, k);
     for (const [k, r] of alwaysIn(rules, scope)) markAlways(input.session_id, k, r);
-    if (doms.length) propose = proposeNote(input.session_id);
+    if (doms.length) {
+      propose = proposeNote(input.session_id);
+      pick = pickNote(input.session_id);
+    }
   }
   // Compaction and /clear start the context again within one session, which already heard these lines.
   const health = ['compact', 'clear'].includes(input.source) ? [] : [guarded('hook errors', errorsNote), guarded('lint reminder', lintNote)];
-  const context = [always.text, index, propose, ...health].filter(Boolean).join('\n\n');
+  const context = [always.text, index, propose, pick, ...health].filter(Boolean).join('\n\n');
   return context ? { hookSpecificOutput: { hookEventName: 'SessionStart', additionalContext: context } } : null;
 });

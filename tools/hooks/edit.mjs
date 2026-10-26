@@ -9,10 +9,11 @@ function vaultGuard(file, cwd) {
   if (rel === null) return null;
   const low = rel.toLowerCase();
   if (low === 'active.md' || low === 'index.md') return `${rel} is generated from the notes. Edit the notes instead, then run \`node tools/build.mjs\`.`;
+  if (low === 'decisions.md') return `${rel} is generated from the picks in raw/picks/. Record picks with tools/pick.mjs instead.`;
   if (low === '.state' || low.startsWith('.state/')) return ".state/ is the hooks' own bookkeeping. Leave it to them.";
   if (low.startsWith('raw/')) {
-    if (fs.existsSync(toPosix(file, cwd))) return `raw/ is append-only: ${rel} already exists and can't be changed. Put new material in a new file under raw/refs/ or raw/judgments/.`;
-    if (!/^raw\/(?:refs|judgments)\/./.test(low)) return 'raw/ is append-only. New files go under raw/refs/ or raw/judgments/; tools/propose.mjs writes the rest.';
+    if (fs.existsSync(toPosix(file, cwd))) return `raw/ is append-only: ${rel} already exists and can't be changed. Put new material in a new file under raw/refs/.`;
+    if (!/^raw\/refs\/./.test(low)) return 'raw/ is append-only. New files go under raw/refs/; tools/propose.mjs and tools/pick.mjs write the rest.';
   }
   return null;
 }

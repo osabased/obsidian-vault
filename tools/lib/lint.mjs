@@ -1,10 +1,11 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { isBuiltin } from 'node:module';
-import { config, vaultPath, plural, today } from './vault.mjs';
+import { config, vaultPath, plural, today, datedFiles } from './vault.mjs';
 import {
-  loadNotes, noteErrors, ruleText, ruleTextParts, liveRules, knownDomain, alwaysSize, build, isUrl, validDay, normTopic, topicNotes, vaultFile, toKey, resolver, linksUnder, noteLinks, byTopic, isTopicPage,
+  loadNotes, noteErrors, ruleText, ruleTextParts, liveRules, knownDomain, alwaysSize, isUrl, validDay, normTopic, topicNotes, vaultFile, toKey, resolver, linksUnder, noteLinks, byTopic, isTopicPage,
 } from './rules.mjs';
+import { build } from './build.mjs';
 
 export const tally = found => {
   const errors = found.filter(f => f.level === 'error').length;
@@ -49,6 +50,7 @@ export function lint(notes = loadNotes()) {
 
   lintTopics(notes, domains, add);
   lintTopicPages(notes, add);
+  lintPicks(add);
   const rules = liveRules(notes);
   for (const d of Object.keys(domains)) {
     const size = alwaysSize(rules, ['global', d]);
@@ -78,6 +80,20 @@ function lintTopics(notes, domains, add) {
   }
 }
 
+// Warnings, since raw/ is append-only: a row is fixed by recording a new one, not by editing it.
+function lintPicks(add) {
+  const files = datedFiles('picks');
+  const ids = new Set(files.flatMap(f => f.rows.map(r => r.id)));
+  for (const { file, rows } of files) {
+    for (const r of rows) {
+      for (const how of ['replaces', 'confirms']) {
+        if (typeof r[how] === 'string' && !ids.has(r[how])) add('warn', file, `${r.id} ${how} ${r[how]}, which has no row`);
+      }
+      if (typeof r.sheet === 'string' && r.sheet && !fs.existsSync(vaultPath(r.sheet))) add('warn', file, `${r.id} names sheet ${r.sheet}, which doesn't exist`);
+    }
+  }
+}
+
 // A topic's updates would split between two topic pages.
 function lintTopicPages(notes, add) {
   for (const topics of byTopic(notes.filter(isTopicPage)).values()) {
@@ -90,7 +106,7 @@ function lintTopicPages(notes, add) {
 
 // Obsidian links an attachment such as ![[shop.png]] by its file name from anywhere in the vault, so only links to notes are checked.
 // A link to a note not written yet is a warning, like a missing topic, so a page being written in Obsidian doesn't block a commit.
-// Obsidian also resolves a link to any other markdown file in the vault, such as [[index]] or a judgment under raw/,
+// Obsidian also resolves a link to any other markdown file in the vault, such as [[index]] or [[decisions]],
 // by its path or its bare name. A bare [[slug]] two notes share resolves to neither in index.md, so it has to name its folder.
 function lintLinks(n, keys, slugs, md, add) {
   for (const target of noteLinks(n)) {
