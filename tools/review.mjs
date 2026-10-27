@@ -2,7 +2,7 @@ import { config, plural, toPosix, guarded, hookErrors, errorsLog, domainsFor, lo
 import { clip, normTopic, topicNotes, loadNotes, liveRules, evidenceSessions, validDay, byKey, cmp, sharedFiles } from './lib/rules.mjs';
 import { lint, tally } from './lib/lint.mjs';
 import { lintRan, trackedSessions } from './lib/sessions.mjs';
-import { subjectRows, laterRows, newestFirst, projectName } from './lib/picks.mjs';
+import { subjectRows, liveRows, newestFirst, projectName } from './lib/picks.mjs';
 
 const USAGE = 'usage: node tools/review.mjs status';
 
@@ -90,9 +90,7 @@ function globPairs() {
 }
 
 function provisional() {
-  const rows = subjectRows();
-  const later = laterRows(rows);
-  return newestFirst(rows.filter(r => r.status === 'provisional' && !later.has(r.id)))
+  return newestFirst(liveRows(subjectRows()).filter(r => r.status === 'provisional'))
     .map(r => `- ${localDay(r.at)} · ${projectName(r.project)}/${r.subject} · ${r.question}: "${r.pick}" (${r.id})`);
 }
 

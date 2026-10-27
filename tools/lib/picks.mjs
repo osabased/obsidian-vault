@@ -21,6 +21,11 @@ export function laterRows(rows) {
   return later;
 }
 
+export function liveRows(rows) {
+  const later = laterRows(rows);
+  return rows.filter(r => !later.has(r.id));
+}
+
 export const endedBy = by => `${by.how === 'replaces' ? 'replaced by' : 'confirmed as'} ${by.id}`;
 
 export const newestFirst = rows => [...rows].sort((a, b) => cmp(String(b.at ?? ''), String(a.at ?? '')) || cmp(String(a.id), String(b.id)));
@@ -28,8 +33,10 @@ export const newestFirst = rows => [...rows].sort((a, b) => cmp(String(b.at ?? '
 const isComment = r => typeof r.text === 'string';
 const statusWord = r => (r.status === 'provisional' ? 'provisional' : r.confirms ? 'confirmed' : 'user');
 
+export const otherLabels = r => (Array.isArray(r.options) ? r.options : []).map(o => o?.label).filter(l => typeof l === 'string' && l !== r.pick);
+
 function over(r) {
-  const others = (Array.isArray(r.options) ? r.options : []).map(o => o?.label).filter(l => typeof l === 'string' && l !== r.pick);
+  const others = otherLabels(r);
   return others.length ? ` over ${joinList(others.map(l => `"${l}"`), 'and')}` : '';
 }
 

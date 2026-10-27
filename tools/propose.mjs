@@ -10,8 +10,8 @@ import {
 import { build } from './lib/build.mjs';
 import { normGlob } from './lib/glob.mjs';
 import { ownEntry, marked, mark, wasShown } from './lib/sessions.mjs';
-import { subjectRows, laterRows, endedBy } from './lib/picks.mjs';
-import { UsageError, readInput, refuser, failure, line as field } from './lib/input.mjs';
+import { subjectRows, laterRows, endedBy, otherLabels } from './lib/picks.mjs';
+import { UsageError, readInput, refuse, failure, line } from './lib/input.mjs';
 
 const RUN = 'usage: node tools/propose.mjs <session-id> < rule.json';
 const USAGE = `${RUN}\n       node tools/propose.mjs --help lists the fields of rule.json`;
@@ -59,9 +59,6 @@ const help = () => [
 
 const topicLines = () => [...domainTopics()].flatMap(([d, topics]) => (topics.length ? [`                 ${d}: ${topics.join(', ')}`] : []));
 
-const refuse = refuser('Not proposed');
-const line = (p, name, required) => field(refuse, p, name, required);
-
 function list(p, name) {
   const v = p[name] ?? [];
   if (!Array.isArray(v) || v.some(x => typeof x !== 'string' || !x.trim() || /[\r\n]/.test(x))) refuse(`${name} must be a list of one-line strings.`);
@@ -69,7 +66,8 @@ function list(p, name) {
 }
 
 function sessionOf(sid) {
-  const entry = ownEntry(sid, refuse);
+  const { entry, notOwn } = ownEntry(sid);
+  if (notOwn) refuse(notOwn);
   const domains = proposeDomains(entry?.cwd);
   if (!domains.length) refuse(`the taste vault has no session ${sid} from a domain's project folder or the vault folder. Pass the session id from the taste vault's note at session start, or $CLAUDE_CODE_SESSION_ID in the vault folder.`);
   return { ...entry, domains };
@@ -120,8 +118,8 @@ function pickEvidence(id, domain) {
   const from = { pick: id, day: localDay(row.at) || today(), session: String(row.session ?? '').slice(0, 8) || 'unknown' };
   if (typeof row.pick === 'string' && row.pick) {
     const said = row.notes ? `${row.pick} — ${row.notes}` : row.pick;
-    const others = (Array.isArray(row.options) ? row.options : []).map(o => o?.label).filter(l => typeof l === 'string' && l !== row.pick);
-    const cite = `"${said}"${others.length ? `, picked over ${others.map(l => `"${l}"`).join(' and ')}` : ''}${row.question ? ` for "${row.question}"` : ''}`;
+    const others = otherLabels(row);
+    const cite = `"${said}"${others.length ? `, picked over ${joinList(others.map(l => `"${l}"`), 'and')}` : ''}${row.question ? ` for "${row.question}"` : ''}`;
     return { ...from, kind: 'choice', said, cite };
   }
   if (typeof row.text === 'string' && row.text.trim()) return { ...from, kind: 'stated', said: row.text.trim(), cite: `"${row.text.trim()}"` };
@@ -353,7 +351,7 @@ try {
   else if (!sid || rest.length) throw new UsageError();
   else console.log(propose(sid, readInput()));
 } catch (e) {
-  const f = failure(e, 'propose', USAGE);
+  const f = failure(e, 'propose', USAGE, 'Not proposed');
   console.error(f.message);
   process.exitCode = f.code;
 }

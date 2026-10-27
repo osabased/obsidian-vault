@@ -6,8 +6,8 @@ import {
 } from './lib/vault.mjs';
 import { KEBAB, settledRules, ruleLine, normTopic, joinList, byKey } from './lib/rules.mjs';
 import { build } from './lib/build.mjs';
-import { subjectRows, laterRows, endedBy, newestFirst, entry, projectName, sameProject } from './lib/picks.mjs';
-import { UsageError, readInput, refuser, failure, line } from './lib/input.mjs';
+import { subjectRows, laterRows, liveRows, endedBy, newestFirst, entry, projectName, sameProject } from './lib/picks.mjs';
+import { UsageError, readInput, refuse, failure, line } from './lib/input.mjs';
 import { ownEntry, markShown } from './lib/sessions.mjs';
 
 const RUN = 'usage: node tools/pick.mjs <session-id> < pick.json';
@@ -47,21 +47,18 @@ const help = () => [
   "reviewing the piece, and paste what it prints into the reviewer's prompt.",
 ].join('\n');
 
-const refuse = refuser('Not recorded');
-const showRefuse = refuser('Not shown');
-
-function sessionOf(sid, refuse) {
-  const entryRow = ownEntry(sid, refuse);
+function sessionOf(sid) {
+  const { entry: entryRow, notOwn } = ownEntry(sid);
+  if (notOwn) refuse(notOwn);
   const [hit] = domainsFor(entryRow?.cwd);
   if (!hit) refuse(`the taste vault has no session ${sid} from a domain's project folder. Pass the session id from the taste vault's note at session start.`);
   return { ...entryRow, domain: hit.domain, project: hit.root };
 }
 
-const field = (p, name, required) => line(refuse, p, name, required);
-const optional = (p, name) => field(p, name, false) || null;
+const optional = (p, name) => line(p, name, false) || null;
 
 function subjectOf(p) {
-  const subject = field(p, 'subject');
+  const subject = line(p, 'subject');
   if (!KEBAB.test(subject)) refuse('subject must be lowercase-kebab-case.');
   return subject;
 }
@@ -82,7 +79,7 @@ const SHEET = /\.(?:png|jpe?g|webp)$/i;
 const mb = n => (n / 1e6).toFixed(1);
 
 function sheetOf(p) {
-  const given = field(p, 'sheet', false);
+  const given = line(p, 'sheet', false);
   if (!given) return null;
   const file = toPosix(given);
   const stat = fs.statSync(file, { throwIfNoEntry: false });
@@ -105,64 +102,70 @@ function target(rows, later, id, s, subject) {
   return row;
 }
 
-// Each kind's name and fields. A field that belongs to another kind is refused rather than dropped without a word.
-const FIELDS = {
-  options: ['pick', ['subject', 'question', 'header', 'options', 'pick', 'status', 'notes', 'reason', 'sheet', 'replaces']],
-  confirms: ['confirmation', ['confirms', 'subject', 'notes', 'reason']],
-  comment: ['comment', ['subject', 'comment']],
-};
-const ALL_FIELDS = new Set(Object.values(FIELDS).flatMap(([, fields]) => fields));
-
-// Each kind checks its input before the lock, and builds its row from the rows read under it.
+// A field that belongs to another kind is refused rather than dropped without a word. Each kind checks its input
+// before the lock, and builds its row from the rows read under it.
 const KINDS = {
-  options(p) {
-    const subject = subjectOf(p);
-    const question = field(p, 'question');
-    const header = optional(p, 'header');
-    const options = optionsOf(p.options);
-    const pick = field(p, 'pick');
-    if (!options.some(o => o.label === pick)) refuse('pick must be the label of one of the options.');
-    const status = field(p, 'status');
-    if (!['user', 'provisional'].includes(status)) refuse('status must be user or provisional.');
-    const notes = optional(p, 'notes');
-    if (notes && status === 'provisional') refuse("notes are the user's words, and a provisional pick has none. Put your own reasons in reason.");
-    const reason = optional(p, 'reason');
-    return {
-      sheet: sheetOf(p), replaces: field(p, 'replaces', false),
-      make: () => ({ subject, question, header, options, multiSelect: false, pick, notes, reason, status, sheet: null }),
-    };
+  options: {
+    name: 'pick',
+    fields: ['subject', 'question', 'header', 'options', 'pick', 'status', 'notes', 'reason', 'sheet', 'replaces'],
+    read: p => {
+      const subject = subjectOf(p);
+      const question = line(p, 'question');
+      const header = optional(p, 'header');
+      const options = optionsOf(p.options);
+      const pick = line(p, 'pick');
+      if (!options.some(o => o.label === pick)) refuse('pick must be the label of one of the options.');
+      const status = line(p, 'status');
+      if (!['user', 'provisional'].includes(status)) refuse('status must be user or provisional.');
+      const notes = optional(p, 'notes');
+      if (notes && status === 'provisional') refuse("notes are the user's words, and a provisional pick has none. Put your own reasons in reason.");
+      const reason = optional(p, 'reason');
+      return {
+        sheet: sheetOf(p), replaces: line(p, 'replaces', false),
+        make: () => ({ subject, question, header, options, multiSelect: false, pick, notes, reason, status, sheet: null }),
+      };
+    },
   },
-  confirms(p, s) {
-    const subject = p.subject === undefined ? null : subjectOf(p);
-    const confirms = field(p, 'confirms');
-    const notes = optional(p, 'notes');
-    const reason = optional(p, 'reason');
-    return {
-      make: (rows, later) => {
-        const was = target(rows, later, confirms, s, subject);
-        if (was.status !== 'provisional') refuse(`${confirms} isn't provisional, so there's nothing to confirm.`);
-        return {
-          subject: was.subject, question: was.question, header: was.header ?? null, options: was.options, multiSelect: false,
-          pick: was.pick, notes, reason: reason ?? was.reason ?? null, status: 'user', sheet: was.sheet ?? null, confirms,
-        };
-      },
-    };
+  confirms: {
+    name: 'confirmation',
+    fields: ['confirms', 'subject', 'notes', 'reason'],
+    read: (p, s) => {
+      const subject = p.subject === undefined ? null : subjectOf(p);
+      const confirms = line(p, 'confirms');
+      const notes = optional(p, 'notes');
+      const reason = optional(p, 'reason');
+      return {
+        make: (rows, later) => {
+          const was = target(rows, later, confirms, s, subject);
+          if (was.status !== 'provisional') refuse(`${confirms} isn't provisional, so there's nothing to confirm.`);
+          return {
+            subject: was.subject, question: was.question, header: was.header ?? null, options: was.options, multiSelect: false,
+            pick: was.pick, notes, reason: reason ?? was.reason ?? null, status: 'user', sheet: was.sheet ?? null, confirms,
+          };
+        },
+      };
+    },
   },
-  comment(p) {
-    const subject = subjectOf(p);
-    const text = field(p, 'comment');
-    return { make: () => ({ subject, text, status: 'user' }) };
+  comment: {
+    name: 'comment',
+    fields: ['subject', 'comment'],
+    read: p => {
+      const subject = subjectOf(p);
+      const text = line(p, 'comment');
+      return { make: () => ({ subject, text, status: 'user' }) };
+    },
   },
 };
+const ALL_FIELDS = new Set(Object.values(KINDS).flatMap(k => k.fields));
 
 function record(sid, p) {
-  const s = sessionOf(sid, refuse);
+  const s = sessionOf(sid);
   const kinds = Object.keys(KINDS).filter(k => p[k] !== undefined);
   if (kinds.length !== 1) refuse('give one of: a pick with question and options, confirms, or comment.');
-  const [name, own] = FIELDS[kinds[0]];
-  const stray = Object.keys(p).find(k => p[k] !== undefined && ALL_FIELDS.has(k) && !own.includes(k));
-  if (stray) refuse(`${stray} doesn't go with a ${name}. node tools/pick.mjs --help lists each one's fields.`);
-  const { make, sheet = null, replaces = '' } = KINDS[kinds[0]](p, s);
+  const kind = KINDS[kinds[0]];
+  const stray = Object.keys(p).find(k => p[k] !== undefined && ALL_FIELDS.has(k) && !kind.fields.includes(k));
+  if (stray) refuse(`${stray} doesn't go with a ${kind.name}. node tools/pick.mjs --help lists each one's fields.`);
+  const { make, sheet = null, replaces = '' } = kind.read(p, s);
   const base = {
     at: new Date().toISOString(), source: 'pick',
     session: sid, transcript: s.transcript ?? null, cwd: s.cwd ?? null, domain: s.domain, project: s.project,
@@ -170,6 +173,8 @@ function record(sid, p) {
 
   // Read under the lock, so two picks recorded at once can't both replace or confirm the same row.
   const out = withLock(statePath('pick.lock'), () => {
+    const day = today();
+    const file = picksFile(day);
     const rows = pickRows();
     const later = laterRows(rows);
     const ids = new Set(rows.map(r => r.id));
@@ -183,13 +188,13 @@ function record(sid, p) {
       }
       row.replaces = replaces;
     }
-    const out = [`Recorded ${row.id} in raw/picks/${path.basename(picksFile())}.`];
+    const out = [`Recorded ${row.id} in raw/picks/${path.basename(file)}.`];
     if (sheet) {
-      const copied = copyNew(sheet, vaultPath('raw', 'picks'), `${today()}-${row.subject}`, path.extname(sheet).toLowerCase());
+      const copied = copyNew(sheet, vaultPath('raw', 'picks'), `${day}-${row.subject}`, path.extname(sheet).toLowerCase());
       row.sheet = `raw/picks/${path.basename(copied)}`;
       out.push(`Copied the sheet to ${row.sheet}.`);
     }
-    appendJsonl(picksFile(), [row]);
+    appendJsonl(file, [row]);
     return out.join('\n');
   });
   guarded('build', build);
@@ -197,11 +202,10 @@ function record(sid, p) {
 }
 
 function show(sid, subject) {
-  const s = sessionOf(sid, showRefuse);
-  if (!KEBAB.test(subject)) showRefuse('subject must be lowercase-kebab-case.');
+  const s = sessionOf(sid);
+  if (!KEBAB.test(subject)) refuse('subject must be lowercase-kebab-case.');
   const rows = subjectRows().filter(r => sameProject(r.project, s.project));
-  const later = laterRows(rows);
-  const live = newestFirst(rows.filter(r => r.subject === subject && !later.has(r.id)));
+  const live = newestFirst(liveRows(rows).filter(r => r.subject === subject));
   const name = projectName(s.project);
   const sheet = r => `Sheet: ${toPosix(vaultPath(r.sheet))}`;
   const others = [...new Set(rows.map(r => r.subject))].filter(x => x !== subject).sort();
@@ -218,13 +222,16 @@ function show(sid, subject) {
 }
 
 const args = process.argv.slice(2);
+let refused = 'Not recorded';
 try {
   if (args[0] === '--help' && args.length === 1) console.log(help());
-  else if (args[0] === 'show' && args.length === 3) console.log(show(args[1], args[2]));
-  else if (args.length === 1 && !['show', '--help'].includes(args[0])) console.log(record(args[0], readInput()));
+  else if (args[0] === 'show' && args.length === 3) {
+    refused = 'Not shown';
+    console.log(show(args[1], args[2]));
+  } else if (args.length === 1 && !['show', '--help'].includes(args[0])) console.log(record(args[0], readInput()));
   else throw new UsageError();
 } catch (e) {
-  const f = failure(e, 'pick', USAGE);
+  const f = failure(e, 'pick', USAGE, refused);
   console.error(f.message);
   process.exitCode = f.code;
 }
