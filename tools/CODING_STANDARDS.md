@@ -26,7 +26,7 @@ These keep the hooks safe to run in every session. Follow them when you change a
 - Code that two entry points share goes in `tools/lib/`; the rest stays in its entry point.
 - Command-line scripts: usage errors exit 2, failures exit 1.
 - Comments only for a non-obvious why. No docstrings, banner comments or TODOs.
-- No test-only code. Tests change behavior through `taste.config.json`.
+- No test-only code. Tests change behavior through `vault.config.json`.
 
 ## What lint enforces
 

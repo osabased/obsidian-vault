@@ -15,7 +15,7 @@ const DEFAULTS = {
 let loaded;
 export function config() {
   if (!loaded) {
-    const c = readJson(vaultPath('taste.config.json'), {});
+    const c = readJson(vaultPath('vault.config.json'), {});
     loaded = { domains: c.domains ?? {}, ...Object.fromEntries(Object.entries(DEFAULTS).map(([k, d]) => [k, { ...d, ...c[k] }])) };
   }
   return loaded;

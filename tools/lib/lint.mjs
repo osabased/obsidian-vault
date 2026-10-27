@@ -26,7 +26,7 @@ export function lint(notes = loadNotes()) {
 
   for (const n of notes) {
     if (n.depth === 1) add('error', n.rel, 'notes go in wiki/<domain>/');
-    else if (!knownDomain(n.domain)) add('error', n.rel, `${n.domain} isn't a domain in taste.config.json`);
+    else if (!knownDomain(n.domain)) add('error', n.rel, `${n.domain} isn't a domain in vault.config.json`);
     if (n.depth > 2) add('warn', n.rel, 'notes go directly in wiki/<domain>/, not in subfolders, or the hooks never deliver them');
     for (const e of noteErrors(n)) add('error', n.rel, e);
     lintLinks(n, keys, slugs, md, add);
@@ -75,7 +75,7 @@ function lintTopics(notes, domains, add) {
       if (more.length || listed.includes(t)) continue;
       const others = [...new Set([...listed, ...[...mine.keys()].filter(k => k !== t)])];
       const fix = others.length ? ` Use one of ${others.join(', ')}, or add it to the list` : '';
-      add('warn', n.rel, `no other ${d} rule has topic ${n.data.topic.trim()}, and taste.config.json doesn't list it.${fix}`);
+      add('warn', n.rel, `no other ${d} rule has topic ${n.data.topic.trim()}, and vault.config.json doesn't list it.${fix}`);
     }
   }
 }

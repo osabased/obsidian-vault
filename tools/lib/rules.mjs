@@ -166,7 +166,7 @@ export const knownDomain = d => d === 'global' || Object.hasOwn(config().domains
 // Why a rule note never reaches a session, or null when it does. A superseded note says so on its own.
 function undelivered(n) {
   if (n.depth !== 2) return 'it is not directly in wiki/<domain>/';
-  if (!knownDomain(n.domain)) return `${n.domain} isn't a domain in taste.config.json`;
+  if (!knownDomain(n.domain)) return `${n.domain} isn't a domain in vault.config.json`;
   return noteErrors(n)[0] ?? null;
 }
 
@@ -185,7 +185,7 @@ export function byTopic(notes) {
 // Each domain's live rules by topic, so lint and propose's help agree on which topics are in use.
 export const topicNotes = (notes = loadNotes()) => byTopic(notes.filter(isLive));
 
-// Each domain's topics: the ones taste.config.json lists, in its order, then the others its live rules and pages have.
+// Each domain's topics: the ones vault.config.json lists, in its order, then the others its live rules and pages have.
 export function domainTopics(notes = loadNotes()) {
   const { domains } = config();
   const used = topicNotes(notes);
@@ -254,7 +254,7 @@ export function domainOrder(domains) {
   return [...new Set(domains)].sort((a, b) => rank(a) - rank(b) || cmp(a, b));
 }
 
-export const domainTitle = d => (d === 'global' ? 'Every project' : config().domains[d]?.title ?? 'not in taste.config.json');
+export const domainTitle = d => (d === 'global' ? 'Every project' : config().domains[d]?.title ?? 'not in vault.config.json');
 
 const isRule = line => line.startsWith('- ');
 const alwaysEntries = rules => Object.entries(rules).filter(([, r]) => r.always).sort(byKey);
