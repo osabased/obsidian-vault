@@ -9,8 +9,9 @@ triggers: []
 keywords:
   - 'style tile'
   - 'style tiles'
+  - 'style-tile'
 created: 2026-10-21
-updated: 2026-10-21
+updated: 2026-10-25
 ---
 
 **Do:** When offering style tiles, make one of the three bold (saturated, chunky, outlined text) so the set runs from bold to calm.

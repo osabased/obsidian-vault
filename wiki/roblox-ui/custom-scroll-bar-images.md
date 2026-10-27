@@ -13,8 +13,13 @@ keywords:
   - 'MidImage'
   - 'BottomImage'
   - 'rhr'
+  - 'scroll'
+  - 'scrollbar'
+  - 'scroll bars'
+  - 'scrollbars'
+  - 'ScrollingFrame'
 created: 2026-10-24
-updated: 2026-10-24
+updated: 2026-10-25
 ---
 
 **Do:** Draw custom scroll bar images (TopImage, MidImage, BottomImage) faithfully in rhr.

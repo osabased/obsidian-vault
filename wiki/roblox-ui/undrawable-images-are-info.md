@@ -12,8 +12,11 @@ keywords:
   - 'image-missing'
   - 'missingAssets'
   - 'rhr check'
+  - 'undrawable'
+  - 'missing asset'
+  - 'missing assets'
 created: 2026-10-24
-updated: 2026-10-24
+updated: 2026-10-25
 ---
 
 **Do:** Have rhr check report every image it can't draw as an image-missing finding with the reason: info when Roblox would draw it (rbxasset, rbxthumb), warning when Roblox refused the id.

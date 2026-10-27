@@ -13,8 +13,14 @@ keywords:
   - 'spend'
   - 'benchmark'
   - 'test the skill'
+  - 'evals'
+  - 'evaluate'
+  - 'A/B test'
+  - 'benchmarks'
+  - 'smoke test'
+  - 'spending'
 created: 2026-10-24
-updated: 2026-10-24
+updated: 2026-10-25
 ---
 
 **Do:** When asked how much to spend testing whether a skill works, run one reviewer or smoke check first and stop there unless the user asks for an A/B.

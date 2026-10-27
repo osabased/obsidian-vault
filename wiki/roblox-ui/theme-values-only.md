@@ -8,7 +8,13 @@ always: false
 applies_to:
   - 'scripts/check.sh'
   - 'src/client/UI/**/*.luau'
-triggers: []
+triggers:
+  - 'Color3\s*\.\s*(?:new|fromRGB|fromHex|fromHSV)\b'
+  - 'BrickColor\s*\.'
+  - 'Font\s*\.\s*(?:new|fromEnum|fromName|fromId)\b'
+  - 'Enum\s*\.\s*Font\s*\.'
+  - '(?:Min|Max)?TextSize\s*=\s*\d'
+  - '(?:Color3|BrickColor|Font|TextSize)\\'
 keywords:
   - 'theme'
   - 'raw values'
@@ -16,12 +22,17 @@ keywords:
   - 'text size'
   - 'font'
   - 'color'
+  - 'Theme.luau'
+  - 'hardcoded'
+  - 'hard-coded'
+  - 'literal colors'
+  - 'raw colors'
 created: 2026-10-24
-updated: 2026-10-24
+updated: 2026-10-26
 ---
 
-**Do:** Make check.sh fail on literal colors, fonts and text sizes in UI components and screens; style values come from Theme.luau.
-**Not:** Leave raw style values to the reviewer, or to review.
+**Do:** Take colors, fonts and text sizes from Theme.luau in UI components and screens, and make check.sh fail on literals.
+**Not:** Write literal style values in UI code outside Theme.luau, or leave them to the reviewer.
 **Because:**
 
 ## Examples

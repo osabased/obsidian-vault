@@ -12,8 +12,11 @@ keywords:
   - 'reusable'
   - 'workflow'
   - 'osaskills'
+  - 'skills'
+  - 'workflows'
+  - 'render tool'
 created: 2026-10-24
-updated: 2026-10-24
+updated: 2026-10-25
 ---
 
 **Do:** Keep the reusable parts of a UI workflow (process, checklist, render tool, reviewer) in a skill; keep the brief, references, theme, components and taste log in the game's repo.

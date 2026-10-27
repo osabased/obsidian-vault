@@ -12,8 +12,10 @@ keywords:
   - 'opus'
   - 'sonnet'
   - 'model'
+  - 'reviewers'
+  - 'ui reviewer'
 created: 2026-10-24
-updated: 2026-10-24
+updated: 2026-10-25
 ---
 
 **Do:** Run the UI reviewer subagent on Opus.

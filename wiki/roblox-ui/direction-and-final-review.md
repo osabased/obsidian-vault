@@ -13,12 +13,15 @@ keywords:
   - 'rounds'
   - 'screen'
   - 'weigh in'
+  - 'directions'
+  - 'final review'
+  - 'sign off'
 created: 2026-10-24
-updated: 2026-10-24
+updated: 2026-10-25
 ---
 
-**Do:** Bring the user in twice per screen: to pick a direction from the options, and to review the finished screen; run the rounds in between with the reviewer.
-**Not:** Show every rendered round, or pick the direction without them.
+**Do:** Bring the user in twice per major screen (pick a direction from the options, then review the finished screen) and once, at the final review, for a minor screen; run the rounds in between with the reviewer.
+**Not:** Show every rendered round, or pick a major screen's direction without them.
 **Because:**
 
 ## Examples

@@ -7,10 +7,10 @@ const DAY = 86400e3;
 export const registry = id => statePath('sessions', `${id}.json`);
 
 // Scripts take the session id as an argument, so one session can't write under another's.
-export function ownEntry(sid, refuse) {
+export function ownEntry(sid) {
   const own = process.env.CLAUDE_CODE_SESSION_ID;
-  if (own && own !== sid) refuse(`${sid} isn't this session, which is ${own}.`);
-  return readJsonSafe(registry(safeId(sid)));
+  if (own && own !== sid) return { entry: null, notOwn: `${sid} isn't this session, which is ${own}.` };
+  return { entry: readJsonSafe(registry(safeId(sid))), notOwn: null };
 }
 
 // `cwd` stays where the session registered, so a move into the vault folder doesn't let it propose for every domain.

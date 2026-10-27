@@ -143,7 +143,7 @@ export const localDay = at => (Number.isNaN(Date.parse(at)) ? '' : today(new Dat
 export const clock = (d = new Date()) => `${today(d)} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
 
 export const inboxFile = () => vaultPath('raw', 'inbox', `${today()}.jsonl`);
-export const picksFile = () => vaultPath('raw', 'picks', `${today()}.jsonl`);
+export const picksFile = (day = today()) => vaultPath('raw', 'picks', `${day}.jsonl`);
 
 export function datedFiles(folder) {
   const dir = vaultPath('raw', folder);

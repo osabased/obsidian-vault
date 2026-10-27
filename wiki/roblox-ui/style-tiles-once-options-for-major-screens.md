@@ -14,8 +14,9 @@ keywords:
   - 'HUD'
   - 'shop'
   - 'inventory'
+  - 'layout option'
 created: 2026-10-24
-updated: 2026-10-24
+updated: 2026-10-25
 ---
 
 **Do:** Set the game's look once with three style tiles; after that, offer two or three layout options only for major screens (shop, inventory, HUD) and take minor screens straight to final review.
