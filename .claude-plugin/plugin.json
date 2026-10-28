@@ -1,6 +1,6 @@
 {
-  "name": "agent-taste",
-  "description": "Skills for the agent-taste vault: /ingest turns a source and the user's words about it into pages and rules, /lint checks the whole wiki. Run them from a vault checkout.",
+  "name": "obsidian-vault",
+  "description": "Skills for the taste vault: /ingest turns a source and the user's words about it into pages and rules, /lint checks the whole wiki. Run them from a vault checkout.",
   "author": {
     "name": "osabased"
   },
