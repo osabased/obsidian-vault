@@ -1,14 +1,14 @@
 {
-  "name": "agent-taste",
-  "description": "The agent-taste vault's skills.",
+  "name": "obsidian-vault",
+  "description": "The taste vault's skills.",
   "owner": {
     "name": "osabased"
   },
   "plugins": [
     {
-      "name": "agent-taste",
+      "name": "obsidian-vault",
       "source": "./",
-      "description": "ingest and lint skills for the agent-taste vault. They run the vault's own tools/ in the working folder, so open a vault checkout first."
+      "description": "ingest and lint skills for the obsidian-vault taste vault. They run the vault's own tools/ in the working folder, so open a vault checkout first."
     }
   ]
 }
