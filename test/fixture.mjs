@@ -7,7 +7,7 @@ import { pathToFileURL } from 'node:url';
 const TOOLS = path.resolve(import.meta.dirname, '..', 'tools');
 
 // The tools find the vault from their own location, so each test runs a copy of tools/ inside a vault of its own.
-export function makeVault(t, { config = {}, domain = 'demo', topics = ['layout', 'code'] } = {}) {
+export function makeVault(t, { config = {}, domain = 'demo', topics = ['layout', 'code'], domains = {} } = {}) {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'vault-test-'));
   const project = fs.mkdtempSync(path.join(os.tmpdir(), 'vault-project-'));
   t.after(() => {
@@ -65,7 +65,7 @@ export function makeVault(t, { config = {}, domain = 'demo', topics = ['layout',
   };
 
   v.write('vault.config.json', `${JSON.stringify({
-    domains: { [domain]: { title: 'Demo', projects: [project.replace(/\\/g, '/')], topics } },
+    domains: { [domain]: { title: 'Demo', projects: [project.replace(/\\/g, '/')], topics }, ...domains },
     ...config,
   }, null, 2)}\n`);
   return v;
@@ -86,6 +86,11 @@ export const assistantTurn = text => ({ type: 'assistant', message: { role: 'ass
 export const toolResult = (text, toolUseResult = {}) => ({
   type: 'user', toolUseResult, message: { role: 'user', content: [{ type: 'tool_result', tool_use_id: 'toolu_1', content: text }] },
 });
+
+export const pageNote = ({ domain = 'demo', kind = 'topic', topic = 'code', summary = "'What we know.'", extra = [], body = ['Body.'] } = {}) => [
+  '---', 'type: page', `domain: ${domain}`, ...(kind ? [`kind: ${kind}`] : []), `topic: ${topic}`, `summary: ${summary}`, ...extra,
+  'created: 2026-10-01', 'updated: 2026-10-01', '---', '', ...body, '',
+].join('\n');
 
 export function ruleNote({ domain = 'demo', topic = 'code', basis = 'stated', kind = 'taste', applies_to = [], keywords = [], always = false, doLine = 'Do the thing.', notLine = 'Skip the thing.', because = '', extra = [], evidence = ['- 2026-10-01 · stated · session 1a2b3c4d · "do the thing" (a-00000001)'] } = {}) {
   const list = (name, xs) => (xs.length ? [`${name}:`, ...xs.map(x => `  - '${x}'`)] : [`${name}: []`]);

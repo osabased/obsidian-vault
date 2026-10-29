@@ -3,7 +3,7 @@ import path from 'node:path';
 import { isBuiltin } from 'node:module';
 import { config, vaultPath, plural, today, datedFiles } from './vault.mjs';
 import {
-  loadNotes, noteErrors, ruleText, ruleTextParts, liveRules, knownDomain, alwaysSize, isUrl, validDay, normTopic, topicNotes, vaultFile, toKey, resolver, linksUnder, noteLinks, byTopic, isTopicPage,
+  loadNotes, noteErrors, ruleText, ruleTextParts, liveRules, knownDomain, alwaysSize, isUrl, validDay, normTopic, topicNotes, vaultFile, toKey, resolver, linksUnder, noteLinks, byTopic, isTopicPage, PAGE_KINDS, joinList,
 } from './rules.mjs';
 import { build } from './build.mjs';
 
@@ -128,7 +128,7 @@ function markdownFiles() {
 const changed = n => [n.data.updated, today(new Date(n.saved))].filter(d => validDay(d) && d <= today()).sort().at(-1);
 
 // /ingest finds the sources no page names yet by comparing paths, so each file has one spelling.
-// A page with no source sums up rules, so it goes stale when one of them changes after it.
+// A source page records what its source said. The other pages sum up the rules they link, so they go stale when one changes after them.
 function lintPage(n, rules, add) {
   const { source, source_date: dated } = n.data;
   if (source != null && !isUrl(source)) {
@@ -140,8 +140,9 @@ function lintPage(n, rules, add) {
   else if (dated > today()) add('error', n.rel, `source_date ${dated} is in the future`);
   if (!n.topic) add('warn', n.rel, 'no topic. Give it one, so the index lists it with the rules on its topic');
   if (!n.summary) add('warn', n.rel, 'no summary. Give it one line, so the index says what the page holds');
-  if (!isTopicPage(n)) return;
-  if (n.slug.startsWith('ref-')) add('warn', n.rel, 'no source. A ref page names its source; without one it counts as a topic page');
+  if (!PAGE_KINDS.includes(n.kind)) add('warn', n.rel, `a page needs kind: ${joinList(PAGE_KINDS, 'or')}`);
+  if (n.kind === 'source' && source == null) add('warn', n.rel, 'no source. A source page names the file under raw/ or the URL it is about');
+  if (n.kind === 'source') return;
   const mine = changed(n);
   for (const r of rules) {
     const theirs = changed(r);

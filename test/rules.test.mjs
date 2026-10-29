@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { makeVault, ruleNote } from './fixture.mjs';
+import { makeVault, ruleNote, pageNote } from './fixture.mjs';
 
 const vault = async (t, opts) => {
   const v = makeVault(t, opts);
@@ -112,20 +112,20 @@ test('superseded notes are not live rules', async t => {
 
 test('page note parses without rule checks', async t => {
   const { rules } = await vault(t);
-  const page = ['---', 'type: page', 'domain: demo', 'topic: code', "summary: 'What we know.'", 'created: 2026-10-01', 'updated: 2026-10-01', '---', '', '## Rules', ''].join('\n');
+  const page = pageNote({ body: ['## Rules'] });
   const n = rules.parseNote(page, 'wiki/demo/code.md');
   assert.equal(n.type, 'page');
   assert.equal(n.summary, 'What we know.');
   assert.equal(n.do, '');
   assert.deepEqual(rules.noteErrors(n), []);
   assert.equal(rules.isTopicPage(n), true);
-  assert.equal(rules.isTopicPage(rules.parseNote(page.replace('summary', 'source: raw/refs/x.png\nsummary'), 'wiki/demo/ref-x.md')), false);
+  assert.equal(rules.isTopicPage(rules.parseNote(page.replace('kind: topic', 'kind: source\nsource: raw/refs/x.png'), 'wiki/demo/source-x.md')), false);
   assert.deepEqual(check(rules, page.replace('domain: demo\n', '')), ['no domain']);
 });
 
 test('pages are not live rules', async t => {
   const { v, rules } = await vault(t);
-  v.write('wiki/demo/code.md', ['---', 'type: page', 'domain: demo', 'topic: code', 'summary: s', '---', '', '## Rules', ''].join('\n'));
+  v.write('wiki/demo/code.md', pageNote({ body: ['## Rules'] }));
   assert.deepEqual(rules.liveRules(), {});
 });
 
