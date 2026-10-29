@@ -342,7 +342,7 @@ export function evidenceSessions(n) {
 }
 
 // The user's quoted words are left out: a broken link there could be fixed only by editing them.
-const QUOTED = ['evidence', 'you said'];
+export const QUOTED = ['evidence', 'you said'];
 
 export function noteLinks(n) {
   const [lead, ...rest] = sections(n);

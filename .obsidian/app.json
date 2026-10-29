@@ -1,6 +1,7 @@
 {
   "userIgnoreFilters": [
     "tools/",
+    "test/",
     "CLAUDE.md"
   ]
 }
