@@ -1,2 +1,15 @@
 #!/bin/sh
+# raw/ holds what the user said and showed. A commit may add files there and append rows to the dated logs,
+# but not delete, rename, rewrite or retype what is there.
+changed=$(git diff --cached --name-only --diff-filter=DRTU -- raw/; git diff --cached --numstat --diff-filter=M -- raw/ | awk -F'\t' '$2 != "0" { print $3 }')
+if [ -n "$changed" ] && [ "$VAULT_ALLOW_RAW_CHANGES" != 1 ]; then
+  echo "raw/ is append-only, and this commit rewrites or removes:" >&2
+  echo "$changed" | sed 's/^/  /' >&2
+  echo "Unstage them, or commit with VAULT_ALLOW_RAW_CHANGES=1 if the user asked for it." >&2
+  exit 1
+fi
+# Notes and sources don't change what the tests run, so only a change to the code or its tests waits on them.
+if git diff --cached --name-only | grep -qE '^(tools|test|\.githooks)/'; then
+  node --test --test-reporter=dot "test/*.test.mjs" || exit 1
+fi
 node tools/build.mjs && git add active.md index.md decisions.md && exec node tools/lint.mjs --fail-on error

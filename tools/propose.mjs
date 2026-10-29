@@ -2,6 +2,7 @@ import fs from 'node:fs';
 import crypto from 'node:crypto';
 import {
   config, vaultPath, proposeDomains, writeSettled, appendJsonl, appendLog, inboxFile, proposalRows, recordedRows, statePath, withLock, today, localDay, toPosix, guarded,
+  readJsonl,
 } from './lib/vault.mjs';
 import {
   KEY_RE, BASES, wrongBasis, parseNote, noteErrors, ruleText, ruleTextParts, readNote, liveRules, mentions, isUrl, validDay, byKey, normTopic, domainTopics, vaultFile, joinList,
@@ -29,8 +30,9 @@ const help = () => [
   "  topic        a short topic; reuse one the domain's rules or pages have, or one of its listed topics:",
   ...topicLines(),
   '  basis        and what to cite for it, written into the note as given:',
-  "    stated       the user's words state the rule. quote: their words",
-  '    inferred     taste only: you generalized a correction. quote: the words you generalized',
+  "    stated       the user's words state the rule. quote: their words, as they typed them in this session",
+  '    inferred     taste only: you generalized a correction. quote: the words you generalized, as the user typed them',
+  '                 A quote may leave words out with …; propose.mjs refuses one the user never typed in this session.',
   "    pick         taste only: the user's recorded answer from an earlier session backs the rule.",
   '                 pick: the id of a row in raw/picks/ (q-) or of an older user-written row in raw/inbox/ (c-, p-).',
   "                 The row's own words are cited; a row backs one rule. A provisional, replaced or confirmed pick backs none.",
@@ -42,7 +44,7 @@ const help = () => [
   '    source       knowledge only: a dated source shows it.',
   '                 source: its URL, or a file under raw/refs/',
   '                 source_date: when the source was published or last updated, as YYYY-MM-DD',
-  "                 quote: the source's words",
+  "                 quote: the source's words; propose.mjs refuses one a text file under raw/refs/ doesn't hold",
   '  keywords     words a request about it would use',
   '  applies_to   globs from the project root; give them to a rule about code or files',
   '  triggers     regexes tested against the new text of an edit; when given, the rule applies only if one matches',
@@ -101,7 +103,88 @@ function evidence(f, p) {
   }
   if (!validDay(date)) refuse('source_date must be a date as YYYY-MM-DD.');
   if (date > today()) refuse("source_date can't be in the future.");
-  return { kind: 'source', said: quote, date, cite: `${cited} · dated ${date} · "${quote}"` };
+  return { kind: 'source', said: quote, date, source: cited, cite: `${cited} · dated ${date} · "${quote}"` };
+}
+
+// Claude Code logs tool output, skill text, compaction summaries, injected context and prompts the app or a script
+// sent as user entries too, so only the text the user typed counts as their words: their prompts, queued or not, and
+// what they wrote into an AskUserQuestion answer. The options' labels are the agent's.
+const INJECTED = /<(system-reminder|task-notification|local-command-stdout|local-command-stderr|local-command-caveat)>[\s\S]*?<\/\1>/g;
+
+const blockTexts = c => (typeof c === 'string' ? [c] : Array.isArray(c) ? c.filter(b => b?.type === 'text').map(b => String(b.text ?? '')) : []);
+const byHuman = r => (r.origin ? r.origin.kind === 'human' : r.turnOrigin === undefined);
+
+function answerTexts(u) {
+  const labels = (u.questions ?? []).flatMap(q => (q.options ?? []).map(o => String(o.label ?? ''))).filter(Boolean).sort((a, b) => b.length - a.length);
+  const answers = Object.values(u.answers ?? {}).map(a => labels.reduce((s, l) => s.split(l).join('\n'), String(a ?? '')));
+  return [...answers, ...Object.values(u.annotations ?? {}).map(a => String(a?.notes ?? ''))];
+}
+
+function typedMessages(transcript) {
+  return readJsonl(transcript).flatMap(r => {
+    const q = r?.attachment;
+    if (r?.type === 'attachment' && q?.type === 'queued_command' && q.commandMode === 'prompt' && byHuman(q)) return blockTexts(q.prompt);
+    if (r?.type !== 'user' || r.isMeta || r.isCompactSummary) return [];
+    if (r.toolUseResult !== undefined) return r.toolUseResult?.answers ? answerTexts(r.toolUseResult) : [];
+    return byHuman(r) ? blockTexts(r.message?.content) : [];
+  }).map(t => t.replace(INJECTED, ' '));
+}
+
+const escapeRegex = s => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+
+// An ellipsis marks words left out, so each piece has to appear, in order, within one message, as whole words.
+function saidIn(quote, messages) {
+  const pieces = normText(quote).split(/\s*(?:…|\.{3})\s*/).filter(Boolean).map(p => new RegExp(
+    `${/^[\p{L}\p{N}]/u.test(p) ? '(?<![\\p{L}\\p{N}])' : ''}${escapeRegex(p)}${/[\p{L}\p{N}]$/u.test(p) ? '(?![\\p{L}\\p{N}])' : ''}`, 'gu'));
+  return pieces.length > 0 && messages.some(m => {
+    const text = normText(m);
+    let from = 0;
+    return pieces.every(re => {
+      re.lastIndex = from;
+      const hit = re.exec(text);
+      from = hit ? re.lastIndex : 0;
+      return hit !== null;
+    });
+  });
+}
+
+const ENTITIES = {
+  amp: '&', lt: '<', gt: '>', quot: '"', apos: "'", nbsp: ' ',
+  lsquo: '‘', rsquo: '’', ldquo: '“', rdquo: '”', ndash: '–', mdash: '—', hellip: '…',
+};
+const INLINE_TAGS = /<\/?(?:a|abbr|b|bdi|bdo|cite|code|data|dfn|em|i|kbd|mark|q|s|samp|small|span|strong|sub|sup|time|u|var)\b[^>]*>/gi;
+
+function decodeEntity(m, name) {
+  if (name[0] !== '#') return ENTITIES[name.toLowerCase()] ?? m;
+  const code = /^#x/i.test(name) ? parseInt(name.slice(2), 16) : parseInt(name.slice(1), 10);
+  return code > 0 && code <= 0x10ffff ? String.fromCodePoint(code) : m;
+}
+
+// A binary source such as a screenshot or PDF has no words to check, and a saved web page is quoted as it reads, not
+// as its markup: inline tags sit inside words and other tags between them.
+function sourceText(rel) {
+  const buf = fs.readFileSync(vaultPath(...rel.split('/')));
+  let text;
+  try { text = new TextDecoder('utf-8', { fatal: true }).decode(buf); } catch { return null; }
+  if (text.includes('\0')) return null;
+  if (!/\.html?$/i.test(rel)) return text;
+  return text.replace(/<(script|style)\b[\s\S]*?<\/\1\s*>/gi, ' ').replace(INLINE_TAGS, '').replace(/<[^>]*>/g, ' ')
+    .replace(/&(#\d+|#x[0-9a-f]+|[a-z]+);/gi, decodeEntity);
+}
+
+function checkQuote(session, e) {
+  if (e.kind === 'source') {
+    const text = REFS.test(e.source) ? sourceText(e.source) : null;
+    if (text !== null && !saidIn(e.said, [text])) refuse(`the quote isn't in ${e.source}. Quote the file's own words.`);
+    return;
+  }
+  if (e.pick || !['stated', 'correction'].includes(e.kind)) return;
+  if (!session.transcript || !fs.existsSync(session.transcript)) {
+    refuse("the taste vault has no transcript for this session, so it can't check the quote is the user's words. Give your own reading with basis reading instead.");
+  }
+  if (!saidIn(e.said, typedMessages(session.transcript))) {
+    refuse("the quote isn't in anything the user typed in this session. Quote their words exactly, leaving words out with … if you need to, or give your own reading with basis reading.");
+  }
 }
 
 // A pick's label is the user's answer verbatim, and an older captured row holds their message; either backs a rule
@@ -129,9 +212,12 @@ function pickEvidence(id, domain) {
 const OVERLAP = 0.2;
 const STOPWORDS = new Set(('a all an and any are as at be because but by can cant didnt do doesnt dont for from in is isnt it its must never not of on or '
   + 'should that the their theirs them these they this those to use was we were with wont you your yours').split(' '));
-// Curly quotes read as straight ones. Apostrophes go first so "don't" reads as the stopword dont rather than as don, which every Not line shares.
+// Curly quotes read as straight ones, and dashes of any length as one hyphen. Apostrophes go first so "don't" reads as
+// the stopword dont rather than as don, which every Not line shares.
 const normText = s => String(s)
+  .normalize('NFKC')
   .toLowerCase()
+  .replace(/[‐‑‒–—―]+|-{2,}/g, '-')
   .replace(/[‘’ʼ]/g, "'")
   .replace(/[“”]/g, '"')
   .replace(/\s+/g, ' ')
@@ -301,6 +387,7 @@ function propose(sid, p) {
   f.repeats = line(p, 'repeats', false);
   if (f.repeats && !KEY_RE.test(f.repeats)) refuse('repeats must be a rule key like roblox-ui/flat-buttons.');
   const e = evidence(f, p);
+  checkQuote(session, e);
   if (f.kind === 'knowledge') f.as_of = e.date ?? today();
 
   const at = new Date().toISOString();

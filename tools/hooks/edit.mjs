@@ -1,6 +1,6 @@
 import fs from 'node:fs';
-import { runHook, config, domainsFor, inside, vaultRel, toPosix, cwdOf, FILE_TOOLS, toolFile } from '../lib/vault.mjs';
-import { settledRules, ruleLine, tryRegex, cmp } from '../lib/rules.mjs';
+import { runHook, config, domainsFor, inside, vaultRel, toPosix, cwdOf, FILE_TOOLS, toolFile, shortHash } from '../lib/vault.mjs';
+import { settledRules, ruleLine, tryRegex, cmp, clip, parseNote, QUOTED } from '../lib/rules.mjs';
 import { bestMatch, specificity, bySpecificity } from '../lib/glob.mjs';
 import { marked, mark, markShown } from '../lib/sessions.mjs';
 
@@ -16,6 +16,60 @@ function vaultGuard(file, cwd) {
     if (!/^raw\/refs\/./.test(low)) return 'raw/ is append-only. New files go under raw/refs/; tools/propose.mjs and tools/pick.mjs write the rest.';
   }
   return null;
+}
+
+const lf = s => String(s ?? '').replace(/\r\n/g, '\n');
+const foldQuotes = s => s.replace(/[‘’]/g, "'").replace(/[“”]/g, '"');
+
+// Edit matches as Claude Code does: line endings and curly quotes don't count, and an old_string found more than
+// once without replace_all fails, so that edit is left for the tool to refuse.
+function replaced(text, e) {
+  let from = lf(e.old_string);
+  if (!from) return null;
+  if (!text.includes(from)) {
+    const i = foldQuotes(text).indexOf(foldQuotes(from));
+    if (i < 0) return null;
+    from = text.slice(i, i + from.length);
+  }
+  const parts = text.split(from);
+  return parts.length > 2 && !e.replace_all ? null : parts.join(lf(e.new_string));
+}
+
+function textAfter(tool, ti, before) {
+  if (tool === 'Write') return lf(ti.content);
+  const edits = tool === 'MultiEdit' ? ti.edits ?? [] : tool === 'Edit' ? [ti] : null;
+  return edits && edits.reduce((text, e) => (text === null ? null : replaced(text, e)), before);
+}
+
+// Fences are kept: a quote the user wrote inside one is still theirs.
+const quotedLines = n => n.body.split(/^## /m).slice(1).filter(s => QUOTED.includes(s.split('\n')[0].trim().toLowerCase()))
+  .flatMap(s => s.split('\n').slice(1).map(l => l.trim()).filter(Boolean));
+
+const PAGE_KEEPS = 0.7;
+
+// Notes are rewritten in place, so an edit that drops the user's words or most of a page is more likely a slip than a
+// choice. The same edit sent again goes through, for when the user asked for it.
+function noteGuard(input, file, cwd) {
+  const rel = vaultRel(file, cwd);
+  if (!rel || !/^wiki\/.+\.md$/i.test(rel)) return null;
+  let before;
+  try { before = lf(fs.readFileSync(toPosix(file, cwd), 'utf8')); } catch { return null; }
+  const after = textAfter(input.tool_name, input.tool_input ?? {}, before);
+  if (after === null) return null;
+  const was = parseNote(before, rel);
+  const kept = new Set(quotedLines(parseNote(after, rel)));
+  const lost = quotedLines(was).filter(l => !kept.has(l));
+  const why = [];
+  if (lost.length) {
+    why.push(`This edit removes the user's words or a rule's evidence from ${rel}:`, ...lost.slice(0, 3).map(l => `  ${clip(l, 160)}`));
+    why.push('Lines under ## You said and ## Evidence stay as written. Add a line instead.');
+  }
+  if (was.type === 'page') {
+    const ratio = after.trim().length / Math.max(1, before.trim().length);
+    if (ratio < PAGE_KEEPS) why.push(`This edit cuts ${rel} to ${Math.round(ratio * 100)}% of its length. Add to the page or fix it in place instead.`);
+  }
+  if (!why.length || !mark('notes', input.session_id, `${rel.toLowerCase()}|${shortHash(after)}`)) return null;
+  return [...why, 'If the user asked for this, retry the same edit. The retry is allowed.'].join('\n');
 }
 
 function newText(tool, ti) {
@@ -68,6 +122,6 @@ runHook('edit', input => {
   const file = toolFile(input.tool_name, input.tool_input ?? {});
   if (!file) return null;
   const cwd = cwdOf(input);
-  const why = vaultGuard(file, cwd) ?? gate(input, file, cwd);
+  const why = vaultGuard(file, cwd) ?? noteGuard(input, file, cwd) ?? gate(input, file, cwd);
   return why ? { hookSpecificOutput: { hookEventName: 'PreToolUse', permissionDecision: 'deny', permissionDecisionReason: why } } : null;
 });
