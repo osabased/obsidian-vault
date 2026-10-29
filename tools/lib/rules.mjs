@@ -7,6 +7,7 @@ import { config, vaultPath, shortHash, toPosix, today, inside } from './vault.mj
 export const LIST_FIELDS = ['applies_to', 'triggers', 'keywords'];
 export const KEY_RE = /^[a-z0-9-]+\/[a-z0-9-]+$/;
 export const BASES = { taste: ['stated', 'inferred', 'pick', 'reading'], knowledge: ['stated', 'failure', 'source'] };
+export const PAGE_KINDS = ['source', 'topic', 'concept', 'entity', 'synthesis'];
 export const joinList = (xs, word) => (xs.length < 2 ? xs.join('') : `${xs.slice(0, -1).join(', ')} ${word} ${xs.at(-1)}`);
 export const wrongBasis = (kind, basis) => (kind === 'knowledge' ? `a knowledge rule's basis must be ${joinList(BASES.knowledge, 'or')}`
   : BASES.knowledge.includes(basis) ? `basis ${basis} is for knowledge rules; set kind: knowledge` : `basis must be ${joinList(BASES.taste, 'or')}`);
@@ -71,7 +72,7 @@ export function parseNote(text, rel) {
     data,
     body,
     type: data.type,
-    kind: data.kind ?? 'taste',
+    kind: single(data.kind) ?? (data.type === 'page' ? null : 'taste'),
     as_of: data.as_of ?? null,
     always: data.always === true,
     topic: typeof data.topic === 'string' ? normTopic(data.topic) : '',
@@ -112,6 +113,7 @@ function checkNote(n) {
   if (n.domain && n.data.domain !== undefined && n.data.domain !== n.domain) errs.push(`domain is ${n.data.domain} but the note is in wiki/${n.domain}/`);
   if (n.data.domain === undefined) errs.push('no domain');
   if (n.type !== 'rule') return errs;
+  if (isResearch(n.domain)) errs.push(`${n.domain} is a research domain, with no project folders, so it holds pages only. Put the rule in a project domain or global`);
   if (!BASES[n.kind]) errs.push('kind must be taste or knowledge');
   else if (!BASES[n.kind].includes(n.data.basis)) errs.push(wrongBasis(n.kind, n.data.basis));
   if (n.kind === 'knowledge') {
@@ -162,6 +164,9 @@ export function readNote(key) {
 }
 
 export const knownDomain = d => d === 'global' || Object.hasOwn(config().domains, d);
+// No session runs in a research domain's projects, so it holds only pages, which sessions read from the vault folder.
+// Global rules apply in every project, so an entry that only lists global's topics doesn't make it one.
+export const isResearch = d => d !== 'global' && Object.hasOwn(config().domains, d) && !config().domains[d].projects?.length;
 
 // Why a rule note never reaches a session, or null when it does. A superseded note says so on its own.
 function undelivered(n) {
@@ -171,7 +176,7 @@ function undelivered(n) {
 }
 
 const isLive = n => n.type === 'rule' && !n.superseded_by && !undelivered(n);
-export const isTopicPage = n => n.type === 'page' && n.data.source == null;
+export const isTopicPage = n => n.type === 'page' && n.kind === 'topic';
 
 export function byTopic(notes) {
   const used = new Map();
@@ -363,7 +368,10 @@ function refPages(notes, resolve) {
 
 function indexLine(n, refs) {
   const link = linkTo(n.key);
-  if (n.type === 'page') return `- ${link} · ${isTopicPage(n) ? 'topic page' : 'ref page'} · ${n.summary ? clip(n.summary, 150) : '(no summary)'}`;
+  if (n.type === 'page') {
+    const [why] = noteErrors(n);
+    return `- ${link} · ${PAGE_KINDS.includes(n.kind) ? `${n.kind} page` : 'page'}${why ? ` · not valid: ${why}` : ''} · ${n.summary ? clip(n.summary, 150) : '(no summary)'}`;
+  }
   const why = n.superseded_by ? null : undelivered(n);
   const gone = n.superseded_by ? ` · superseded by ${linkTo(n.superseded_by)}` : why ? ` · not delivered: ${why}` : '';
   const kind = n.kind === 'knowledge' ? ` · knowledge as of ${n.as_of ?? '(no date)'}` : '';

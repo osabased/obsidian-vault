@@ -3,12 +3,12 @@ import assert from 'node:assert/strict';
 import { makeVault, ruleNote, denied } from './fixture.mjs';
 
 const SID = '9f8e7d6c-0000-4000-8000-000000000002';
-const PAGE_REL = 'wiki/demo/ref-shop.md';
+const PAGE_REL = 'wiki/demo/source-shop.md';
 const SAID = '- 2026-10-01 · session 1a2b3c4d · "the cards breathe, the tabs feel cramped"';
 const READING = 'Cards sit on a 12px grid with roomy padding; the tab bar packs six tabs into the top strip.';
 
 const PAGE = [
-  '---', 'type: page', 'domain: demo', 'topic: layout', 'summary: Shop screens where the tabs feel cramped.', 'source: raw/refs/shop.png',
+  '---', 'type: page', 'domain: demo', 'kind: source', 'topic: layout', 'summary: Shop screens where the tabs feel cramped.', 'source: raw/refs/shop.png',
   'created: 2026-10-01', 'updated: 2026-10-01', '---', '',
   '## You said', SAID, '- 2026-10-02 · session 1a2b3c4d · "more room between tabs"', '',
   "## Agent's reading", READING, 'The shop header uses the same accent as the buy buttons, and the prices sit right-aligned.', '',
@@ -72,7 +72,7 @@ test('a page cut below 70% of its length is refused once', t => {
   const v = vault(t);
   const reading = PAGE.slice(PAGE.indexOf("## Agent's reading"), PAGE.indexOf('## Rules'));
   const cut = { old_string: reading, new_string: "## Agent's reading\nCards.\n\n" };
-  assert.match(denied(edit(v, 'Edit', PAGE_REL, cut)) ?? '', /cuts wiki\/demo\/ref-shop\.md to \d+%/);
+  assert.match(denied(edit(v, 'Edit', PAGE_REL, cut)) ?? '', /cuts wiki\/demo\/source-shop\.md to \d+%/);
   assert.equal(denied(edit(v, 'Edit', PAGE_REL, cut)), null);
 });
 
@@ -89,7 +89,7 @@ test('a rule note may shrink', t => {
 
 test('a new page, an edit that would not apply and files outside wiki/ are not checked', t => {
   const v = vault(t, { [PAGE_REL]: PAGE, 'notes/scratch.md': PAGE });
-  assert.equal(denied(edit(v, 'Write', 'wiki/demo/ref-new.md', { content: PAGE })), null);
+  assert.equal(denied(edit(v, 'Write', 'wiki/demo/source-new.md', { content: PAGE })), null);
   assert.equal(denied(edit(v, 'Edit', PAGE_REL, { old_string: 'not in the page', new_string: '' })), null);
   assert.equal(denied(edit(v, 'Write', 'notes/scratch.md', { content: '' })), null);
 });

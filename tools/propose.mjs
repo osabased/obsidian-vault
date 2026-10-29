@@ -21,7 +21,7 @@ const help = () => [
   RUN,
   '',
   'rule.json is an object with these fields:',
-  "  domain       this session's domain (any domain in the vault folder), or global for every project",
+  "  domain       this session's domain (in the vault folder, any domain with project folders), or global for every project",
   '  slug         lowercase-kebab-case',
   '  kind         "taste" (the default), or "knowledge" for a fact about an API, version or tool',
   "               that your training gets wrong or doesn't know",

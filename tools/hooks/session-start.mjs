@@ -56,6 +56,7 @@ function lintNote() {
 runHook('session-start', input => {
   guarded('tidy', tidy);
   const doms = domainsFor(input.cwd).map(d => d.domain);
+  const vaultFolder = inVaultFolder(input.cwd);
   // Compaction can drop the rules the gate and excerpts already showed, so they show them again.
   if (input.session_id && (input.source === 'compact' || input.source === 'clear')) clearMarkers(input.session_id);
   const scope = [...doms, 'global'];
@@ -65,11 +66,13 @@ runHook('session-start', input => {
   const ready = settledNotes(notes);
   const rules = liveRules(ready);
   const always = alwaysContext(scope, rules);
-  const index = guarded('index note', () => indexNote(scope, ready));
+  // The vault folder is where every domain's pages are read, a research domain's among them.
+  const readable = [...(vaultFolder ? Object.keys(config().domains) : doms), 'global'];
+  const index = guarded('index note', () => indexNote(readable, ready));
   let propose = '';
   let pick = '';
   // Vault sessions register so /ingest can propose; the skill tells them how, so they get no note.
-  if (input.session_id && (doms.length || inVaultFolder(input.cwd))) {
+  if (input.session_id && (doms.length || vaultFolder)) {
     touchSession(input);
     // Only the rules that fit count as shown, but those cut for size are marked too, so the next prompt doesn't
     // deliver what didn't fit here.
