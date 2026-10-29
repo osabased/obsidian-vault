@@ -91,7 +91,7 @@ export function trackedSessions() {
 }
 
 export function clearMarkers(sid) {
-  for (const kind of ['gate', 'excerpts']) fs.rmSync(vaultPath('.state', kind, safeId(sid)), { recursive: true, force: true });
+  for (const kind of ['gate', 'notes', 'excerpts']) fs.rmSync(vaultPath('.state', kind, safeId(sid)), { recursive: true, force: true });
 }
 
 const lastLint = () => readJsonSafe(vaultPath('.state', 'lint.json')) ?? {};
@@ -115,7 +115,7 @@ export function errorsSinceLint() {
   return size > seen ? hookErrors(errorsLog(), seen) : [...hookErrors(errorsLog('.1'), seen), ...hookErrors()];
 }
 
-const KINDS = ['gate', 'excerpts', 'repeats', 'delivered'];
+const KINDS = ['gate', 'notes', 'excerpts', 'repeats', 'delivered'];
 
 // The registry goes last, so a session whose markers can't be removed yet is tried again next time.
 function prune(id) {

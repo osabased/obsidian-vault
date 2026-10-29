@@ -1,0 +1,149 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import { makeVault, ruleNote } from './fixture.mjs';
+
+const vault = async (t, opts) => {
+  const v = makeVault(t, opts);
+  return { v, rules: await v.import('lib/rules.mjs') };
+};
+const check = (rules, text, rel = 'wiki/demo/some-rule.md') => rules.noteErrors(rules.parseNote(text, rel));
+const without = (text, re) => text.split('\n').filter(l => !re.test(l)).join('\n');
+
+test('valid taste rule parses and has no errors', async t => {
+  const { rules } = await vault(t);
+  const n = rules.parseNote(ruleNote({ applies_to: ['src/**/*.luau'], keywords: ['strict'], because: 'Fewer bugs.' }), 'wiki/demo/some-rule.md');
+  assert.equal(n.key, 'demo/some-rule');
+  assert.equal(n.domain, 'demo');
+  assert.equal(n.slug, 'some-rule');
+  assert.equal(n.depth, 2);
+  assert.equal(n.kind, 'taste');
+  assert.equal(n.topic, 'code');
+  assert.equal(n.do, 'Do the thing.');
+  assert.equal(n.not, 'Skip the thing.');
+  assert.equal(n.because, 'Fewer bugs.');
+  assert.deepEqual(n.applies_to, ['src/**/*.luau']);
+  assert.deepEqual(n.keywords, ['strict']);
+  assert.deepEqual(n.triggers, []);
+  assert.equal(n.always, false);
+  assert.equal(n.superseded_by, null);
+  assert.deepEqual(rules.noteErrors(n), []);
+});
+
+test('kind defaults to taste and a topic is lowercased', async t => {
+  const { rules } = await vault(t);
+  const n = rules.parseNote(ruleNote({ topic: 'Layout' }).replace('kind: taste\n', ''), 'wiki/demo/some-rule.md');
+  assert.equal(n.kind, 'taste');
+  assert.equal(n.topic, 'layout');
+});
+
+test('note without frontmatter is not ok', async t => {
+  const { rules } = await vault(t);
+  assert.deepEqual(check(rules, '**Do:** a\n**Not:** b\n'), ['no frontmatter']);
+});
+
+test('missing Do and Not lines are errors', async t => {
+  const { rules } = await vault(t);
+  const base = ruleNote({ keywords: ['x'] });
+  assert.deepEqual(check(rules, without(base, /^\*\*Do:\*\*/)), ['no **Do:** line']);
+  assert.deepEqual(check(rules, without(base, /^\*\*Not:\*\*/)), ['no **Not:** line']);
+});
+
+test('basis must fit the kind', async t => {
+  const { rules } = await vault(t);
+  assert.deepEqual(check(rules, ruleNote({ basis: 'failure', keywords: ['x'] })), ['basis failure is for knowledge rules; set kind: knowledge']);
+  assert.deepEqual(check(rules, ruleNote({ basis: 'bogus', keywords: ['x'] })), ['basis must be stated, inferred, pick or reading']);
+  const k = ruleNote({ kind: 'knowledge', basis: 'reading', applies_to: ['a/**'], extra: ['as_of: 2026-10-01'] });
+  assert.deepEqual(check(rules, k), ["a knowledge rule's basis must be stated, failure or source"]);
+});
+
+test('knowledge rule needs applies_to and as_of, no keywords or always', async t => {
+  const { rules } = await vault(t);
+  const ok = ruleNote({ kind: 'knowledge', basis: 'source', applies_to: ['a/**'], extra: ['as_of: 2026-10-01'] });
+  assert.deepEqual(check(rules, ok), []);
+  const n = rules.parseNote(ok, 'wiki/demo/some-rule.md');
+  assert.equal(n.kind, 'knowledge');
+  assert.equal(n.as_of, '2026-10-01');
+  assert.match(rules.ruleText(n), /As of 2026-10-01\.$/);
+
+  assert.match(check(rules, ruleNote({ kind: 'knowledge', basis: 'source', applies_to: ['a/**'] }))[0], /needs as_of/);
+  assert.match(check(rules, ruleNote({ kind: 'knowledge', basis: 'source', applies_to: ['a/**'], extra: ['as_of: 2999-01-01'] }))[0], /in the future/);
+  assert.match(check(rules, ruleNote({ kind: 'knowledge', basis: 'source', extra: ['as_of: 2026-10-01'] }))[0], /needs applies_to/);
+  const both = ruleNote({ kind: 'knowledge', basis: 'source', applies_to: ['a/**'], keywords: ['k'], extra: ['as_of: 2026-10-01'] });
+  assert.match(check(rules, both)[0], /takes no keywords or always/);
+  const always = ruleNote({ kind: 'knowledge', basis: 'source', applies_to: ['a/**'], always: true, extra: ['as_of: 2026-10-01'] });
+  assert.match(check(rules, always)[0], /takes no keywords or always/);
+});
+
+test('as_of on a taste rule is an error', async t => {
+  const { rules } = await vault(t);
+  assert.deepEqual(check(rules, ruleNote({ keywords: ['x'], extra: ['as_of: 2026-10-01'] })), ['as_of is only for knowledge rules; taste rules never expire']);
+});
+
+test('bad kind, glob and trigger regex are errors', async t => {
+  const { rules } = await vault(t);
+  assert.deepEqual(check(rules, ruleNote({ kind: 'weird', keywords: ['x'] })), ['kind must be taste or knowledge']);
+  assert.deepEqual(check(rules, ruleNote({ applies_to: ['a/{b'] })), ['bad glob in applies_to: a/{b']);
+  assert.deepEqual(check(rules, ruleNote({ keywords: ['x'] }).replace('triggers: []', "triggers:\n  - '('")), ['bad regex in triggers: (']);
+});
+
+test('names, type and domain are checked', async t => {
+  const { rules } = await vault(t);
+  const base = ruleNote({ keywords: ['x'] });
+  assert.deepEqual(check(rules, base, 'wiki/demo/Some_Rule.md'), ['file and folder names must be lowercase-kebab-case']);
+  assert.deepEqual(check(rules, base, 'wiki/other/some-rule.md'), ['domain is demo but the note is in wiki/other/']);
+  assert.deepEqual(check(rules, base.replace('type: rule', 'type: wat')), ['type must be rule or page']);
+  assert.ok(check(rules, without(base, /^domain:/)).includes('no domain'));
+});
+
+test('superseded_by resolves to a key', async t => {
+  const { rules } = await vault(t);
+  const n = rules.parseNote(ruleNote({ keywords: ['x'], extra: ["superseded_by: '[[wiki/demo/new-one|new-one]]'"] }), 'wiki/demo/some-rule.md');
+  assert.equal(n.superseded_by, 'demo/new-one');
+  assert.deepEqual(rules.noteErrors(n), []);
+  assert.equal(rules.parseNote(ruleNote({ extra: ['superseded_by: demo/Other.md'] }), 'wiki/demo/a.md').superseded_by, 'demo/other');
+});
+
+test('superseded notes are not live rules', async t => {
+  const { v, rules } = await vault(t);
+  v.write('wiki/demo/old.md', ruleNote({ keywords: ['x'], extra: ['superseded_by: demo/new'] }));
+  v.write('wiki/demo/new.md', ruleNote({ keywords: ['y'] }));
+  assert.deepEqual(Object.keys(rules.liveRules()), ['demo/new']);
+});
+
+test('page note parses without rule checks', async t => {
+  const { rules } = await vault(t);
+  const page = ['---', 'type: page', 'domain: demo', 'topic: code', "summary: 'What we know.'", 'created: 2026-10-01', 'updated: 2026-10-01', '---', '', '## Rules', ''].join('\n');
+  const n = rules.parseNote(page, 'wiki/demo/code.md');
+  assert.equal(n.type, 'page');
+  assert.equal(n.summary, 'What we know.');
+  assert.equal(n.do, '');
+  assert.deepEqual(rules.noteErrors(n), []);
+  assert.equal(rules.isTopicPage(n), true);
+  assert.equal(rules.isTopicPage(rules.parseNote(page.replace('summary', 'source: raw/refs/x.png\nsummary'), 'wiki/demo/ref-x.md')), false);
+  assert.deepEqual(check(rules, page.replace('domain: demo\n', '')), ['no domain']);
+});
+
+test('pages are not live rules', async t => {
+  const { v, rules } = await vault(t);
+  v.write('wiki/demo/code.md', ['---', 'type: page', 'domain: demo', 'topic: code', 'summary: s', '---', '', '## Rules', ''].join('\n'));
+  assert.deepEqual(rules.liveRules(), {});
+});
+
+test('settledNotes leaves out a note saved within settleSeconds', async t => {
+  const { v, rules } = await vault(t);
+  v.write('wiki/demo/old.md', ruleNote({ keywords: ['x'] }));
+  v.write('wiki/demo/fresh.md', ruleNote({ keywords: ['y'] }), { settled: false });
+  assert.deepEqual(rules.settledNotes().map(n => n.key), ['demo/old']);
+  assert.deepEqual(Object.keys(rules.settledRules()), ['demo/old']);
+  assert.deepEqual(Object.keys(rules.liveRules()), ['demo/fresh', 'demo/old']);
+});
+
+test('settleSeconds in the config changes the window', async t => {
+  const long = await vault(t, { config: { delivery: { settleSeconds: 7200 } } });
+  long.v.write('wiki/demo/hour-old.md', ruleNote({ keywords: ['x'] }));
+  assert.deepEqual(long.rules.settledNotes(), []);
+
+  const zero = await vault(t, { config: { delivery: { settleSeconds: 0 } } });
+  zero.v.write('wiki/demo/fresh.md', ruleNote({ keywords: ['x'] }), { settled: false });
+  assert.deepEqual(zero.rules.settledNotes().map(n => n.key), ['demo/fresh']);
+});

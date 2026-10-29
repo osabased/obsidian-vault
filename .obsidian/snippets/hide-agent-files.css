@@ -1,5 +1,6 @@
 /* Excluded files leave search and the graph, but Obsidian still lists them in the file explorer. */
 .nav-folder:has(> .nav-folder-title[data-path="tools"]),
+.nav-folder:has(> .nav-folder-title[data-path="test"]),
 .nav-file:has(> .nav-file-title[data-path="CLAUDE.md"]) {
   display: none;
 }
