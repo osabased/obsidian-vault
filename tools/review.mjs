@@ -1,5 +1,5 @@
 import { config, plural, toPosix, guarded, hookErrors, errorsLog, domainsFor, localDay } from './lib/vault.mjs';
-import { clip, normTopic, topicNotes, loadNotes, liveRules, evidenceSessions, validDay, byKey, cmp, sharedFiles } from './lib/rules.mjs';
+import { clip, normTopic, topicNotes, loadNotes, liveRules, evidenceSessions, validDay, byKey, cmp, sharedFiles, isResearch } from './lib/rules.mjs';
 import { lint, tally } from './lib/lint.mjs';
 import { lintRan, trackedSessions } from './lib/sessions.mjs';
 import { subjectRows, liveRows, newestFirst, projectName } from './lib/picks.mjs';
@@ -43,6 +43,7 @@ function section(title, lines) {
 function emptyTopics() {
   const used = topicNotes(notes());
   return Object.entries(config().domains).flatMap(([d, c]) => {
+    if (isResearch(d)) return [];
     const empty = (c.topics ?? []).filter(t => !used.get(d)?.has(normTopic(t)));
     return empty.length ? [`${d}: ${empty.join(', ')}`] : [];
   });
