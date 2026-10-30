@@ -110,6 +110,22 @@ function shownKeys(id) {
   return keys;
 }
 
+// A marker holds its id, in which a rule's wording hash follows its key. The session whose evidence changed a rule's
+// wording already has it in mind, so its markers move to the new hash and only other sessions get the rule again.
+export const carryMarkers = (sid, key, from, to) => guarded('carry markers', () => {
+  for (const kind of ['gate', 'excerpts']) {
+    const dir = vaultPath('.state', kind, safeId(sid));
+    let files = [];
+    try { files = fs.readdirSync(dir); } catch (e) { if (!stray(e)) throw e; }
+    for (const f of files) {
+      let parts;
+      try { parts = fs.readFileSync(path.join(dir, f), 'utf8').split('|'); } catch (e) { if (stray(e)) continue; throw e; }
+      const i = parts.indexOf(key);
+      if (i >= 0 && parts[i + 1] === from) mark(kind, sid, parts.with(i + 1, to).join('|'));
+    }
+  }
+});
+
 // The registered sessions, with their folder and when they were last seen, and the others the hooks recorded
 // deliveries for, each with the rules it was shown.
 export function trackedSessions() {

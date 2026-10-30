@@ -1,17 +1,12 @@
-import fs from 'node:fs';
 import { config, plural, toPosix, guarded, hookErrors, errorsLog, domainsFor, localDay, appendLog, filesIn, vaultPath } from './lib/vault.mjs';
 import {
   clip, normTopic, topicNotes, loadNotes, liveRules, evidenceSessions, validDay, byKey, cmp, sharedFiles, isResearch, rawFile, resolver, linkedKeys, evidenceSources, isSourcePage, joinList,
-  isUrl,
+  savedUrl,
 } from './lib/rules.mjs';
-import { parse } from './lib/frontmatter.mjs';
 import { lint, tally } from './lib/lint.mjs';
 import { lintRan, trackedSessions } from './lib/sessions.mjs';
 import { subjectRows, liveRows, newestFirst, projectName } from './lib/picks.mjs';
-
-const USAGE = 'usage: node tools/review.mjs status\n       node tools/review.mjs sources';
-
-class UsageError extends Error {}
+import { UsageError } from './lib/input.mjs';
 
 // Each section reads these once a run; a read that fails is tried again by the next section, which reports it too.
 const once = f => {
@@ -115,13 +110,6 @@ function newerSources() {
   });
 }
 
-// /ingest saves a web page as a file whose frontmatter gives its url, and saves it again when it changes.
-const savedUrl = f => {
-  if (!f.endsWith('.md')) return null;
-  const { url } = parse(fs.readFileSync(vaultPath(f), 'utf8')).data;
-  return isUrl(url) ? url : null;
-};
-
 // A browser saves a whole web page as <name>.html, or .htm, and the files it shows in <name>_files/ beside it.
 const savedPages = f => [...f.matchAll(/_files\//g)].flatMap(m => ['html', 'htm'].map(ext => `${f.slice(0, m.index)}.${ext}`));
 
@@ -168,6 +156,7 @@ const COMMANDS = {
   status: runStatus,
   sources: () => console.log(unnamedSources().join('\n') || 'Every file in raw/refs/ has a source page.'),
 };
+const USAGE = `usage: ${Object.keys(COMMANDS).map(c => `node tools/review.mjs ${c}`).join('\n       ')}`;
 
 const [cmd, ...rest] = process.argv.slice(2);
 try {

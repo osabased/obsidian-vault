@@ -2,13 +2,12 @@ import path from 'node:path';
 import { appendLog, vaultRel } from './lib/vault.mjs';
 import { KEY_RE, readNote, toKey, isUrl, rawFile } from './lib/rules.mjs';
 import { build } from './lib/build.mjs';
+import { UsageError } from './lib/input.mjs';
 
 const USAGE = `usage: node tools/log.mjs <page>
        node tools/log.mjs ingest [--batch] <source> <page>...
        node tools/log.mjs query "<question>" <page>...
 A page is wiki/<domain>/<slug>.md, or its full path. A source is a file under raw/ or a URL.`;
-
-class UsageError extends Error {}
 
 // A session outside the vault passes full paths.
 const fromRoot = ref => (path.isAbsolute(ref) && vaultRel(ref)) || ref;

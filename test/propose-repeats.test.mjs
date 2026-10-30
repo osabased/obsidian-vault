@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
-import { makeVault, ruleNote, userTurn, sessionId } from './fixture.mjs';
+import { makeVault, ruleNote, userTurn, sessionId, denied, editFile as edit } from './fixture.mjs';
 
 function setup(t, { quote } = {}) {
   const v = makeVault(t);
@@ -115,6 +115,87 @@ test('repeats adds an Evidence line to the named note instead of writing a new o
   const [row] = inbox(v);
   assert.equal(row.note, 'demo/old-rule');
   assert.match(v.read('log.md'), /added evidence to demo\/old-rule · session a1b2c3d4/);
+});
+
+test('a newer source repeating a knowledge rule moves its as_of up, and an older one leaves it', t => {
+  const { v, sid } = setup(t);
+  v.write('wiki/demo/old-api.md', ruleNote({ kind: 'knowledge', basis: 'source', applies_to: ['src/**'], extra: ['as_of: 2026-01-01'] }));
+  v.write('raw/refs/notes.md', 'The solver is on by default. The old flag is gone.\n');
+  const backed = (quote, date) => v.propose(sid, proposal({
+    kind: 'knowledge', basis: 'source', source: 'raw/refs/notes.md', source_date: date, quote, repeats: 'demo/old-api',
+  }));
+  const newer = backed('The solver is on by default', '2026-09-01');
+  assert.equal(newer.code, 0, newer.stderr);
+  assert.match(newer.stdout, /\*\*Rule backed again\*\* demo\/old-api: .*As of 2026-09-01\.\nIts note has a new Evidence line, and as_of 2026-09-01\./);
+  assert.match(v.read('wiki/demo/old-api.md'), /^as_of: 2026-09-01$/m);
+  const older = backed('The old flag is gone', '2025-12-01');
+  assert.equal(older.code, 0, older.stderr);
+  assert.match(older.stdout, /Its note has a new Evidence line\./);
+  assert.match(v.read('wiki/demo/old-api.md'), /^as_of: 2026-09-01$/m);
+});
+
+const oldApi = (v, extra = ['as_of: 2026-01-01'], examples = []) => {
+  v.write('wiki/demo/old-api.md', ruleNote({ kind: 'knowledge', basis: 'source', applies_to: ['src/**'], extra }).replace('## Examples\n', ['## Examples', ...examples, ''].join('\n')));
+  v.write('raw/refs/notes.md', 'The solver is on by default.\n');
+};
+const newerSource = o => proposal({
+  kind: 'knowledge', basis: 'source', source: 'raw/refs/notes.md', source_date: '2026-09-01', quote: 'The solver is on by default', repeats: 'demo/old-api', ...o,
+});
+
+test('a stated repeat of a knowledge rule moves its as_of to today, whatever kind the proposal gives', async t => {
+  const { v, sid } = setup(t, { quote: 'the solver is on by default now' });
+  oldApi(v);
+  const r = v.propose(sid, proposal({ basis: 'stated', quote: 'the solver is on by default now', repeats: 'demo/old-api' }));
+  assert.equal(r.code, 0, r.stderr);
+  const day = (await v.import('lib/vault.mjs')).today();
+  assert.match(v.read('wiki/demo/old-api.md'), new RegExp(`^as_of: ${day}$`, 'm'));
+  assert.match(r.stdout, new RegExp(`and as_of ${day}\\.`));
+});
+
+test('a repeat that moves as_of rebuilds index.md', t => {
+  const { v, sid } = setup(t);
+  oldApi(v);
+  assert.equal(v.run('build.mjs').code, 0);
+  const r = v.propose(sid, newerSource());
+  assert.equal(r.code, 0, r.stderr);
+  const check = v.run('build.mjs', ['--check']);
+  assert.equal(check.code, 0, check.stdout + check.stderr);
+  assert.match(v.read('index.md'), /knowledge as of 2026-09-01/);
+});
+
+test('as_of moves on the frontmatter line the note is read from, keeping its comment, and nowhere else', async t => {
+  for (const [extra, examples = []] of [
+    [['as_of : 2026-01-01'], ['as_of: 2025-05-05']],
+    [['as_of: 2025-01-01', 'as_of: 2026-01-01']],
+    [['as_of: 2026-01-01 # checked by hand']],
+    [["as_of: '2026-01-01'"]],
+  ]) {
+    const { v, sid } = setup(t);
+    oldApi(v, extra, examples);
+    const r = v.propose(sid, newerSource());
+    assert.equal(r.code, 0, r.stderr);
+    assert.match(r.stdout, /, and as_of 2026-09-01\./, extra.join());
+    const text = v.read('wiki/demo/old-api.md');
+    assert.equal((await v.import('lib/rules.mjs')).parseNote(text, 'wiki/demo/old-api.md').as_of, '2026-09-01', extra.join());
+    for (const line of examples) assert.ok(text.includes(`\n${line}\n`), `${extra.join()}: ${line} kept`);
+    if (extra[0].includes('#')) assert.match(text, /^as_of: 2026-09-01 # checked by hand$/m);
+  }
+});
+
+test('the session whose repeat moves as_of is not gated by the rule again, and other sessions are', t => {
+  const { v, sid } = setup(t);
+  const other = sessionId();
+  v.startSession(other);
+  oldApi(v);
+  for (const s of [sid, other]) {
+    assert.ok(denied(edit(v, s, 'src/a.lua')));
+    assert.equal(edit(v, s, 'src/a.lua'), null);
+  }
+  const r = v.propose(sid, newerSource());
+  assert.equal(r.code, 0, r.stderr);
+  assert.equal(edit(v, sid, 'src/a.lua'), null);
+  assert.ok(denied(edit(v, sid, 'src/b.lua')), 'a file it never gated still is');
+  assert.ok(denied(edit(v, other, 'src/a.lua')));
 });
 
 test('repeats naming a rule that is not delivered is refused', t => {

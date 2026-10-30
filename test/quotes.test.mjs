@@ -1,3 +1,4 @@
+import fs from 'node:fs';
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { makeVault, userTurn, assistantTurn, toolResult } from './fixture.mjs';
@@ -114,6 +115,16 @@ test('a session with no transcript cannot back a stated rule', t => {
   assert.match(r.stderr, /no transcript/);
 });
 
+test('a session whose transcript can\'t be read cannot back a stated rule', t => {
+  const v = makeVault(t);
+  const transcript = v.at('.transcripts', 'unreadable');
+  fs.mkdirSync(transcript, { recursive: true });
+  v.startSession(SID, { transcript });
+  const r = v.propose(SID, rule({ quote: 'anything' }));
+  assert.equal(r.code, 1);
+  assert.match(r.stderr, /no transcript/);
+});
+
 test('a reading needs no transcript', t => {
   const v = session(t, null);
   assert.equal(v.propose(SID, rule({ basis: 'reading', reading: 'the UI scripts all start with --!strict' })).code, 0);
@@ -142,6 +153,26 @@ test('a saved web page is read with its entities, without scripts, and with inli
   v.write('raw/refs/post.html', '<script>var x = 1;</script><p>Don&#8217;t pad the <b>T</b>abs&#x2014;ever&hellip;</p><p>Next</p>');
   assert.equal(v.propose(SID, knowledge('raw/refs/post.html', "Don't pad the Tabs—ever")).code, 0);
   assert.equal(v.propose(SID, knowledge('raw/refs/post.html', 'var x = 1', { slug: 'script' })).code, 1);
+});
+
+test('a saved web page is read with its Latin-1 and typographic entities', t => {
+  const v = session(t, [userTurn('hi')]);
+  v.write('raw/refs/menu.html', '<p>The caf&eacute; costs &euro;5 &ndash; na&iuml;ve&trade; &bull; &Agrave; la carte, &frac12; off</p>');
+  const r = v.propose(SID, knowledge('raw/refs/menu.html', 'The café costs €5 – naïve™ • À la carte, ½ off'));
+  assert.equal(r.code, 0, r.stderr);
+});
+
+test('a Markdown source may be quoted as it reads or as it is written', t => {
+  const quote = q => {
+    const v = session(t, [userTurn('hi')]);
+    v.write('raw/refs/guide.md', 'Use **strict mode** always. Set the `Padding` value. See the [docs](https://example.com/docs) or [[wiki/demo/x|the note]] here.\n');
+    return v.propose(SID, knowledge('raw/refs/guide.md', q));
+  };
+  for (const q of ['Use strict mode always', 'Set the Padding value', 'See the docs or the note here', 'Use **strict mode** always']) {
+    const r = quote(q);
+    assert.equal(r.code, 0, `${q}: ${r.stderr}`);
+  }
+  assert.equal(quote('Use strict mode never').code, 1);
 });
 
 test('a binary source is not checked', t => {

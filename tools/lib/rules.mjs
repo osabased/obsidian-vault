@@ -382,9 +382,31 @@ export const linksUnder = (n, title) => targets(sections(n).slice(1).find(s => h
 const sectionNamed = (n, title) => sections(n).slice(1).find(s => heading(s).toLowerCase() === title.toLowerCase()) ?? '';
 export const hasSection = (n, title) => sectionNamed(n, title) !== '';
 
+// An Evidence line is <day> · <kind> · session <id> · <what backs it>, the last part as propose.mjs's evidenceLine
+// writes it for the kind. A line in another form comes back without a kind.
+const EVIDENCE_KINDS = ['stated', 'correction', 'source', 'failure', 'choice', "agent's reading"];
+const evidenceLines = n => [...sectionNamed(n, 'evidence').matchAll(/^- .*$/gm)].map(([line]) => {
+  const m = line.match(/^- [^·]*· ([^·]*)· session ([^\s·]+)(?: · (.*))?/);
+  return { line: line.trim(), kind: m?.[1].trim(), session: m?.[2], cite: m?.[3] ?? '' };
+});
+
 // The session prefixes the Evidence lines give, first seen first.
-export const evidenceSessions = n => [...new Set([...sectionNamed(n, 'evidence').matchAll(/^- [^·\n]*· [^·\n]*· session ([^\s·]+)/gm)].map(m => m[1]))];
-export const evidenceSources = n => [...sectionNamed(n, 'evidence').matchAll(/^- [^·\n]*· source · session [^\s·]+ · (.+?) · dated /gm)].map(m => m[1]);
+export const evidenceSessions = n => [...new Set(evidenceLines(n).flatMap(e => e.session ?? []))];
+export const evidenceSources = n => evidenceLines(n).filter(e => e.kind === 'source').flatMap(e => e.cite.match(/^(.+?) · dated /)?.[1] ?? []);
+
+// The quotes of the user's words, of sources and of recorded rows, with what each is checked against. A line from a
+// row, whose id comes before the proposal's, quotes the row rather than the session. A line lint can't read comes back
+// as the line alone.
+export const evidenceQuotes = n => evidenceLines(n).flatMap(({ line, kind, session, cite }) => {
+  if (!EVIDENCE_KINDS.includes(kind)) return [{ line }];
+  if (!['stated', 'correction', 'source'].includes(kind)) return [];
+  const m = cite.match(/^(?:(.+?) · dated [^·]* · )?["“](.*)["”](?: \(([^()]*)\))?[ \t]*$/);
+  if (!m || (kind === 'source') !== (m[1] !== undefined)) return [{ line }];
+  const [, source, quote, ids = ''] = m;
+  if (!ids.includes(';')) return [{ session, source, quote }];
+  const pick = kind === 'stated' && ids.match(/^(\S+); proposed as \S+$/)?.[1];
+  return pick ? [{ pick, quote }] : [{ line }];
+});
 
 // A line in any other form comes back without a session, so lint can say it can't check it.
 export const youSaid = n => [...sectionNamed(n, 'you said').matchAll(/^- .*$/gm)].map(([line]) => {
@@ -419,13 +441,56 @@ export function footnotes(n) {
   return { defs, cited };
 }
 
-// How many sources a page draws on: the ones its footnotes cite and the source pages it links, a source page by its
-// source. A source page is one source, so it shows no count.
+export const sourceOf = s => (typeof s.data.source === 'string' ? s.data.source : s.key);
+
+// /ingest saves a web page as a file whose frontmatter gives its url, and saves it again when it changes. A file that
+// can't be read gives none.
+export function savedUrl(rel) {
+  if (!rel.endsWith('.md')) return null;
+  let url;
+  try { ({ url } = parse(fs.readFileSync(vaultPath(rel), 'utf8')).data); } catch { return null; }
+  return isUrl(url) ? url : null;
+}
+
+// One web page however a note spells it: without its #fragment or a trailing slash, and with its host in lowercase.
+function normUrl(u) {
+  try {
+    const url = new URL(u);
+    url.hash = '';
+    return url.href.replace(/\/$/, '');
+  } catch {
+    return u;
+  }
+}
+
+// The sources a page draws on, each once however it's named, a file saved from a web page as that page's URL: the ones
+// its footnotes cite and the sources of the source pages it links. The source pages it draws on are the ones it links
+// and the ones whose source a footnote cites, not every page on a source it reached through a link.
+export function citedSources(notes, resolve) {
+  const urls = new Map();
+  const idOf = ref => {
+    const rel = rawFile(ref);
+    if (rel && !urls.has(rel)) urls.set(rel, savedUrl(rel));
+    const url = rel ? urls.get(rel) : isUrl(ref) ? ref : null;
+    return url ? normUrl(url) : rel ?? ref;
+  };
+  const idAt = new Map(notes.filter(isSourcePage).map(n => [n.key, idOf(sourceOf(n))]));
+  return n => {
+    const cited = new Set(footnotes(n).defs.flatMap(d => (d.target ? [idOf(d.target)] : [])));
+    const linked = new Set(linkedKeys(n, resolve).filter(k => idAt.has(k)));
+    return {
+      sources: new Set([...cited, ...[...linked].map(k => idAt.get(k))]),
+      pages: new Set([...idAt].flatMap(([k, id]) => (linked.has(k) || cited.has(id) ? [k] : []))),
+    };
+  };
+}
+
+// A source page is one source, so it shows no count.
 function drawsOn(notes, resolve) {
-  const sourceAt = new Map(notes.filter(isSourcePage).map(n => [n.key, typeof n.data.source === 'string' ? n.data.source : n.key]));
+  const cited = citedSources(notes, resolve);
   return n => {
     if (isSourcePage(n)) return '';
-    const count = new Set([...footnotes(n).defs.map(d => d.target), ...linkedKeys(n, resolve).map(k => sourceAt.get(k))].filter(Boolean)).size;
+    const count = cited(n).sources.size;
     return ` · ${count ? plural(count, 'source') : 'no sources'}`;
   };
 }

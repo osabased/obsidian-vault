@@ -57,6 +57,7 @@ function value(raw) {
 }
 
 const closing = lines => (lines[0].trim() === '---' ? lines.findIndex((l, i) => i > 0 && /^---\s*$/.test(l)) : -1);
+const KV = /^([^\s#'"-][^:]*?)\s*:(?:\s+(.*))?$/;
 
 // The subset of YAML that Obsidian writes for properties: scalars, quoted strings, inline and block lists.
 export function parse(text) {
@@ -74,10 +75,23 @@ export function parse(text) {
       continue;
     }
     list = null;
-    const kv = line.match(/^([^\s#'"-][^:]*?)\s*:(?:\s+(.*))?$/);
+    const kv = line.match(KV);
     if (!kv) continue;
     data[kv[1]] = kv[2] === undefined ? null : value(kv[2]);
     if (data[kv[1]] === null) list = kv[1];
   }
   return { data, body: lines.slice(end + 1).join('\n'), ok: true };
+}
+
+// Sets a scalar on the line parse reads it from, the last one with its key, keeping the line's quotes, comment and
+// ending. Text without frontmatter or without the key comes back as it was.
+export function setField(text, key, val) {
+  const lines = text.split('\n');
+  const end = closing(lines);
+  const at = lines.findLastIndex((l, i) => i > 0 && i < end && l.replace(/\r$/, '').match(KV)?.[1] === key);
+  if (at < 0) return text;
+  const [, head, old, comment, eol] = lines[at].match(/^([^:]*:[ \t]*)(.*?)((?:[ \t]+#.*)?)(\r?)$/);
+  const q = /^['"]/.test(old) ? old[0] : '';
+  lines[at] = `${/\s$/.test(head) ? head : `${head} `}${q}${val}${q}${comment}${eol}`;
+  return lines.join('\n');
 }

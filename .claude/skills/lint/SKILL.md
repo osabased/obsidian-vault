@@ -13,7 +13,7 @@ Work in the vault root. AGENTS.md has the note and page formats. A rule applies 
    - **Rules no session was shown.** Suggest the keywords or applies_to that would bring each up in the sessions its domain gets.
 2. **Lint.** Run `node tools/build.mjs`, then `node tools/lint.mjs`. For each error and warning, say what it means and the fix you propose. Name the rules with an empty **Because:** in one line; only the user can give their reason.
    - A rule that index.md marks `not delivered` reaches no session until its error is fixed.
-   - A topic page lint calls stale needs rereading against the rule or source page that changed.
+   - A page lint calls stale needs rereading against the rule or source page that changed.
 3. **Read the wiki.** Read `index.md`, then every rule and page, a domain at a time, and find what lint can't see:
    - rules that contradict each other, in one domain, between a domain and global, or between domains whose project folders nest, starting with the pairs status lists under "Rules on one topic whose globs overlap";
    - rules that say the same thing;
@@ -25,6 +25,7 @@ Work in the vault root. AGENTS.md has the note and page formats. A rule applies 
 4. **Fix.** Fix frontmatter, links, summaries, topic pages and generated files yourself, and log each page you change with `node tools/log.mjs wiki/<domain>/<slug>.md`.
    - Write the page a concept is missing from the sources the vault holds, citing them with footnotes, and link it from its topic page. One the vault's sources say too little about is a gap.
    - Rewrite a page's claim that a newer source overrides from that source, and cite it. For a knowledge rule, show the user the newer source's words and the Do, Not and `as_of` you would change, or the note that should supersede it.
+   - For an Evidence or You said line lint can't check, or whose quote isn't in its source, find the words in what the line names: the session's transcript, the pick's row or the file. Add a line in the form AGENTS.md gives, with those exact words, and ask the user before you remove the old line. Put a quote you can't find to the user.
    - List the gaps with their searches. Run a search only when the user asks, and take in what it finds with `/ingest`.
    - For contradictions, show the user both rules and let them decide. Change a rule's Do, Not or Because, or delete a note, only once the user says yes.
 5. Run `node tools/lint.mjs` again. Done when it shows no errors, each finding from steps 1 and 3 is fixed or put to the user, and the user has answered each change you proposed to a rule.
