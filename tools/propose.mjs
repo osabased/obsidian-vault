@@ -2,7 +2,6 @@ import fs from 'node:fs';
 import crypto from 'node:crypto';
 import {
   config, vaultPath, proposeDomains, writeSettled, appendJsonl, appendLog, inboxFile, proposalRows, recordedRows, statePath, withLock, today, localDay, toPosix, guarded,
-  readJsonl,
 } from './lib/vault.mjs';
 import {
   KEY_RE, BASES, wrongBasis, parseNote, noteErrors, ruleText, ruleTextParts, readNote, liveRules, mentions, isUrl, validDay, byKey, normTopic, domainTopics, vaultFile, joinList,
@@ -10,6 +9,7 @@ import {
 } from './lib/rules.mjs';
 import { build } from './lib/build.mjs';
 import { normGlob } from './lib/glob.mjs';
+import { typedMessages, saidIn, normText } from './lib/quotes.mjs';
 import { ownEntry, marked, mark, wasShown } from './lib/sessions.mjs';
 import { subjectRows, laterRows, endedBy, otherLabels } from './lib/picks.mjs';
 import { UsageError, readInput, refuse, failure, line } from './lib/input.mjs';
@@ -106,48 +106,6 @@ function evidence(f, p) {
   return { kind: 'source', said: quote, date, source: cited, cite: `${cited} · dated ${date} · "${quote}"` };
 }
 
-// Claude Code logs tool output, skill text, compaction summaries, injected context and prompts the app or a script
-// sent as user entries too, so only the text the user typed counts as their words: their prompts, queued or not, and
-// what they wrote into an AskUserQuestion answer. The options' labels are the agent's.
-const INJECTED = /<(system-reminder|task-notification|local-command-stdout|local-command-stderr|local-command-caveat)>[\s\S]*?<\/\1>/g;
-
-const blockTexts = c => (typeof c === 'string' ? [c] : Array.isArray(c) ? c.filter(b => b?.type === 'text').map(b => String(b.text ?? '')) : []);
-const byHuman = r => (r.origin ? r.origin.kind === 'human' : r.turnOrigin === undefined);
-
-function answerTexts(u) {
-  const labels = (u.questions ?? []).flatMap(q => (q.options ?? []).map(o => String(o.label ?? ''))).filter(Boolean).sort((a, b) => b.length - a.length);
-  const answers = Object.values(u.answers ?? {}).map(a => labels.reduce((s, l) => s.split(l).join('\n'), String(a ?? '')));
-  return [...answers, ...Object.values(u.annotations ?? {}).map(a => String(a?.notes ?? ''))];
-}
-
-function typedMessages(transcript) {
-  return readJsonl(transcript).flatMap(r => {
-    const q = r?.attachment;
-    if (r?.type === 'attachment' && q?.type === 'queued_command' && q.commandMode === 'prompt' && byHuman(q)) return blockTexts(q.prompt);
-    if (r?.type !== 'user' || r.isMeta || r.isCompactSummary) return [];
-    if (r.toolUseResult !== undefined) return r.toolUseResult?.answers ? answerTexts(r.toolUseResult) : [];
-    return byHuman(r) ? blockTexts(r.message?.content) : [];
-  }).map(t => t.replace(INJECTED, ' '));
-}
-
-const escapeRegex = s => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-
-// An ellipsis marks words left out, so each piece has to appear, in order, within one message, as whole words.
-function saidIn(quote, messages) {
-  const pieces = normText(quote).split(/\s*(?:…|\.{3})\s*/).filter(Boolean).map(p => new RegExp(
-    `${/^[\p{L}\p{N}]/u.test(p) ? '(?<![\\p{L}\\p{N}])' : ''}${escapeRegex(p)}${/[\p{L}\p{N}]$/u.test(p) ? '(?![\\p{L}\\p{N}])' : ''}`, 'gu'));
-  return pieces.length > 0 && messages.some(m => {
-    const text = normText(m);
-    let from = 0;
-    return pieces.every(re => {
-      re.lastIndex = from;
-      const hit = re.exec(text);
-      from = hit ? re.lastIndex : 0;
-      return hit !== null;
-    });
-  });
-}
-
 const ENTITIES = {
   amp: '&', lt: '<', gt: '>', quot: '"', apos: "'", nbsp: ' ',
   lsquo: '‘', rsquo: '’', ldquo: '“', rdquo: '”', ndash: '–', mdash: '—', hellip: '…',
@@ -212,17 +170,6 @@ function pickEvidence(id, domain) {
 const OVERLAP = 0.2;
 const STOPWORDS = new Set(('a all an and any are as at be because but by can cant didnt do doesnt dont for from in is isnt it its must never not of on or '
   + 'should that the their theirs them these they this those to use was we were with wont you your yours').split(' '));
-// Curly quotes read as straight ones, and dashes of any length as one hyphen. Apostrophes go first so "don't" reads as
-// the stopword dont rather than as don, which every Not line shares.
-const normText = s => String(s)
-  .normalize('NFKC')
-  .toLowerCase()
-  .replace(/[‐‑‒–—―]+|-{2,}/g, '-')
-  .replace(/[‘’ʼ]/g, "'")
-  .replace(/[“”]/g, '"')
-  .replace(/\s+/g, ' ')
-  .trim();
-
 const words = s => new Set((normText(s).replace(/'/g, '').match(/[\p{L}\p{N}]+/gu) ?? [])
   .filter(w => w.length > 2 && !STOPWORDS.has(w) && !/^\p{N}+$/u.test(w))
   .map(w => (w.length > 3 ? w.replace(/s$/, '') : w)));

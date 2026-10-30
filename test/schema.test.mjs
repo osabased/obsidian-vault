@@ -23,7 +23,7 @@ test('a page needs a kind from the list, and only a topic page is a topic page',
   v.write('wiki/demo/no-kind.md', page({ kind: null, topic: 'drafts' }));
   v.write('wiki/demo/rule-kind.md', page({ kind: 'taste' }));
   v.write('wiki/demo/listed-kind.md', page({ kind: null, extra: ['kind:', '  - concept'] }));
-  const unkinded = 'a page needs kind: source, topic, concept, entity or synthesis';
+  const unkinded = 'a page needs kind: topic, concept, entity, synthesis or source';
   assert.deepEqual((await lintFound(v, /kind/)).map(f => [f.level, f.file, f.msg]), [
     ['warn', 'wiki/demo/no-kind.md', unkinded],
     ['warn', 'wiki/demo/rule-kind.md', unkinded],
@@ -51,16 +51,17 @@ test('the index labels each page by its kind', async t => {
   assert.match(index, /\|luau-types\]\] · concept page · /);
   assert.match(index, /\|source-changelog\]\] · source page · /);
   assert.match(index, /\|rule-kind\]\] · page · /);
-  assert.match(index, /\|elsewhere\]\] · concept page · not valid: domain is other but the note is in wiki\/demo\/ · /);
+  assert.match(index, /\|elsewhere\]\] · concept page · no sources · not valid: domain is other but the note is in wiki\/demo\/ · /);
 });
 
 test('lint warns when a rule a page links changes after it, except on a source page', async t => {
   const v = makeVault(t);
   v.write('wiki/demo/some-rule.md', ruleNote({ keywords: ['x'] }));
-  const month = new Date(Date.now() - 30 * 864e5);
+  // Saved before the fixture's updated date, so each page's day stays 2026-10-01 whenever the test runs.
+  const saved = new Date(2026, 8, 1);
   for (const [slug, kind] of [['code', 'topic'], ['luau-types', 'concept'], ['shop-answer', 'synthesis'], ['source-shop', 'source']]) {
     const extra = kind === 'source' ? ['source: https://example.com/shop'] : [];
-    fs.utimesSync(v.write(`wiki/demo/${slug}.md`, page({ kind, extra, body: ['## Rules', '- [[wiki/demo/some-rule|some-rule]]'] })), month, month);
+    fs.utimesSync(v.write(`wiki/demo/${slug}.md`, page({ kind, extra, body: ['## Rules', '- [[wiki/demo/some-rule|some-rule]]'] })), saved, saved);
   }
   const stale = await lintFound(v, /after this page/);
   assert.deepEqual(stale.map(f => [f.level, f.file]), [['warn', 'wiki/demo/code.md'], ['warn', 'wiki/demo/luau-types.md'], ['warn', 'wiki/demo/shop-answer.md']]);
@@ -82,9 +83,9 @@ test('lint warns on a source page with no source, and on no other page for it', 
   const v = makeVault(t);
   v.write('wiki/demo/source-shop.md', page({ kind: 'source' }));
   v.write('wiki/demo/code.md', page({ kind: 'topic' }));
-  const found = await lintFound(v, /source/);
+  const found = await lintFound(v, /^no source\./);
   assert.deepEqual(found.map(f => [f.level, f.file]), [['warn', 'wiki/demo/source-shop.md']]);
-  assert.match(found[0].msg, /^no source\. A source page names the file under raw\/ or the URL it is about$/);
+  assert.equal(found[0].msg, 'no source. A source page names the file under raw/ or the URL it is about');
 });
 
 test('a research domain holds pages, and a rule there is an error', async t => {
