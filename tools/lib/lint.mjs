@@ -4,7 +4,7 @@ import { isBuiltin } from 'node:module';
 import { config, vaultPath, plural, today, datedFiles, filesIn, recordedRows } from './vault.mjs';
 import {
   loadNotes, noteErrors, ruleText, ruleTextParts, liveRules, knownDomain, alwaysSize, isUrl, validDay, normTopic, topicNotes, rawFile, toKey, resolver, linksUnder, noteLinks, byTopic, isTopicPage, isSourcePage, PAGE_KINDS, joinList,
-  hasSection, footnotes, youSaid, linkedKeys, clip, isResearch, citedSources, evidenceQuotes,
+  hasSection, footnotes, youSaid, linkedKeys, clip, isResearch, citedSources, evidenceQuotes, keyOf, kindFolder, kindLabel, linkTo,
 } from './rules.mjs';
 import { build } from './build.mjs';
 import { transcriptFor } from './sessions.mjs';
@@ -28,8 +28,8 @@ export function lint(notes = loadNotes()) {
   const add = (level, file, msg) => found.push({ level, file, msg });
   const { domains, delivery, knowledge } = config();
   const keys = new Set(notes.map(n => n.key));
-  const slugs = new Map();
-  for (const n of notes) slugs.set(n.slug, (slugs.get(n.slug) ?? 0) + 1);
+  const named = new Map();
+  for (const n of notes) named.set(n.slug, [...(named.get(n.slug) ?? []), n]);
   const noteAt = new Map(notes.map(n => [n.key, n]));
   const resolve = resolver(notes);
   const md = markdownFiles();
@@ -58,9 +58,13 @@ export function lint(notes = loadNotes()) {
   for (const n of notes) {
     if (n.depth === 1) add('error', n.rel, 'notes go in wiki/<domain>/');
     else if (!knownDomain(n.domain)) add('error', n.rel, `${n.domain} isn't a domain in vault.config.json`);
-    if (n.depth > 2) add('warn', n.rel, 'notes go directly in wiki/<domain>/, not in subfolders, or the hooks never deliver them');
+    const folder = kindFolder(n);
+    if (n.depth > 1 && folder && n.folder !== folder) {
+      const what = n.type === 'rule' ? 'rule' : kindLabel(n.kind);
+      add('warn', n.rel, `${/^[aeiou]/.test(what) ? 'an' : 'a'} ${what} goes in wiki/${n.domain}/${folder}/`);
+    }
     for (const e of noteErrors(n)) add('error', n.rel, e);
-    lintLinks(n, keys, slugs, md, add);
+    lintLinks(n, noteAt, named, md, add);
     if (n.type === 'page') {
       lintPage(n, () => watched(n), add);
       lintFootnotes(n, add);
@@ -201,13 +205,20 @@ function lintEvidence(n, { typedIn, textsOf, rowOf }, add) {
 // Obsidian links an attachment such as ![[shop.png]] by its file name from anywhere in the vault, so only links to notes are checked.
 // A link to a note not written yet is a warning, like a missing topic, so a page being written in Obsidian doesn't block a commit.
 // Obsidian also resolves a link to any other markdown file in the vault, such as [[index]] or [[decisions]],
-// by its path or its bare name. A bare [[slug]] two notes share resolves to neither in index.md, so it has to name its folder.
-function lintLinks(n, keys, slugs, md, add) {
+// by its path or its bare name. A bare [[slug]] two notes share resolves to neither in index.md, so it has to give its path.
+// A link by a note's key, or through a folder it isn't in, names the note for the tools, but Obsidian may resolve it to
+// another file or none, so lint gives the note's path.
+function lintLinks(n, noteAt, named, md, add) {
   for (const target of noteLinks(n)) {
     if (!target || /\.(?!md$)[^./]+$/i.test(target)) continue;
+    const rel = target.replace(/\\/g, '/').replace(/^\.?\//, '').replace(/\.md$/i, '').toLowerCase();
+    if (md.paths.has(rel)) continue;
     const key = toKey(target);
-    if (key.includes('/') ? keys.has(key) || md.paths.has(key) : slugs.get(key) === 1 || (!slugs.has(key) && md.names.has(key))) continue;
-    if (slugs.get(key) > 1) add('warn', n.rel, `links [[${target}]], which names more than one note. Write its folder too, as [[wiki/<domain>/${key}]]`);
+    const same = named.get(key) ?? [];
+    if (!key.includes('/') && (same.length === 1 || (!same.length && md.names.has(key)))) continue;
+    const note = key.includes('/') && noteAt.get(keyOf(key));
+    if (note) add('warn', n.rel, `links [[${target}]], a note at ${note.rel}. Link it by that path, as ${linkTo(note.key, note.rel)}`);
+    else if (same.length > 1) add('warn', n.rel, `links [[${target}]], which names more than one note. Write its path from the vault root: ${joinList(same.map(x => `[[${x.rel.slice(0, -3)}]]`), 'or')}`);
     else add('warn', n.rel, `links [[${target}]], which has no note`);
   }
 }

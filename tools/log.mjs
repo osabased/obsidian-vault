@@ -1,22 +1,23 @@
 import path from 'node:path';
 import { appendLog, vaultRel } from './lib/vault.mjs';
-import { KEY_RE, readNote, toKey, isUrl, rawFile } from './lib/rules.mjs';
+import { KEY_RE, readNote, keyOf, isUrl, rawFile, loadNotes } from './lib/rules.mjs';
 import { build } from './lib/build.mjs';
 import { UsageError } from './lib/input.mjs';
 
 const USAGE = `usage: node tools/log.mjs <page>
        node tools/log.mjs ingest [--batch] <source> <page>...
        node tools/log.mjs query "<question>" <page>...
-A page is wiki/<domain>/<slug>.md, or its full path. A source is a file under raw/ or a URL.`;
+A page is wiki/<domain>/<folder>/<slug>.md, or its full path. A source is a file under raw/ or a URL.`;
 
 // A session outside the vault passes full paths.
 const fromRoot = ref => (path.isAbsolute(ref) && vaultRel(ref)) || ref;
 
+let notes;
 function pageKey(ref) {
-  const key = toKey(fromRoot(ref));
+  const key = keyOf(fromRoot(ref));
   if (!KEY_RE.test(key)) throw new UsageError();
-  const n = readNote(key);
-  if (n?.type !== 'page') throw new Error(`wiki/${key}.md is ${n ? 'not a page' : 'missing'}.`);
+  const n = readNote(key, notes ??= loadNotes());
+  if (n?.type !== 'page') throw new Error(`${n ? `${n.rel} is not a page` : `${ref} has no note`}.`);
   return key;
 }
 
