@@ -61,7 +61,7 @@ updated: 2026-10-19
 
 - `kind`: `taste` (the default) or `knowledge`, a fact about an API, version or tool that training gets wrong or doesn't know. Knowledge rules reach the agent only on matching edits, so they need `applies_to` and take no `keywords` or `always`.
 - `basis`: `stated` when the user said it, `inferred` when you generalized it from their corrections, `pick` when a recorded answer from an earlier session backs it (a `q-` row in `raw/picks/`, or an older `c-`/`p-` row in `raw/inbox/` that holds the user's own words), `reading` when your own reading of what you saw backs it. Knowledge rules use `stated`, `failure` (something worked only after a failure) or `source` (a dated source shows it).
-- `as_of`: knowledge rules only, the day the fact was last checked, as YYYY-MM-DD: the source's date, or the day it was proposed. Delivery shows it, and lint warns once it is more than 180 days old (`knowledge.staleAfterDays` in `vault.config.json`). Taste rules never expire.
+- `as_of`: knowledge rules only, the day the fact was last checked, as YYYY-MM-DD: the source's date, or the day it was proposed, moved up when `repeats` adds newer evidence. Delivery shows it, and lint warns once it is more than 180 days old (`knowledge.staleAfterDays` in `vault.config.json`). Taste rules never expire.
 - `topic`: a short topic, ideally one the domain's other rules have or `vault.config.json` lists for it. Lint warns on a rule with no topic unless it's superseded. Among delivered rules, it also warns on a topic only one rule in its domain has that the config doesn't list. Global topics aren't checked against the config. `/lint` reports the listed topics no rule has yet.
 - `always`: only for short rules that matter in nearly every session. The user sets it in Obsidian; `tools/propose.mjs` refuses it.
 - `applies_to`: globs relative to the project root. `**` crosses folders, `*` doesn't, `{a,b}` picks one. Matching ignores case and worktree folders.
@@ -115,7 +115,7 @@ What the source shows, by topic, in the agent's words.
 - `applies_to`: optional globs, written as a rule's. An edit to a matching file brings the page up. A research domain's pages reach no edit, so lint warns on one with `applies_to`. Lint also warns on a page with `always` or `triggers`, which only rules take.
 - `source`: source pages, a URL or a file under `raw/` that exists. Lint warns on a source page with none.
 - `source_date`: optional, when the source was published or last updated, as YYYY-MM-DD. Only source pages take `source` and `source_date`; lint warns on another page with either.
-- `updated`: the day the page last changed. Set it whenever you change a page. Lint warns on a page other than a source page when a rule it links under `## Rules` changed after it, and on a topic page when a source page on its topic did, going by `updated` or, since Obsidian doesn't change `updated`, the day the file was last saved.
+- `updated`: the day the page last changed. Set it whenever you change a page. Lint warns on a page other than a source page when a rule it links under `## Rules` or a source page it cites changed after it, and on a topic page when any source page on its topic did, going by `updated` or, since Obsidian doesn't change `updated`, the day the file was last saved.
 - A source page has `## You said`, `## Agent's reading` and `## Rules`, and a topic page `## Rules`, even when one is empty. Lint warns on a missing one.
 - `## You said`: source pages, the user's exact words about the source, one line each with the date and the first 8 characters of the session id. Empty when they said nothing. Lint warns on a line in another form, and on a line whose quote isn't in what the user typed in that session, while the session is still registered and its transcript is there.
 - `## Agent's reading`: source pages, the agent's description. It backs a rule only as `basis: reading`, so the rule's note labels it as the agent's.
@@ -175,7 +175,7 @@ A pick is the user's choice between options the agent showed them for one piece 
 ## Evidence
 
 - A stated preference or a correction from one session is enough for a rule.
-- Cite what backs each rule as it is: the user's words, the error a tool printed and its fix, a dated source and its words, or your own reading. Quote the user's or the source's exact words, marking words left out with …, and give anything else as your reading: `tools/propose.mjs` refuses a quote the user never typed in this session, or one a text file under `raw/refs/` doesn't hold.
+- Cite what backs each rule as it is: the user's words, the error a tool printed and its fix, a dated source and its words, or your own reading. Quote the user's or the source's exact words, marking words left out with …, and give anything else as your reading: `tools/propose.mjs` refuses a quote the user never typed in this session, or one a text file under `raw/refs/` doesn't hold, and lint warns on one already in a note.
 - When evidence conflicts, show the user both sides and let them decide.
 - The user's own taste beats general best practice. Write rules they expressed, ones a failure or a dated source backs, or your reading of what they showed you, labelled as yours.
 

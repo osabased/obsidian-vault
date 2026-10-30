@@ -106,6 +106,21 @@ test('lint warns when a source page on a topic page\'s topic changes after it, a
   assert.match(found[0].msg, /^demo\/source-shop changed on \d{4}-\d\d-\d\d, after this page \(2026-10-01\)\. Check the page still matches it, then set updated$/);
 });
 
+test('lint warns when a source page another page cites, by footnote or link, changes after it', async t => {
+  const v = makeVault(t);
+  const saved = new Date(2026, 8, 1);
+  const old = rel => fs.utimesSync(v.at(...rel.split('/')), saved, saved);
+  v.write('raw/refs/shop.md', 'The shop.\n');
+  v.write('wiki/demo/luau-types.md', page({ kind: 'concept', body: ['Typed.[^1]', '', '[^1]: raw/refs/shop.md'] }));
+  v.write('wiki/demo/roact.md', page({ kind: 'entity', body: ['See [[source-shop]].'] }));
+  v.write('wiki/demo/strict-mode.md', page({ kind: 'concept' }));
+  ['wiki/demo/luau-types.md', 'wiki/demo/roact.md', 'wiki/demo/strict-mode.md'].forEach(old);
+  v.write('wiki/demo/source-shop.md', sourcePage({ source: 'raw/refs/shop.md' }));
+  const found = await lintFound(v, /after this page/);
+  assert.deepEqual(found.map(f => f.file), ['wiki/demo/luau-types.md', 'wiki/demo/roact.md']);
+  assert.match(found[0].msg, /^demo\/source-shop changed on/);
+});
+
 test('lint warns on a quote under You said that the user did not type in its session, and skips a session it has no transcript for', async t => {
   const v = makeVault(t);
   v.startSession(SID, { cwd: v.root, transcript: v.transcript(SID, [userTurn('the cards breathe, the tabs feel cramped'), assistantTurn('the tabs look tight')]) });
@@ -122,6 +137,129 @@ test('lint warns on a quote under You said that the user did not type in its ses
     ['warn', 'wiki/demo/source-shop.md', `"the tabs look tight" isn't in what the user typed in session ${SID8}. Quote their exact words, with … where you leave some out`],
     ['warn', 'wiki/demo/source-shop.md', `a line under ## You said isn't in the form - <date> · session <id> · "<their exact words>", so lint can't check it: - 2026-10-22 · the cards breathe`],
   ]);
+});
+
+test('lint re-checks Evidence quotes against the session and the source, and skips the lines it has nothing to check against', async t => {
+  const v = makeVault(t);
+  v.startSession(SID, { cwd: v.root, transcript: v.transcript(SID, [userTurn('the cards breathe, the tabs feel cramped'), assistantTurn('the tabs look tight')]) });
+  v.write('raw/refs/notes.md', 'The solver is on by default.\n');
+  v.write('raw/refs/grid.html', '<p>The <b>grid</b> is 8&nbsp;px.</p>\n');
+  v.write('raw/refs/guide.md', 'Use **strict mode** in the [shop](https://example.com/shop) scripts.\n');
+  v.write('raw/inbox/2026-09-01.jsonl', `${JSON.stringify({ id: 'c-1234abcd', source: 'capture', text: 'an old captured message' })}\n`);
+  const line = (kind, rest, id = '(a-00000001)') => `- 2026-10-22 · ${kind} · session ${SID8} · ${rest} ${id}`.trimEnd();
+  v.write('wiki/demo/cards.md', ruleNote({ keywords: ['cards'], evidence: [
+    line('stated', '"the cards breathe … feel cramped"'),
+    line('stated', '"the tabs feel cramped"', ''),
+    line('correction', '"the tabs look tight"'),
+    '- 2026-10-22 · stated · session 00000000 · "said in a session long gone" (a-00000001)',
+    line('stated', '"an old captured message"', '(c-1234abcd; proposed as a-00000001)'),
+    line('source', 'raw/refs/notes.md · dated 2026-10-01 · "The solver is on by default"'),
+    line('source', 'raw/refs/notes.md · dated 2026-10-01 · "The solver is off"'),
+    line('source', 'raw/refs/grid.html · dated 2026-10-01 · "The grid is 8 px"'),
+    line('source', 'raw/refs/guide.md · dated 2026-10-01 · "Use strict mode in the shop scripts"'),
+    line('source', 'raw/refs/guide.md · dated 2026-10-01 · "Use **strict mode**"'),
+    line('source', 'https://example.com/blog · dated 2026-10-01 · "not saved anywhere"'),
+    line('failure', 'src/a.lua · "boom" · fixed by: x'),
+    line("agent's reading", 'The user rewrote it.'),
+  ] }));
+  const found = await lintFound(v, /isn't in/);
+  assert.deepEqual(found.map(f => [f.level, f.file, f.msg]), [
+    ['warn', 'wiki/demo/cards.md', `"the tabs look tight" isn't in what the user typed in session ${SID8}. Quote their exact words, with … where you leave some out`],
+    ['warn', 'wiki/demo/cards.md', `"The solver is off" isn't in raw/refs/notes.md. Quote the file's own words, with … where you leave some out`],
+  ]);
+});
+
+test('lint warns on an Evidence line it can\'t read, and on one whose source is no URL or file under raw/', async t => {
+  const v = makeVault(t);
+  v.startSession(SID, { cwd: v.root, transcript: v.transcript(SID, [userTurn('something else entirely')]) });
+  const lines = [
+    `- 2026-10-22 · Stated · session ${SID8} · "never typed" (a-00000001)`,
+    `- 2026-10-22 · stated · Session ${SID8} · "never typed" (a-00000001)`,
+    `- 2026-10-22 · stated · session ${SID8} · "never typed". (a-00000001)`,
+    `- 2026-10-22 · stated · session ${SID8} · "never typed" (a-00000001) see chat`,
+    `- 2026-10-22 · correction · session ${SID8} · 'never typed' (a-00000001)`,
+    `- 2026-10-22 · stated · session ${SID8} · never typed (a-00000001)`,
+    `- 2026-10-22 · stated · session ${SID8} · "never typed" (a-00000001; edited)`,
+    `- 2026-10-22 · source · session ${SID8} · raw/refs/notes.md, dated 2026-10-01 · "anything"`,
+  ];
+  v.write('wiki/demo/cards.md', ruleNote({ keywords: ['cards'], evidence: [
+    ...lines,
+    `- 2026-10-22 · source · session ${SID8} · raw/refs/notse.md · dated 2026-10-01 · "anything" (a-00000001)`,
+    `- 2026-10-22 · choice · session ${SID8} · "B, Grid", picked over "A" for "Which grid?" (q-1234abcd; proposed as a-00000001)`,
+    `- 2026-10-22 · failure · session ${SID8} · src/a.lua · "boom" · fixed by: x (a-00000001)`,
+    `- 2026-10-22 · agent's reading · session ${SID8} · The user rewrote it. (a-00000001)`,
+  ] }));
+  const found = await lintFound(v, /Evidence line/);
+  assert.deepEqual(found.map(f => [f.level, f.msg]), [
+    ...lines.map(l => ['warn', `an Evidence line isn't in the form propose.mjs writes, so lint can't check it: ${l}`]),
+    ['warn', 'an Evidence line cites raw/refs/notse.md. Cite a URL or a file under raw/ that exists'],
+  ]);
+});
+
+test('lint checks an Evidence line from a recorded row against the row\'s words', async t => {
+  const v = makeVault(t);
+  v.write('raw/inbox/2026-09-01.jsonl', `${JSON.stringify({ id: 'c-1234abcd', source: 'capture', text: 'keep the cards roomy please' })}\n`);
+  const pick = (quote, id) => `- 2026-09-01 · stated · session ${SID8} · "${quote}" (${id}; proposed as a-00000001)`;
+  v.write('wiki/demo/cards.md', ruleNote({ keywords: ['cards'], evidence: [
+    pick('keep the cards roomy', 'c-1234abcd'),
+    pick('keep the tabs roomy', 'c-1234abcd'),
+    pick('anything', 'c-99999999'),
+  ] }));
+  const found = await lintFound(v, /c-1234abcd|c-99999999/);
+  assert.deepEqual(found.map(f => [f.level, f.msg]), [
+    ['warn', `"keep the tabs roomy" isn't in what row c-1234abcd recorded. Quote the row's own words, with … where you leave some out`],
+    ['warn', "an Evidence line cites c-99999999, which no row in raw/picks/ or raw/inbox/ has"],
+  ]);
+});
+
+test('lint passes an Evidence line over a raw/ file it can\'t read', { skip: process.platform !== 'win32' && 'needs a share-none lock, which only Windows has' }, async t => {
+  const v = makeVault(t);
+  const file = v.write('raw/refs/notes.md', 'The solver is on by default.\n');
+  v.write('wiki/demo/cards.md', ruleNote({ keywords: ['cards'], evidence: [
+    `- 2026-10-22 · source · session ${SID8} · raw/refs/notes.md · dated 2026-10-01 · "The solver is off" (a-00000001)`,
+  ] }));
+  // libuv's UV_FS_O_EXLOCK, which node doesn't export: no other handle can read the file until this one closes.
+  const fd = fs.openSync(file, fs.constants.O_RDONLY | 0x10000000);
+  let found;
+  try { found = await lintFound(v, /notes\.md/); } finally { fs.closeSync(fd); }
+  assert.deepEqual(found, []);
+});
+
+test('lint skips a session whose transcript it can\'t read', async t => {
+  const v = makeVault(t);
+  const transcript = v.at('.transcripts', 'unreadable');
+  fs.mkdirSync(transcript, { recursive: true });
+  v.startSession(SID, { cwd: v.root, transcript });
+  v.write('wiki/demo/source-shop.md', sourcePage({ source: 'https://example.com/shop', body: [
+    '## You said', `- 2026-10-22 · session ${SID8} · "the tabs look tight"`, '', "## Agent's reading", '', '## Rules',
+  ] }));
+  v.write('wiki/demo/cards.md', ruleNote({ keywords: ['cards'], evidence: [`- 2026-10-22 · stated · session ${SID8} · "the tabs look tight" (a-00000001)`] }));
+  assert.deepEqual(await lintFound(v, /isn't in/), []);
+});
+
+test('a source page stales the pages that link it, and not those that link another source page on the same file', async t => {
+  const v = makeVault(t, { domains: { other: { title: 'Other', projects: [], topics: ['code'] } } });
+  const saved = new Date(2026, 8, 1);
+  v.write('raw/refs/shop.md', 'The shop.\n');
+  v.write('wiki/demo/source-shop.md', sourcePage({ source: 'raw/refs/shop.md' }));
+  v.write('wiki/demo/roact.md', page({ kind: 'entity', body: ['See [[wiki/demo/source-shop|source-shop]].'] }));
+  for (const f of ['wiki/demo/source-shop.md', 'wiki/demo/roact.md']) fs.utimesSync(v.at(...f.split('/')), saved, saved);
+  v.write('wiki/other/source-shop-notes.md', sourcePage({ domain: 'other', source: 'raw/refs/shop.md' }));
+  assert.deepEqual(await lintFound(v, /after this page/), []);
+});
+
+test('a URL footnote is the source page of the file saved from that URL, for staleness and the index count', async t => {
+  const v = makeVault(t);
+  const saved = new Date(2026, 8, 1);
+  v.write('raw/refs/post.md', '---\nurl: https://example.com/post/\nfetched: 2026-10-01\n---\n\nThe post.\n');
+  v.write('wiki/demo/luau-types.md', page({ kind: 'concept', body: ['Typed.[^1]', '', '[^1]: https://Example.com/post#intro · dated 2026-09-30'] }));
+  v.write('wiki/demo/roact.md', page({ kind: 'entity', body: ['Typed.[^1] See [[source-post]].', '', '[^1]: https://example.com/post'] }));
+  for (const f of ['wiki/demo/luau-types.md', 'wiki/demo/roact.md']) fs.utimesSync(v.at(...f.split('/')), saved, saved);
+  v.write('wiki/demo/source-post.md', sourcePage({ source: 'raw/refs/post.md' }));
+  const found = await lintFound(v, /after this page/);
+  assert.deepEqual(found.map(f => f.file), ['wiki/demo/luau-types.md', 'wiki/demo/roact.md']);
+  const rules = await v.import('lib/rules.mjs');
+  assert.match(rules.renderIndex(rules.loadNotes()), /\[\[wiki\/demo\/roact\|roact\]\] · entity page · 1 source ·/);
 });
 
 const logged = v => v.read('log.md').trim().split('\n').map(l => l.replace(/^- \d{4}-\d\d-\d\d \d\d:\d\d · /, ''));

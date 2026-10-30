@@ -1,14 +1,22 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { isBuiltin } from 'node:module';
-import { config, vaultPath, plural, today, datedFiles, filesIn } from './vault.mjs';
+import { config, vaultPath, plural, today, datedFiles, filesIn, recordedRows } from './vault.mjs';
 import {
   loadNotes, noteErrors, ruleText, ruleTextParts, liveRules, knownDomain, alwaysSize, isUrl, validDay, normTopic, topicNotes, rawFile, toKey, resolver, linksUnder, noteLinks, byTopic, isTopicPage, isSourcePage, PAGE_KINDS, joinList,
-  hasSection, footnotes, youSaid, linkedKeys, clip, isResearch,
+  hasSection, footnotes, youSaid, linkedKeys, clip, isResearch, citedSources, evidenceQuotes,
 } from './rules.mjs';
 import { build } from './build.mjs';
 import { transcriptFor } from './sessions.mjs';
-import { typedMessages, saidIn } from './quotes.mjs';
+import { typedMessages, saidIn, sourceTexts } from './quotes.mjs';
+
+const memo = f => {
+  const seen = new Map();
+  return k => {
+    if (!seen.has(k)) seen.set(k, f(k));
+    return seen.get(k);
+  };
+};
 
 export const tally = found => {
   const errors = found.filter(f => f.level === 'error').length;
@@ -26,19 +34,26 @@ export function lint(notes = loadNotes()) {
   const resolve = resolver(notes);
   const md = markdownFiles();
   const rulesOf = page => [...new Set(linksUnder(page, 'Rules').map(resolve))].map(k => noteAt.get(k)).filter(r => r?.type === 'rule');
-  const sourcePages = notes.filter(n => isSourcePage(n) && n.topic);
-  const watched = page => [
-    ...rulesOf(page),
-    ...(isTopicPage(page) ? sourcePages.filter(s => s.domain === page.domain && s.topic === page.topic) : []),
-  ];
-  const said = new Map();
-  const typedIn = prefix => {
-    if (!said.has(prefix)) {
-      const file = transcriptFor(prefix);
-      said.set(prefix, file ? typedMessages(file) : null);
-    }
-    return said.get(prefix);
+  const sourcePages = notes.filter(isSourcePage);
+  const cites = citedSources(notes, resolve);
+  const watched = page => {
+    const { pages } = cites(page);
+    const onTopic = isTopicPage(page);
+    return [
+      ...rulesOf(page),
+      ...sourcePages.filter(s => pages.has(s.key) || (onTopic && s.topic && s.domain === page.domain && s.topic === page.topic)),
+    ];
   };
+  const typedIn = memo(prefix => {
+    const file = transcriptFor(prefix);
+    return file ? typedMessages(file) : null;
+  });
+  // A file another program holds open can't be read for now, so its lines pass like a binary source's.
+  const textsOf = memo(rel => {
+    try { return sourceTexts(rel); } catch { return null; }
+  });
+  let rows;
+  const rowOf = id => (rows ??= new Map(recordedRows().map(r => [r.id, r]))).get(id);
 
   for (const n of notes) {
     if (n.depth === 1) add('error', n.rel, 'notes go in wiki/<domain>/');
@@ -47,12 +62,13 @@ export function lint(notes = loadNotes()) {
     for (const e of noteErrors(n)) add('error', n.rel, e);
     lintLinks(n, keys, slugs, md, add);
     if (n.type === 'page') {
-      lintPage(n, watched(n), add);
+      lintPage(n, () => watched(n), add);
       lintFootnotes(n, add);
       lintSaid(n, typedIn, add);
     }
     if (n.type !== 'rule') continue;
 
+    lintEvidence(n, { typedIn, textsOf, rowOf }, add);
     if (n.superseded_by === n.key) add('error', n.rel, 'superseded_by names the note itself');
     else if (n.superseded_by && !keys.has(n.superseded_by)) add('error', n.rel, `superseded_by names ${n.superseded_by}, which has no note`);
     if (n.data.status !== undefined) add('warn', n.rel, 'status does nothing. To stop a rule, delete its note or set superseded_by');
@@ -149,14 +165,36 @@ function lintFootnotes(n, add) {
 }
 
 // A session the registry has dropped, or whose transcript is gone, can't be checked, so its lines pass.
+function checkTyped(n, session, quote, typedIn, add) {
+  const typed = typedIn(session);
+  if (typed && !saidIn(quote, typed)) add('warn', n.rel, `"${quote}" isn't in what the user typed in session ${session}. Quote their exact words, with … where you leave some out`);
+}
+
 function lintSaid(n, typedIn, add) {
   for (const { line, session, quote } of youSaid(n)) {
-    if (!session) {
-      add('warn', n.rel, `a line under ## You said isn't in the form - <date> · session <id> · "<their exact words>", so lint can't check it: ${clip(line, 100)}`);
-      continue;
+    if (session) checkTyped(n, session, quote, typedIn, add);
+    else add('warn', n.rel, `a line under ## You said isn't in the form - <date> · session <id> · "<their exact words>", so lint can't check it: ${clip(line, 100)}`);
+  }
+}
+
+// propose.mjs checks a quote as it writes it, but a rule written or edited by hand never passes through it.
+// A URL, or a source with no words such as a screenshot, can't be checked, so its lines pass.
+function lintEvidence(n, { typedIn, textsOf, rowOf }, add) {
+  for (const { line, session, source, pick, quote } of evidenceQuotes(n)) {
+    if (line) {
+      add('warn', n.rel, `an Evidence line isn't in the form propose.mjs writes, so lint can't check it: ${clip(line, 100)}`);
+    } else if (pick) {
+      const row = rowOf(pick);
+      if (!row) add('warn', n.rel, `an Evidence line cites ${pick}, which no row in raw/picks/ or raw/inbox/ has`);
+      else if (!saidIn(quote, [String(row.text ?? '')])) add('warn', n.rel, `"${quote}" isn't in what row ${pick} recorded. Quote the row's own words, with … where you leave some out`);
+    } else if (source === undefined) {
+      checkTyped(n, session, quote, typedIn, add);
+    } else if (!isUrl(source)) {
+      const rel = rawFile(source);
+      const texts = rel ? textsOf(rel) : null;
+      if (!rel) add('warn', n.rel, `an Evidence line cites ${source}. Cite a URL or a file under raw/ that exists`);
+      else if (texts && !saidIn(quote, texts)) add('warn', n.rel, `"${quote}" isn't in ${rel}. Quote the file's own words, with … where you leave some out`);
     }
-    const typed = typedIn(session);
-    if (typed && !saidIn(quote, typed)) add('warn', n.rel, `"${quote}" isn't in what the user typed in session ${session}. Quote their exact words, with … where you leave some out`);
   }
 }
 
@@ -186,8 +224,8 @@ const changed = n => [n.data.updated, today(new Date(n.saved))].filter(d => vali
 const SECTIONS = { source: ['You said', "Agent's reading", 'Rules'], topic: ['Rules'] };
 
 // /ingest finds a source's page by the path its source gives, so each file has one spelling.
-// A source page records what its source said. The other pages sum up the rules they link, and a topic page the source
-// pages on its topic too, so they go stale when one changes after them.
+// A source page records what its source said. The other pages sum up the rules they link and the source pages they
+// cite, and a topic page every source page on its topic too, so they go stale when one changes after them.
 function lintPage(n, watched, add) {
   const { source, source_date: dated } = n.data;
   // Another page gets only the warning below that these fields are for source pages, not errors on their values.
@@ -220,7 +258,7 @@ function lintPage(n, watched, add) {
   }
   if (isSourcePage(n)) return;
   const mine = changed(n);
-  for (const r of watched) {
+  for (const r of watched()) {
     const theirs = changed(r);
     if (theirs > mine) add('warn', n.rel, `${r.key} changed on ${theirs}, after this page (${mine}). Check the page still matches it, then set updated`);
   }

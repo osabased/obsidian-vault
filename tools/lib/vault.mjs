@@ -128,9 +128,10 @@ export function copyNew(src, dir, stem, ext) {
   }
 }
 
-export function readJsonl(file) {
-  let text = '';
-  try { text = fs.readFileSync(file, 'utf8'); } catch {}
+// A file that can't be read gives missing, so a caller can tell it from an empty one.
+export function readJsonl(file, missing = []) {
+  let text;
+  try { text = fs.readFileSync(file, 'utf8'); } catch { return missing; }
   return text.split('\n').flatMap(line => {
     try { return line.trim() ? [JSON.parse(line)] : []; } catch { return []; }
   });

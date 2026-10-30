@@ -137,33 +137,25 @@ test('an always rule written after session start reaches the next prompt', t => 
   assert.equal(prompt(v, sid, 'hello'), null);
 });
 
-test('a compact start clears the markers so the edit gate and prompt refuse again', t => {
+test('a compact or clear start clears the markers so the edit gate and prompt refuse again', t => {
   const v = makeVault(t);
-  const sid = sessionId();
   v.write('wiki/demo/ui-rule.md', ruleNote({ applies_to: ['src/**'], keywords: ['strict'] }));
-  v.startSession(sid);
-  assert.ok(denied(edit(v, sid, 'src/a.lua')));
-  assert.equal(edit(v, sid, 'src/a.lua'), null);
-  assert.ok(prompt(v, sid, 'strict'));
-  assert.equal(prompt(v, sid, 'strict'), null);
+  for (const source of ['compact', 'clear']) {
+    const sid = sessionId();
+    v.startSession(sid);
+    assert.ok(denied(edit(v, sid, 'src/a.lua')), source);
+    assert.equal(edit(v, sid, 'src/a.lua'), null, source);
+    assert.ok(prompt(v, sid, 'strict'), source);
+    assert.equal(prompt(v, sid, 'strict'), null, source);
 
-  v.startSession(sid, { source: 'resume' });
-  assert.equal(edit(v, sid, 'src/a.lua'), null, 'resume keeps the markers');
+    v.startSession(sid, { source: 'resume' });
+    assert.equal(edit(v, sid, 'src/a.lua'), null, `${source}: resume keeps the markers`);
 
-  v.startSession(sid, { source: 'compact' });
-  assert.ok(denied(edit(v, sid, 'src/a.lua')));
-  assert.equal(edit(v, sid, 'src/a.lua'), null);
-  assert.ok(prompt(v, sid, 'strict'));
-});
-
-test('a clear start also clears the markers', t => {
-  const v = makeVault(t);
-  const sid = sessionId();
-  v.write('wiki/demo/ui-rule.md', ruleNote({ applies_to: ['src/**'] }));
-  v.startSession(sid);
-  assert.ok(denied(edit(v, sid, 'src/a.lua')));
-  v.startSession(sid, { source: 'clear' });
-  assert.ok(denied(edit(v, sid, 'src/a.lua')));
+    v.startSession(sid, { source });
+    assert.ok(denied(edit(v, sid, 'src/a.lua')), source);
+    assert.equal(edit(v, sid, 'src/a.lua'), null, source);
+    assert.ok(prompt(v, sid, 'strict'), source);
+  }
 });
 
 test('a rule with a lint error or superseded_by is never delivered', t => {
