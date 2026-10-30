@@ -4,7 +4,7 @@ import { isBuiltin } from 'node:module';
 import { config, vaultPath, plural, today, datedFiles } from './vault.mjs';
 import {
   loadNotes, noteErrors, ruleText, ruleTextParts, liveRules, knownDomain, alwaysSize, isUrl, validDay, normTopic, topicNotes, rawFile, toKey, resolver, linksUnder, noteLinks, byTopic, isTopicPage, PAGE_KINDS, joinList,
-  hasSection, footnotes, youSaid, linkedKeys, clip,
+  hasSection, footnotes, youSaid, linkedKeys, clip, isResearch,
 } from './rules.mjs';
 import { build } from './build.mjs';
 import { transcriptFor } from './sessions.mjs';
@@ -209,9 +209,14 @@ function lintPage(n, watched, add) {
   if (missing.length) {
     add('warn', n.rel, `no ${joinList(missing, 'or')} section. A ${n.kind} page has ${joinList(needs.map(s => `## ${s}`), 'and')}, even when ${needs.length > 1 ? 'one is' : 'it is'} empty`);
   }
-  const sourceFields = ['source', 'source_date'].filter(f => n.data[f] != null);
-  if (n.kind !== 'source' && sourceFields.length) {
-    add('warn', n.rel, `${joinList(sourceFields, 'and')} ${sourceFields.length > 1 ? 'are' : 'is'} for source pages. Cite a source with a footnote instead`);
+  const misplaced = (fields, owner, instead) => {
+    const set = fields.filter(f => n.data[f] != null);
+    if (set.length) add('warn', n.rel, `${joinList(set, 'and')} ${set.length > 1 ? 'are' : 'is'} for ${owner}. ${instead}`);
+  };
+  if (n.kind !== 'source') misplaced(['source', 'source_date'], 'source pages', 'Cite a source with a footnote instead');
+  misplaced(['always', 'triggers'], 'rules', 'A page comes up through keywords and applies_to');
+  if (n.applies_to?.length && isResearch(n.domain)) {
+    add('warn', n.rel, `${n.domain} is a research domain, with no project folders, so no edit brings this page up. Give it keywords instead`);
   }
   if (n.kind === 'source') return;
   const mine = changed(n);

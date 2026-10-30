@@ -1,16 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import os from 'node:os';
-import path from 'node:path';
-import { makeVault, ruleNote, denied } from './fixture.mjs';
+import { makeVault, ruleNote, denied, sessionId, editFile as edit, prompt } from './fixture.mjs';
 
-let n = 0;
-const sessionId = () => `b1b2c3d4-0000-4000-8000-${String(++n).padStart(12, '0')}`;
-
-const edit = (v, sid, rel, { tool = 'Edit', text = 'local x = 1', abs } = {}) => v.edit(sid, tool, {
-  file_path: abs ?? path.join(v.project, ...rel.split('/')), ...(tool === 'Write' ? { content: text } : { old_string: 'a', new_string: text }),
-});
-const prompt = (v, sid, text) => v.hook('prompt', { session_id: sid, cwd: v.project, prompt: text, hook_event_name: 'UserPromptSubmit' });
 const withTriggers = (text, ...res) => text.replace('triggers: []', `triggers:\n${res.map(r => `  - '${r}'`).join('\n')}`);
 
 test('edit hook refuses the first matching edit and lets the retry through', t => {

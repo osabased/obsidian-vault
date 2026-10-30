@@ -1,4 +1,4 @@
-import { runHook, domainsFor, inVaultFolder, vaultPath, toPosix, guarded, config, plural, clock } from '../lib/vault.mjs';
+import { runHook, domainsFor, inVaultFolder, readableDomains, vaultPath, toPosix, guarded, config, plural, clock } from '../lib/vault.mjs';
 import { alwaysContext, alwaysIn, loadNotes, settledNotes, liveRules, domainTopics, joinList, clip } from '../lib/rules.mjs';
 import { build } from '../lib/build.mjs';
 import { touchSession, clearMarkers, markAlways, markShown, tidy, errorsSinceLint, daysSinceLint } from '../lib/sessions.mjs';
@@ -66,9 +66,7 @@ runHook('session-start', input => {
   const ready = settledNotes(notes);
   const rules = liveRules(ready);
   const always = alwaysContext(scope, rules);
-  // The vault folder is where every domain's pages are read, a research domain's among them.
-  const readable = [...(vaultFolder ? Object.keys(config().domains) : doms), 'global'];
-  const index = guarded('index note', () => indexNote(readable, ready));
+  const index = guarded('index note', () => indexNote(readableDomains(doms, vaultFolder), ready));
   let propose = '';
   let pick = '';
   // Vault sessions register so /ingest can propose; the skill tells them how, so they get no note.

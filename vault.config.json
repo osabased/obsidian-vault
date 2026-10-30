@@ -12,6 +12,7 @@
     "maxRuleChars": 300,
     "maxBlockChars": 1200,
     "maxPromptExcerpts": 3,
+    "maxPages": 3,
     "activeMaxLines": 60,
     "activeMaxBytes": 4096
   },
