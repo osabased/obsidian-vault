@@ -22,7 +22,7 @@ Work in the vault root. AGENTS.md has the note and page formats. A rule applies 
    - concepts, APIs and named things that two pages mention with no page of their own;
    - claims a newer source overrides: each knowledge rule status lists under "Knowledge rules a newer source on their topic may override" against the newer source pages it names, and on each topic, a page's claims against the source pages dated after the sources it cites;
    - gaps worth a web search: a question a topic page leaves open, a claim only one old source backs, a topic with rules and no source. Write the search you would run for each.
-4. **Fix.** Fix frontmatter, links, summaries, topic pages and generated files yourself, and log each page you change with `node tools/log.mjs wiki/<domain>/<slug>.md`.
+4. **Fix.** Fix frontmatter, links, summaries, topic pages and generated files yourself, and log each page you change with `node tools/log.mjs wiki/<domain>/<folder>/<slug>.md`.
    - Write the page a concept is missing from the sources the vault holds, citing them with footnotes, and link it from its topic page. One the vault's sources say too little about is a gap.
    - Rewrite a page's claim that a newer source overrides from that source, and cite it. For a knowledge rule, show the user the newer source's words and the Do, Not and `as_of` you would change, or the note that should supersede it.
    - For an Evidence or You said line lint can't check, or whose quote isn't in its source, find the words in what the line names: the session's transcript, the pick's row or the file. Add a line in the form AGENTS.md gives, with those exact words, and ask the user before you remove the old line. Put a quote you can't find to the user.

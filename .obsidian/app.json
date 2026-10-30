@@ -3,5 +3,7 @@
     "tools/",
     "test/",
     "CLAUDE.md"
-  ]
+  ],
+  "alwaysUpdateLinks": true,
+  "newLinkFormat": "absolute"
 }

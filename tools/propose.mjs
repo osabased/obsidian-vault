@@ -5,7 +5,7 @@ import {
   shortHash,
 } from './lib/vault.mjs';
 import {
-  KEY_RE, BASES, wrongBasis, parseNote, noteErrors, ruleText, ruleTextParts, readNote, liveRules, mentions, isUrl, validDay, byKey, normTopic, domainTopics, vaultFile, joinList,
+  KEY_RE, BASES, wrongBasis, parseNote, noteErrors, ruleText, ruleTextParts, loadNotes, readNote, liveRules, mentions, isUrl, validDay, byKey, normTopic, domainTopics, vaultFile, joinList,
   sharedFiles,
 } from './lib/rules.mjs';
 import { build } from './lib/build.mjs';
@@ -186,7 +186,7 @@ function lookalikes(f, text, scope, rules) {
 }
 
 // The retry goes through once every rule on the list, and the note its words back, was shown for this proposal.
-function checkRepeats(f, text, scope, rules, same) {
+function checkRepeats(f, text, scope, rules, same, notes) {
   const topic = onTopic(f, rules);
   const all = lookalikes(f, text, scope, rules);
   const inTopic = new Set(topic.map(([k]) => k));
@@ -206,7 +206,7 @@ function checkRepeats(f, text, scope, rules, same) {
     ...(alike.length ? ['Others that share words, globs or keywords:', ...alike.map(item)] : []),
   ] : alike.length ? [`${it} may repeat these rules:`, ...alike.map(item)] : [];
   refuse([
-    ...(same ? [`these words already back ${same.note}${gone(same.note)}.`] : []),
+    ...(same ? [`these words already back ${same.note}${gone(same.note, notes)}.`] : []),
     ...listed,
     ...(more ? [`${more} more match less closely and aren't listed.`] : []),
     ...(listed.length ? [
@@ -226,8 +226,8 @@ function sameFiles(f, rules) {
   return near.length ? `On ${f.topic}, ${joinList(near, 'and')} cover${one ? 's' : ''} files this rule covers too. Check the new rule doesn't contradict ${one ? 'it' : 'them'}. ` : '';
 }
 
-function gone(key) {
-  const n = readNote(key);
+function gone(key, notes) {
+  const n = readNote(key, notes);
   return !n ? ', which has since been deleted' : n.superseded_by ? ', which has since been retired' : '';
 }
 
@@ -274,19 +274,20 @@ function withEvidence(text, entry) {
 }
 
 // Saved settled, so the rule keeps reaching sessions just when the user has corrected the agent on it.
-function addEvidence(f, e, scope, rules, same, row) {
+function addEvidence(f, e, scope, rules, same, row, notes) {
   const target = f.repeats;
   if (!rules[target] || !scope.includes(rules[target].domain)) refuse(`repeats names ${target}, which isn't a delivered rule in ${joinList(scope, 'or')}. Give the key of a rule the refusal listed.`);
   if (same?.note === target) refuse(`these words already back ${target}.`);
-  const file = `${vaultPath('wiki', ...target.split('/'))}.md`;
+  const { rel } = readNote(target, notes);
+  const file = vaultPath(...rel.split('/'));
   const before = fs.readFileSync(file, 'utf8');
-  const n = parseNote(before, `wiki/${target}.md`);
+  const n = parseNote(before, rel);
   let after = withEvidence(before, evidenceLine(f, e));
   // as_of is the day the fact was last checked, so newer evidence of any kind moves it up: a source's date, or the day
   // the Evidence line gives.
   const checked = e.date ?? e.day ?? f.day;
   if (n.kind === 'knowledge' && validDay(n.as_of) && checked > n.as_of) after = setField(after, 'as_of', checked);
-  const now = parseNote(after, `wiki/${target}.md`);
+  const now = parseNote(after, rel);
   writeSettled(file, after);
   appendJsonl(inboxFile(), [row(target)]);
   appendLog([`added evidence to ${target} · session ${f.sid.slice(0, 8)}`]);
@@ -295,7 +296,7 @@ function addEvidence(f, e, scope, rules, same, row) {
   if (was !== is) carryMarkers(f.sid, target, was, is);
   const moved = now.as_of !== n.as_of;
   return [
-    `Added the Evidence line to wiki/${target}.md. End your reply with these two lines as they are:`,
+    `Added the Evidence line to ${rel}. End your reply with these two lines as they are:`,
     '',
     `**Rule backed again** ${target}: ${ruleText(now)}`,
     `Its note has a new Evidence line${moved ? `, and as_of ${now.as_of}` : ''}. To change or remove it, edit ${toPosix(file)}.`,
@@ -331,7 +332,8 @@ function propose(sid, p) {
   const at = new Date().toISOString();
   Object.assign(f, { day: today(), id: `a-${crypto.randomBytes(4).toString('hex')}` });
   const text = noteText(f, e);
-  const n = parseNote(text, `wiki/${key}.md`);
+  const rel = `wiki/${f.domain}/rules/${f.slug}.md`;
+  const n = parseNote(text, rel);
   checkReadBack(n, f);
   const [err] = noteErrors(n);
   if (err) refuse(`${err}.`);
@@ -347,15 +349,17 @@ function propose(sid, p) {
     // One error can show several facts, so a failure matches an earlier one only with the same fix.
     const same = rows.find(r => normText(r.text ?? '') === normText(e.said) && (!e.fix || normText(r.fix ?? '') === normText(e.fix)));
     // Read under the lock, so a proposal written meanwhile is on the list.
-    const rules = liveRules();
+    const notes = loadNotes();
+    const rules = liveRules(notes);
     const row = note => ({
       id: f.id, at, source: 'agent', kind: e.kind, text: e.said, ...(e.fix ? { fix: e.fix } : {}),
       note, session: sid, transcript: session.transcript ?? null, cwd: session.cwd ?? null, domain: rules[note]?.domain ?? f.domain, ...(e.pick ? { pick: e.pick } : {}),
     });
-    if (f.repeats) return addEvidence(f, e, scope, rules, same, row);
-    if (readNote(key)) refuse(`wiki/${key}.md already exists. Pick another slug, or leave that note to the user.`);
-    const overlaps = checkRepeats(f, ruleText(n), scope, rules, same);
-    const file = `${vaultPath('wiki', f.domain, f.slug)}.md`;
+    if (f.repeats) return addEvidence(f, e, scope, rules, same, row, notes);
+    const taken = readNote(key, notes);
+    if (taken) refuse(`${taken.rel} already exists. Pick another slug, or leave that note to the user.`);
+    const overlaps = checkRepeats(f, ruleText(n), scope, rules, same, notes);
+    const file = vaultPath(...rel.split('/'));
     writeSettled(file, text);
     appendJsonl(inboxFile(), [row(key)]);
     appendLog([`wrote ${key} · session ${sid.slice(0, 8)}`]);
@@ -366,7 +370,7 @@ function propose(sid, p) {
       ...(overlaps.length ? [`It may overlap ${joinList(overlaps, 'and')}.`] : []),
       `It applies from now on. To change or remove it, edit or delete ${toPosix(file)}.`,
     ];
-    return [`Wrote wiki/${key}.md. ${sameFiles(f, rules)}End your reply with these ${['two', 'three'][reply.length - 2]} lines as they are:`, '', ...reply].join('\n');
+    return [`Wrote ${rel}. ${sameFiles(f, rules)}End your reply with these ${['two', 'three'][reply.length - 2]} lines as they are:`, '', ...reply].join('\n');
   });
 }
 
