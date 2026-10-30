@@ -6,7 +6,7 @@ export const ROOT = path.resolve(import.meta.dirname, '..', '..');
 export const vaultPath = (...xs) => path.join(ROOT, ...xs);
 
 const DEFAULTS = {
-  delivery: { maxRulesPerEdit: 3, maxRuleChars: 300, maxBlockChars: 1200, maxPromptExcerpts: 3, activeMaxLines: 60, activeMaxBytes: 4096, settleSeconds: 60 },
+  delivery: { maxRulesPerEdit: 3, maxRuleChars: 300, maxBlockChars: 1200, maxPromptExcerpts: 3, maxPages: 3, activeMaxLines: 60, activeMaxBytes: 4096, settleSeconds: 60 },
   knowledge: { staleAfterDays: 180 },
   lint: { remindAfterDays: 14 },
   picks: { maxSheetBytes: 3_000_000 },
@@ -57,6 +57,8 @@ export const inVaultFolder = cwd => Boolean(cwd) && vaultRel(cwd) !== null;
 
 // /ingest runs in the vault folder and can feed any domain.
 export const proposeDomains = cwd => (inVaultFolder(cwd) ? Object.keys(config().domains) : domainsFor(cwd).map(d => d.domain));
+// The vault folder is where every domain's pages are read, a research domain's among them.
+export const readableDomains = (doms, vaultFolder) => [...(vaultFolder ? Object.keys(config().domains) : doms), 'global'];
 
 export function readJson(file, fallback) {
   try {
