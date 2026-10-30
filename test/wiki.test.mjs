@@ -1,18 +1,16 @@
 import fs from 'node:fs';
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { makeVault, ruleNote, pageNote as page, userTurn, assistantTurn, lintFound } from './fixture.mjs';
+import { makeVault, ruleNote, pageNote as page, sourcePage, userTurn, assistantTurn, lintFound } from './fixture.mjs';
 
 const SID = '9f8e7d6c-0000-4000-8000-000000000004';
 const SID8 = SID.slice(0, 8);
 
-const sourcePage = (source, body = ['## You said', '', "## Agent's reading", '', '## Rules'], extra = []) => page({ kind: 'source', extra: [`source: ${source}`, ...extra], body });
-
 test('the index lists a topic\'s pages by kind, each but a source page with how many sources it draws on', async t => {
   const v = makeVault(t);
   v.write('raw/refs/notes.md', 'notes');
-  v.write('wiki/demo/source-changelog.md', sourcePage('https://example.com/changelog'));
-  v.write('wiki/demo/source-notes.md', sourcePage('raw/refs/notes.md'));
+  v.write('wiki/demo/source-changelog.md', sourcePage({ source: 'https://example.com/changelog' }));
+  v.write('wiki/demo/source-notes.md', sourcePage({ source: 'raw/refs/notes.md' }));
   v.write('wiki/demo/strict-mode.md', page({ kind: 'synthesis', body: ['Typed.[^1]', '', '[^1]: https://example.com/changelog · dated 2026-09-30'] }));
   v.write('wiki/demo/luau-types.md', page({ kind: 'concept', body: ['Typed.[^1] Strict.[^2]', '', '[^1]: raw/refs/notes.md', '[^2]: https://example.com/strict'] }));
   v.write('wiki/demo/code.md', page({
@@ -35,8 +33,8 @@ test('the index lists a topic\'s pages by kind, each but a source page with how 
 
 test('lint warns on a page missing a section its kind has, or holding a source field only a source page takes', async t => {
   const v = makeVault(t);
-  v.write('wiki/demo/source-shop.md', sourcePage('https://example.com/shop', ['## You said', '', 'Shows a shop.']));
-  v.write('wiki/demo/source-full.md', sourcePage('https://example.com/full'));
+  v.write('wiki/demo/source-shop.md', sourcePage({ source: 'https://example.com/shop', body: ['## You said', '', 'Shows a shop.'] }));
+  v.write('wiki/demo/source-full.md', sourcePage({ source: 'https://example.com/full' }));
   v.write('wiki/demo/code.md', page({ kind: 'topic' }));
   v.write('wiki/demo/layout.md', page({ kind: 'topic', topic: 'layout', body: ['## Rules'] }));
   v.write('wiki/demo/luau-types.md', page({ kind: 'concept', extra: ['source: https://example.com/x', 'source_date: 2026-09-30'] }));
@@ -77,11 +75,11 @@ test('lint warns on a page no other note links, except a topic page or a note wi
   const v = makeVault(t);
   v.write('wiki/demo/code.md', page({ kind: 'topic', body: ['See [[luau-types]] and [the store](../demo/source-store.md).', '', '## Rules'] }));
   v.write('wiki/demo/luau-types.md', page({ kind: 'concept' }));
-  v.write('wiki/demo/source-store.md', sourcePage('https://example.com/store'));
+  v.write('wiki/demo/source-store.md', sourcePage({ source: 'https://example.com/store' }));
   v.write('wiki/demo/roblox.md', page({ kind: 'entity', body: ['Itself: [[roblox]].'] }));
   v.write('wiki/demo/strict-mode.md', page({ kind: 'synthesis' }));
-  v.write('wiki/demo/source-quoted.md', sourcePage('https://example.com/q'));
-  v.write('wiki/demo/source-shop.md', sourcePage('https://example.com/shop', ['## You said', '- 2026-10-22 · session 00000000 · "see [[source-quoted]]"', '', "## Agent's reading", '', '## Rules']));
+  v.write('wiki/demo/source-quoted.md', sourcePage({ source: 'https://example.com/q' }));
+  v.write('wiki/demo/source-shop.md', sourcePage({ source: 'https://example.com/shop', body: ['## You said', '- 2026-10-22 · session 00000000 · "see [[source-quoted]]"', '', "## Agent's reading", '', '## Rules'] }));
   v.write('wiki/demo/elsewhere.md', page({ kind: 'concept', domain: 'other' }));
   v.write('wiki/demo/some-rule.md', ruleNote({ keywords: ['x'] }).replace('## Examples\n', '## Examples\n- [[wiki/demo/strict-mode|strict-mode]]\n'));
   const found = await lintFound(v, /no other note links/);
@@ -100,9 +98,9 @@ test('lint warns when a source page on a topic page\'s topic changes after it, a
   v.write('wiki/demo/code.md', page({ kind: 'topic', body: ['## Rules'] }));
   v.write('wiki/demo/luau-types.md', page({ kind: 'concept' }));
   v.write('wiki/demo/layout.md', page({ kind: 'topic', topic: 'layout', body: ['## Rules'] }));
-  v.write('wiki/demo/source-grid.md', sourcePage('https://example.com/grid').replace('topic: code', 'topic: layout'));
+  v.write('wiki/demo/source-grid.md', sourcePage({ source: 'https://example.com/grid', topic: 'layout' }));
   ['wiki/demo/code.md', 'wiki/demo/luau-types.md', 'wiki/demo/layout.md', 'wiki/demo/source-grid.md'].forEach(old);
-  v.write('wiki/demo/source-shop.md', sourcePage('https://example.com/shop'));
+  v.write('wiki/demo/source-shop.md', sourcePage({ source: 'https://example.com/shop' }));
   const found = await lintFound(v, /after this page/);
   assert.deepEqual(found.map(f => [f.level, f.file]), [['warn', 'wiki/demo/code.md']]);
   assert.match(found[0].msg, /^demo\/source-shop changed on \d{4}-\d\d-\d\d, after this page \(2026-10-01\)\. Check the page still matches it, then set updated$/);
@@ -111,14 +109,14 @@ test('lint warns when a source page on a topic page\'s topic changes after it, a
 test('lint warns on a quote under You said that the user did not type in its session, and skips a session it has no transcript for', async t => {
   const v = makeVault(t);
   v.startSession(SID, { cwd: v.root, transcript: v.transcript(SID, [userTurn('the cards breathe, the tabs feel cramped'), assistantTurn('the tabs look tight')]) });
-  v.write('wiki/demo/source-shop.md', sourcePage('https://example.com/shop', [
+  v.write('wiki/demo/source-shop.md', sourcePage({ source: 'https://example.com/shop', body: [
     '## You said',
     `- 2026-10-22 · session ${SID8} · "the cards breathe … feel cramped"`,
     `- 2026-10-22 · session ${SID8} · "the tabs look tight"`,
     '- 2026-10-22 · session 00000000 · "said in a session long gone"',
     '- 2026-10-22 · the cards breathe',
     '', "## Agent's reading", '', '## Rules',
-  ]));
+  ] }));
   const found = await lintFound(v, /typed|form/);
   assert.deepEqual(found.map(f => [f.level, f.file, f.msg]), [
     ['warn', 'wiki/demo/source-shop.md', `"the tabs look tight" isn't in what the user typed in session ${SID8}. Quote their exact words, with … where you leave some out`],
@@ -131,7 +129,7 @@ const logged = v => v.read('log.md').trim().split('\n').map(l => l.replace(/^- \
 test('log.mjs logs a page, an ingest, a batch ingest and a filed-back query as one line each', t => {
   const v = makeVault(t);
   v.write('raw/refs/shop.png', 'png');
-  v.write('wiki/demo/source-shop.md', sourcePage('raw/refs/shop.png'));
+  v.write('wiki/demo/source-shop.md', sourcePage({ source: 'raw/refs/shop.png' }));
   v.write('wiki/demo/code.md', page({ kind: 'topic', body: ['## Rules'] }));
   const env = { CLAUDE_CODE_SESSION_ID: SID };
   for (const args of [
