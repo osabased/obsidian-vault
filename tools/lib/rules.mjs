@@ -2,12 +2,12 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { parse } from './frontmatter.mjs';
 import { validGlob, overlapping } from './glob.mjs';
-import { config, vaultPath, shortHash, toPosix, today, inside } from './vault.mjs';
+import { config, vaultPath, shortHash, toPosix, today, inside, plural } from './vault.mjs';
 
 export const LIST_FIELDS = ['applies_to', 'triggers', 'keywords'];
 export const KEY_RE = /^[a-z0-9-]+\/[a-z0-9-]+$/;
 export const BASES = { taste: ['stated', 'inferred', 'pick', 'reading'], knowledge: ['stated', 'failure', 'source'] };
-export const PAGE_KINDS = ['source', 'topic', 'concept', 'entity', 'synthesis'];
+export const PAGE_KINDS = ['topic', 'concept', 'entity', 'synthesis', 'source'];
 export const joinList = (xs, word) => (xs.length < 2 ? xs.join('') : `${xs.slice(0, -1).join(', ')} ${word} ${xs.at(-1)}`);
 export const wrongBasis = (kind, basis) => (kind === 'knowledge' ? `a knowledge rule's basis must be ${joinList(BASES.knowledge, 'or')}`
   : BASES.knowledge.includes(basis) ? `basis ${basis} is for knowledge rules; set kind: knowledge` : `basis must be ${joinList(BASES.taste, 'or')}`);
@@ -41,11 +41,17 @@ export function vaultFile(rel) {
   }
 }
 
+// Spelled as the disk spells it, so two pages that name one file name it the same way.
+export const rawFile = ref => {
+  const rel = typeof ref === 'string' ? vaultFile(ref) : null;
+  return rel?.startsWith('raw/') ? rel : null;
+};
+
 export function tryRegex(source) {
   try { return new RegExp(source); } catch { return null; }
 }
 
-const escapeRegExp = s => String(s).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+export const escapeRegExp = s => String(s).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 export const mentions = (word, text) => new RegExp(`(?<!\\w)${escapeRegExp(word)}(?!\\w)`, 'i').test(text);
 
 const asList = v => (v === null || v === undefined ? [] : Array.isArray(v) ? v.map(String) : null);
@@ -334,24 +340,70 @@ export function resolver(notes) {
 const FENCES = /^ {0,3}(`{3,}|~{3,})[\s\S]*?(?:^ {0,3}\1[^\n]*$|(?![\s\S]))/gm;
 
 const heading = s => s.split(/\r?\n/)[0].trim();
-const sections = n => n.body.replace(FENCES, '').split(/^## /m);
-// Inside a table Obsidian escapes the alias pipe as \|.
-const targets = text => [...text.matchAll(/\[\[[^\]]*\]\]/g)].map(m => m[0].slice(2, -2).split(/\\?[|#]/)[0].trim());
+// Lint and the index each read a note's sections several ways, so each body is split once.
+const split = new WeakMap();
+const sections = n => {
+  if (!split.has(n)) split.set(n, n.body.replace(FENCES, '').split(/^## /m));
+  return split.get(n);
+};
+// Inside a table Obsidian escapes the alias pipe as \|. Every note sits in wiki/<domain>/, so a markdown link to one,
+// relative or from the vault root, ends in its folder and name.
+const targets = text => [
+  ...[...text.matchAll(/\[\[[^\]]*\]\]/g)].map(m => m[0].slice(2, -2).split(/\\?[|#]/)[0].trim()),
+  ...[...text.matchAll(/\]\(([^()\s]+\.md)(?:#[^()\s]*)?\)/gi)].map(m => m[1]).filter(t => !/^[a-z][\w+.-]*:/i.test(t))
+    .map(t => t.replace(/^(?:\.\.?\/)+/, '')),
+];
 
 export const linksUnder = (n, title) => targets(sections(n).slice(1).find(s => heading(s) === title) ?? '').map(toKey);
 
+const sectionNamed = (n, title) => sections(n).slice(1).find(s => heading(s).toLowerCase() === title.toLowerCase()) ?? '';
+export const hasSection = (n, title) => sectionNamed(n, title) !== '';
+
 // The session prefixes the Evidence lines give, first seen first.
-export function evidenceSessions(n) {
-  const evidence = sections(n).slice(1).find(s => heading(s).toLowerCase() === 'evidence') ?? '';
-  return [...new Set([...evidence.matchAll(/^- [^·\n]*· [^·\n]*· session ([^\s·]+)/gm)].map(m => m[1]))];
-}
+export const evidenceSessions = n => [...new Set([...sectionNamed(n, 'evidence').matchAll(/^- [^·\n]*· [^·\n]*· session ([^\s·]+)/gm)].map(m => m[1]))];
+
+// A line in any other form comes back without a session, so lint can say it can't check it.
+export const youSaid = n => [...sectionNamed(n, 'you said').matchAll(/^- .*$/gm)].map(([line]) => {
+  const m = line.match(/^- [^·]*· session ([^\s·]+) · ["“](.*)["”][ \t]*$/);
+  return { line: line.trim(), session: m?.[1], quote: m?.[2] };
+});
 
 // The user's quoted words are left out: a broken link there could be fixed only by editing them.
 export const QUOTED = ['evidence', 'you said'];
 
-export function noteLinks(n) {
+const unquotedSections = n => {
   const [lead, ...rest] = sections(n);
-  return [lead, ...rest.filter(s => !QUOTED.includes(heading(s).toLowerCase()))].flatMap(s => targets(s.replace(/`[^`\n]*`/g, '')));
+  return [lead, ...rest.filter(s => !QUOTED.includes(heading(s).toLowerCase()))];
+};
+// Read as often as sections, so cached the same way.
+const prose = new WeakMap();
+const unquoted = n => {
+  if (!prose.has(n)) prose.set(n, unquotedSections(n).map(s => s.replace(/`[^`\n]*`/g, '')));
+  return prose.get(n);
+};
+
+export const noteLinks = n => unquoted(n).flatMap(targets);
+export const linkedKeys = (n, resolve) => noteLinks(n).map(t => resolve(toKey(t)));
+
+// A footnote's target is a file under raw/ or a URL, in backticks or not, then ` · ` and its date when it has one.
+// Definitions are read with inline code kept, so a target in backticks survives. A citation may sit before a colon,
+// so only a definition's own [^id]: at the start of its line is left out of the citations.
+export function footnotes(n) {
+  const defs = [...unquotedSections(n).join('\n').matchAll(/^\[\^([^\]\s]+)\]:[ \t]*(.*)$/gm)]
+    .map(m => ({ id: m[1], target: m[2].split(' · ')[0].trim().replace(/^`([^`]*)`$/, '$1') }));
+  const cited = new Set([...unquoted(n).join('\n').replace(/^\[\^[^\]\s]+\]:/gm, '').matchAll(/\[\^([^\]\s]+)\]/g)].map(m => m[1]));
+  return { defs, cited };
+}
+
+// How many sources a page draws on: the ones its footnotes cite and the source pages it links, a source page by its
+// source. A source page is one source, so it shows no count.
+function drawsOn(notes, resolve) {
+  const sourceAt = new Map(notes.filter(n => n.type === 'page' && n.kind === 'source').map(n => [n.key, typeof n.data.source === 'string' ? n.data.source : n.key]));
+  return n => {
+    if (n.kind === 'source') return '';
+    const count = new Set([...footnotes(n).defs.map(d => d.target), ...linkedKeys(n, resolve).map(k => sourceAt.get(k))].filter(Boolean)).size;
+    return ` · ${count ? plural(count, 'source') : 'no sources'}`;
+  };
 }
 
 // /ingest links a page and its rules both ways, but a link added by hand in Obsidian may be on one side only.
@@ -366,11 +418,11 @@ function refPages(notes, resolve) {
   return refs;
 }
 
-function indexLine(n, refs) {
+function indexLine(n, refs, sources) {
   const link = linkTo(n.key);
   if (n.type === 'page') {
     const [why] = noteErrors(n);
-    return `- ${link} · ${PAGE_KINDS.includes(n.kind) ? `${n.kind} page` : 'page'}${why ? ` · not valid: ${why}` : ''} · ${n.summary ? clip(n.summary, 150) : '(no summary)'}`;
+    return `- ${link} · ${PAGE_KINDS.includes(n.kind) ? `${n.kind} page` : 'page'}${sources(n)}${why ? ` · not valid: ${why}` : ''} · ${n.summary ? clip(n.summary, 150) : '(no summary)'}`;
   }
   const why = n.superseded_by ? null : undelivered(n);
   const gone = n.superseded_by ? ` · superseded by ${linkTo(n.superseded_by)}` : why ? ` · not delivered: ${why}` : '';
@@ -382,12 +434,16 @@ function indexLine(n, refs) {
 // Notes with no topic get a section of their own after the topics, so no topic a note names can merge with it.
 // Its heading is capitalized and topic headings lowercase, so they can't read the same either.
 const NO_TOPIC = Symbol('No topic');
-// A topic's pages come before its rules: sessions read the pages, and the hooks deliver the rules.
-const pagesFirst = (a, b) => (b.type === 'page') - (a.type === 'page') || cmp(a.key, b.key);
+// A topic's pages come before its rules, in PAGE_KINDS order: sessions read the pages, the topic page first, and the
+// hooks deliver the rules.
+const kindRank = n => (n.type !== 'page' ? PAGE_KINDS.length + 1 : PAGE_KINDS.includes(n.kind) ? PAGE_KINDS.indexOf(n.kind) : PAGE_KINDS.length);
+const pagesFirst = (a, b) => kindRank(a) - kindRank(b) || cmp(a.key, b.key);
 
 export function renderIndex(notes) {
   const { domains } = config();
-  const refs = refPages(notes, resolver(notes));
+  const resolve = resolver(notes);
+  const refs = refPages(notes, resolve);
+  const sources = drawsOn(notes, resolve);
   const out = ['# Index', '', 'Generated by tools/build.mjs from the notes in wiki/. Do not edit.'];
   const nested = notes.filter(n => n.depth > 1);
   const sections = domainOrder([...Object.keys(domains), ...nested.map(n => n.domain)])
@@ -408,7 +464,7 @@ export function renderIndex(notes) {
     }
     const rank = g => (g === NO_TOPIC ? topics.length + 1 : topics.includes(g) ? topics.indexOf(g) : topics.length);
     for (const g of [...groups.keys()].sort((a, b) => rank(a) - rank(b) || cmp(a, b))) {
-      out.push('', `### ${typeof g === 'symbol' ? g.description : g}`, '', ...groups.get(g).sort(pagesFirst).map(n => indexLine(n, refs)));
+      out.push('', `### ${typeof g === 'symbol' ? g.description : g}`, '', ...groups.get(g).sort(pagesFirst).map(n => indexLine(n, refs, sources)));
     }
   }
   return `${out.join('\n')}\n`;

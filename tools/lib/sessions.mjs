@@ -65,7 +65,20 @@ export const markShown = (sid, key) => guarded('mark shown', () => {
 });
 export const wasShown = (sid, key) => marked('excerpts', sid, `shown|${key}`);
 
-const registeredIds = () => fs.readdirSync(stateDir('sessions')).filter(n => n.endsWith('.json')).map(n => n.slice(0, -'.json'.length));
+// Read without creating the folder, since lint reads it and lint changes nothing.
+function registeredIds() {
+  let names = [];
+  try { names = fs.readdirSync(vaultPath('.state', 'sessions')); } catch (e) { if (!stray(e)) throw e; }
+  return names.filter(n => n.endsWith('.json')).map(n => n.slice(0, -'.json'.length));
+}
+
+// Pages name a session by the first 8 characters of its id. Null when no registered session, or more than one, has
+// them, or when its transcript is gone; tidy() drops old sessions from the registry.
+export function transcriptFor(prefix) {
+  const ids = registeredIds().filter(id => id.startsWith(prefix));
+  const file = ids.length === 1 ? readJsonSafe(registry(ids[0]))?.transcript : null;
+  return typeof file === 'string' && fs.existsSync(file) ? file : null;
+}
 
 // tidy() may prune a session mid-read, and other tools drop files like desktop.ini into folders.
 const stray = e => ['ENOENT', 'ENOTDIR', 'EISDIR'].includes(e.code);

@@ -1,29 +1,60 @@
 import path from 'node:path';
 import { appendLog, vaultRel } from './lib/vault.mjs';
-import { KEY_RE, readNote, toKey } from './lib/rules.mjs';
+import { KEY_RE, readNote, toKey, isUrl, rawFile } from './lib/rules.mjs';
 import { build } from './lib/build.mjs';
 
-const USAGE = 'usage: node tools/log.mjs wiki/<domain>/<slug>.md, or the page\'s full path';
+const USAGE = `usage: node tools/log.mjs <page>
+       node tools/log.mjs ingest [--batch] <source> <page>...
+       node tools/log.mjs query "<question>" <page>...
+A page is wiki/<domain>/<slug>.md, or its full path. A source is a file under raw/ or a URL.`;
 
 class UsageError extends Error {}
 
-function logPage(ref) {
-  // A session outside the vault passes the page's full path.
-  const key = toKey((path.isAbsolute(ref) && vaultRel(ref)) || ref);
+// A session outside the vault passes full paths.
+const fromRoot = ref => (path.isAbsolute(ref) && vaultRel(ref)) || ref;
+
+function pageKey(ref) {
+  const key = toKey(fromRoot(ref));
   if (!KEY_RE.test(key)) throw new UsageError();
   const n = readNote(key);
   if (n?.type !== 'page') throw new Error(`wiki/${key}.md is ${n ? 'not a page' : 'missing'}.`);
-  // Built first, so a failed build logs nothing and a retry doesn't log the page twice.
-  build();
-  const sid = process.env.CLAUDE_CODE_SESSION_ID;
-  appendLog([`wrote page ${key}${sid ? ` · session ${sid.slice(0, 8)}` : ''}`]);
-  return `Logged wiki/${key}.md in log.md and rebuilt index.md.`;
+  return key;
 }
 
-const args = process.argv.slice(2);
+function sourceRef(ref) {
+  if (isUrl(ref)) return ref;
+  const rel = rawFile(fromRoot(ref));
+  if (!rel) throw new Error(`${ref} is not a URL or a file under raw/ that exists.`);
+  return rel;
+}
+
+const pageList = refs => [...new Set(refs.map(pageKey))].join(', ');
+
+// One line per operation, naming every page it wrote, so log.md reads as what happened rather than file by file.
+function entry([cmd, ...rest]) {
+  if (cmd === 'ingest') {
+    const batch = rest[0] === '--batch';
+    const [source, ...pages] = batch ? rest.slice(1) : rest;
+    if (!source || !pages.length) throw new UsageError();
+    return `ingest ${sourceRef(source)}${batch ? ' · batch' : ''} · pages ${pageList(pages)}`;
+  }
+  if (cmd === 'query') {
+    const [question = '', ...pages] = rest;
+    const asked = question.replace(/\s+/g, ' ').trim();
+    if (!asked || !pages.length) throw new UsageError();
+    return `query "${asked}" · filed in ${pageList(pages)}`;
+  }
+  if (cmd === undefined || rest.length) throw new UsageError();
+  return `wrote page ${pageKey(cmd)}`;
+}
+
 try {
-  if (args.length !== 1) throw new UsageError();
-  console.log(logPage(args[0]));
+  const line = entry(process.argv.slice(2));
+  // Built first, so a failed build logs nothing and a retry doesn't log the operation twice.
+  build();
+  const sid = process.env.CLAUDE_CODE_SESSION_ID;
+  appendLog([`${line}${sid ? ` · session ${sid.slice(0, 8)}` : ''}`]);
+  console.log(`Logged in log.md: ${line}\nRebuilt index.md.`);
 } catch (e) {
   if (e instanceof UsageError) {
     console.error(USAGE);
