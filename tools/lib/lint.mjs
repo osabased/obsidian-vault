@@ -1,9 +1,9 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { isBuiltin } from 'node:module';
-import { config, vaultPath, plural, today, datedFiles } from './vault.mjs';
+import { config, vaultPath, plural, today, datedFiles, filesIn } from './vault.mjs';
 import {
-  loadNotes, noteErrors, ruleText, ruleTextParts, liveRules, knownDomain, alwaysSize, isUrl, validDay, normTopic, topicNotes, rawFile, toKey, resolver, linksUnder, noteLinks, byTopic, isTopicPage, PAGE_KINDS, joinList,
+  loadNotes, noteErrors, ruleText, ruleTextParts, liveRules, knownDomain, alwaysSize, isUrl, validDay, normTopic, topicNotes, rawFile, toKey, resolver, linksUnder, noteLinks, byTopic, isTopicPage, isSourcePage, PAGE_KINDS, joinList,
   hasSection, footnotes, youSaid, linkedKeys, clip, isResearch,
 } from './rules.mjs';
 import { build } from './build.mjs';
@@ -26,7 +26,7 @@ export function lint(notes = loadNotes()) {
   const resolve = resolver(notes);
   const md = markdownFiles();
   const rulesOf = page => [...new Set(linksUnder(page, 'Rules').map(resolve))].map(k => noteAt.get(k)).filter(r => r?.type === 'rule');
-  const sourcePages = notes.filter(n => n.type === 'page' && n.kind === 'source' && n.topic);
+  const sourcePages = notes.filter(n => isSourcePage(n) && n.topic);
   const watched = page => [
     ...rulesOf(page),
     ...(isTopicPage(page) ? sourcePages.filter(s => s.domain === page.domain && s.topic === page.topic) : []),
@@ -185,13 +185,13 @@ const changed = n => [n.data.updated, today(new Date(n.saved))].filter(d => vali
 
 const SECTIONS = { source: ['You said', "Agent's reading", 'Rules'], topic: ['Rules'] };
 
-// /ingest finds the sources no page names yet by comparing paths, so each file has one spelling.
+// /ingest finds a source's page by the path its source gives, so each file has one spelling.
 // A source page records what its source said. The other pages sum up the rules they link, and a topic page the source
 // pages on its topic too, so they go stale when one changes after them.
 function lintPage(n, watched, add) {
   const { source, source_date: dated } = n.data;
   // Another page gets only the warning below that these fields are for source pages, not errors on their values.
-  if (n.kind === 'source') {
+  if (isSourcePage(n)) {
     if (source != null && !isUrl(source)) {
       const rel = rawFile(source);
       if (!rel) add('error', n.rel, 'source must be a URL or a file under raw/ that exists');
@@ -203,7 +203,7 @@ function lintPage(n, watched, add) {
   if (!n.topic) add('warn', n.rel, 'no topic. Give it one, so the index lists it with the rules on its topic');
   if (!n.summary) add('warn', n.rel, 'no summary. Give it one line, so the index says what the page holds');
   if (!PAGE_KINDS.includes(n.kind)) add('warn', n.rel, `a page needs kind: ${joinList(PAGE_KINDS, 'or')}`);
-  if (n.kind === 'source' && source == null) add('warn', n.rel, 'no source. A source page names the file under raw/ or the URL it is about');
+  if (isSourcePage(n) && source == null) add('warn', n.rel, 'no source. A source page names the file under raw/ or the URL it is about');
   const needs = SECTIONS[n.kind] ?? [];
   const missing = needs.filter(s => !hasSection(n, s)).map(s => `## ${s}`);
   if (missing.length) {
@@ -213,12 +213,12 @@ function lintPage(n, watched, add) {
     const set = fields.filter(f => n.data[f] != null);
     if (set.length) add('warn', n.rel, `${joinList(set, 'and')} ${set.length > 1 ? 'are' : 'is'} for ${owner}. ${instead}`);
   };
-  if (n.kind !== 'source') misplaced(['source', 'source_date'], 'source pages', 'Cite a source with a footnote instead');
+  if (!isSourcePage(n)) misplaced(['source', 'source_date'], 'source pages', 'Cite a source with a footnote instead');
   misplaced(['always', 'triggers'], 'rules', 'A page comes up through keywords and applies_to');
   if (n.applies_to?.length && isResearch(n.domain)) {
     add('warn', n.rel, `${n.domain} is a research domain, with no project folders, so no edit brings this page up. Give it keywords instead`);
   }
-  if (n.kind === 'source') return;
+  if (isSourcePage(n)) return;
   const mine = changed(n);
   for (const r of watched) {
     const theirs = changed(r);
@@ -394,15 +394,6 @@ function codeErrors(rel, src) {
     else if (/^(?:[=\-*#~_+]{3,}|step\s*\d|note\s*:)/i.test(c.replace(/^\/[/*]/, '').trim())) errors.push('has a banner comment');
   }
   return [...new Set(errors)];
-}
-
-function filesIn(dir, ext, rel = '') {
-  return fs.readdirSync(dir, { withFileTypes: true }).flatMap(e => {
-    if (e.name.startsWith('.') || e.name === 'node_modules') return [];
-    const r = rel ? `${rel}/${e.name}` : e.name;
-    if (e.isDirectory()) return filesIn(path.join(dir, e.name), ext, r);
-    return e.name.endsWith(ext) ? [r] : [];
-  });
 }
 
 function lintCode(add) {

@@ -1,7 +1,7 @@
 import fs from 'node:fs';
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { makeVault, ruleNote, pageNote as page, userTurn, lintFound } from './fixture.mjs';
+import { makeVault, ruleNote, pageNote as page, sourcePage, userTurn, lintFound } from './fixture.mjs';
 
 const SID = '9f8e7d6c-0000-4000-8000-000000000003';
 
@@ -40,7 +40,7 @@ test('the index labels each page by its kind', async t => {
   const v = makeVault(t);
   v.write('wiki/demo/code.md', page({ kind: 'topic' }));
   v.write('wiki/demo/luau-types.md', page({ kind: 'concept' }));
-  v.write('wiki/demo/source-changelog.md', page({ kind: 'source', extra: ['source: https://example.com/changelog'] }));
+  v.write('wiki/demo/source-changelog.md', sourcePage({ source: 'https://example.com/changelog' }));
   v.write('wiki/demo/rule-kind.md', page({ kind: 'taste' }));
   v.write('wiki/demo/elsewhere.md', page({ kind: 'concept', domain: 'other' }));
   const rules = await v.import('lib/rules.mjs');

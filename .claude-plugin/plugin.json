@@ -1,6 +1,6 @@
 {
   "name": "obsidian-vault",
-  "description": "Skills for the taste vault: /ingest turns a source and the user's words about it into pages and rules, /lint checks the whole wiki. Run them from a vault checkout.",
+  "description": "Skills for the taste vault: /ingest turns a source and the user's words about it into pages and rules, and with batch takes in every new file in raw/refs/; /lint checks the whole wiki. Run them from a vault checkout.",
   "author": {
     "name": "osabased"
   },
