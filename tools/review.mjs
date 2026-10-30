@@ -1,4 +1,4 @@
-import { config, plural, toPosix, guarded, hookErrors, errorsLog, domainsFor, localDay } from './lib/vault.mjs';
+import { config, plural, toPosix, guarded, hookErrors, errorsLog, domainsFor, localDay, appendLog } from './lib/vault.mjs';
 import { clip, normTopic, topicNotes, loadNotes, liveRules, evidenceSessions, validDay, byKey, cmp, sharedFiles, isResearch } from './lib/rules.mjs';
 import { lint, tally } from './lib/lint.mjs';
 import { lintRan, trackedSessions } from './lib/sessions.mjs';
@@ -16,13 +16,15 @@ const once = f => {
 
 const notes = once(loadNotes);
 
-function lintLine() {
+const linted = once(() => {
   try {
-    return `Lint: ${tally(lint(notes()))}`;
+    return { counts: tally(lint(notes())) };
   } catch (e) {
-    return `Lint: failed: ${e.message}`;
+    return { failed: e.message };
   }
-}
+});
+
+const lintLine = () => `Lint: ${linted().counts ?? `failed: ${linted().failed}`}`;
 
 function hookHealth() {
   const errors = hookErrors();
@@ -108,6 +110,8 @@ const [cmd, ...rest] = process.argv.slice(2);
 try {
   if (cmd !== 'status' || rest.length) throw new UsageError();
   console.log(status());
+  const { counts } = linted();
+  if (counts) guarded('lint log', () => appendLog([`lint · ${counts}`]));
   // /lint runs status first, so this is what quiets the session-start error line and reminder. A failed stamp is
   // logged, and session start reports it.
   guarded('lint stamp', lintRan);

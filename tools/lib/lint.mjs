@@ -3,9 +3,12 @@ import path from 'node:path';
 import { isBuiltin } from 'node:module';
 import { config, vaultPath, plural, today, datedFiles } from './vault.mjs';
 import {
-  loadNotes, noteErrors, ruleText, ruleTextParts, liveRules, knownDomain, alwaysSize, isUrl, validDay, normTopic, topicNotes, vaultFile, toKey, resolver, linksUnder, noteLinks, byTopic, isTopicPage, PAGE_KINDS, joinList,
+  loadNotes, noteErrors, ruleText, ruleTextParts, liveRules, knownDomain, alwaysSize, isUrl, validDay, normTopic, topicNotes, rawFile, toKey, resolver, linksUnder, noteLinks, byTopic, isTopicPage, PAGE_KINDS, joinList,
+  hasSection, footnotes, youSaid, linkedKeys, clip,
 } from './rules.mjs';
 import { build } from './build.mjs';
+import { transcriptFor } from './sessions.mjs';
+import { typedMessages, saidIn } from './quotes.mjs';
 
 export const tally = found => {
   const errors = found.filter(f => f.level === 'error').length;
@@ -23,6 +26,19 @@ export function lint(notes = loadNotes()) {
   const resolve = resolver(notes);
   const md = markdownFiles();
   const rulesOf = page => [...new Set(linksUnder(page, 'Rules').map(resolve))].map(k => noteAt.get(k)).filter(r => r?.type === 'rule');
+  const sourcePages = notes.filter(n => n.type === 'page' && n.kind === 'source' && n.topic);
+  const watched = page => [
+    ...rulesOf(page),
+    ...(isTopicPage(page) ? sourcePages.filter(s => s.domain === page.domain && s.topic === page.topic) : []),
+  ];
+  const said = new Map();
+  const typedIn = prefix => {
+    if (!said.has(prefix)) {
+      const file = transcriptFor(prefix);
+      said.set(prefix, file ? typedMessages(file) : null);
+    }
+    return said.get(prefix);
+  };
 
   for (const n of notes) {
     if (n.depth === 1) add('error', n.rel, 'notes go in wiki/<domain>/');
@@ -30,7 +46,11 @@ export function lint(notes = loadNotes()) {
     if (n.depth > 2) add('warn', n.rel, 'notes go directly in wiki/<domain>/, not in subfolders, or the hooks never deliver them');
     for (const e of noteErrors(n)) add('error', n.rel, e);
     lintLinks(n, keys, slugs, md, add);
-    if (n.type === 'page') lintPage(n, rulesOf(n), add);
+    if (n.type === 'page') {
+      lintPage(n, watched(n), add);
+      lintFootnotes(n, add);
+      lintSaid(n, typedIn, add);
+    }
     if (n.type !== 'rule') continue;
 
     if (n.superseded_by === n.key) add('error', n.rel, 'superseded_by names the note itself');
@@ -50,6 +70,7 @@ export function lint(notes = loadNotes()) {
 
   lintTopics(notes, domains, add);
   lintTopicPages(notes, add);
+  lintOrphans(notes, resolve, add);
   lintPicks(add);
   const rules = liveRules(notes);
   for (const d of Object.keys(domains)) {
@@ -104,6 +125,41 @@ function lintTopicPages(notes, add) {
   }
 }
 
+// A session finds a topic's page in index.md and the other pages through it, so a page no note links is found only by
+// reading the whole index. A link under the user's quoted words doesn't count, as noteLinks leaves those out.
+function lintOrphans(notes, resolve, add) {
+  const linked = new Set(notes.flatMap(n => linkedKeys(n, resolve).filter(k => k !== n.key)));
+  for (const n of notes) {
+    if (n.type !== 'page' || isTopicPage(n) || noteErrors(n).length || linked.has(n.key)) continue;
+    add('warn', n.rel, "no other note links this page. Link it from its topic's page");
+  }
+}
+
+function lintFootnotes(n, add) {
+  const { defs, cited } = footnotes(n);
+  for (const { id, target } of defs) {
+    if (!cited.has(id)) add('warn', n.rel, `footnote [^${id}] is never cited`);
+    if (isUrl(target)) continue;
+    const rel = rawFile(target);
+    if (!rel) add('warn', n.rel, `footnote [^${id}] names ${target || 'nothing'}. Cite a URL or a file under raw/ that exists`);
+    else if (rel !== target) add('warn', n.rel, `footnote [^${id}] names ${target}. Write it as ${rel}, the path from the vault root`);
+  }
+  const written = new Set(defs.map(d => d.id));
+  for (const id of cited) if (!written.has(id)) add('warn', n.rel, `cites [^${id}], which has no footnote`);
+}
+
+// A session the registry has dropped, or whose transcript is gone, can't be checked, so its lines pass.
+function lintSaid(n, typedIn, add) {
+  for (const { line, session, quote } of youSaid(n)) {
+    if (!session) {
+      add('warn', n.rel, `a line under ## You said isn't in the form - <date> · session <id> · "<their exact words>", so lint can't check it: ${clip(line, 100)}`);
+      continue;
+    }
+    const typed = typedIn(session);
+    if (typed && !saidIn(quote, typed)) add('warn', n.rel, `"${quote}" isn't in what the user typed in session ${session}. Quote their exact words, with … where you leave some out`);
+  }
+}
+
 // Obsidian links an attachment such as ![[shop.png]] by its file name from anywhere in the vault, so only links to notes are checked.
 // A link to a note not written yet is a warning, like a missing topic, so a page being written in Obsidian doesn't block a commit.
 // Obsidian also resolves a link to any other markdown file in the vault, such as [[index]] or [[decisions]],
@@ -127,24 +183,39 @@ function markdownFiles() {
 // A checkout gives every file the same day, which flags nothing. A date in the future is a typo, not a change.
 const changed = n => [n.data.updated, today(new Date(n.saved))].filter(d => validDay(d) && d <= today()).sort().at(-1);
 
+const SECTIONS = { source: ['You said', "Agent's reading", 'Rules'], topic: ['Rules'] };
+
 // /ingest finds the sources no page names yet by comparing paths, so each file has one spelling.
-// A source page records what its source said. The other pages sum up the rules they link, so they go stale when one changes after them.
-function lintPage(n, rules, add) {
+// A source page records what its source said. The other pages sum up the rules they link, and a topic page the source
+// pages on its topic too, so they go stale when one changes after them.
+function lintPage(n, watched, add) {
   const { source, source_date: dated } = n.data;
-  if (source != null && !isUrl(source)) {
-    const rel = (typeof source === 'string' && vaultFile(source)) || '';
-    if (!rel.startsWith('raw/')) add('error', n.rel, 'source must be a URL or a file under raw/ that exists');
-    else if (rel !== source) add('error', n.rel, `write source as ${rel}, the path from the vault root`);
+  // Another page gets only the warning below that these fields are for source pages, not errors on their values.
+  if (n.kind === 'source') {
+    if (source != null && !isUrl(source)) {
+      const rel = rawFile(source);
+      if (!rel) add('error', n.rel, 'source must be a URL or a file under raw/ that exists');
+      else if (rel !== source) add('error', n.rel, `write source as ${rel}, the path from the vault root`);
+    }
+    if (dated != null && !validDay(dated)) add('error', n.rel, 'source_date must be a date as YYYY-MM-DD');
+    else if (dated > today()) add('error', n.rel, `source_date ${dated} is in the future`);
   }
-  if (dated != null && !validDay(dated)) add('error', n.rel, 'source_date must be a date as YYYY-MM-DD');
-  else if (dated > today()) add('error', n.rel, `source_date ${dated} is in the future`);
   if (!n.topic) add('warn', n.rel, 'no topic. Give it one, so the index lists it with the rules on its topic');
   if (!n.summary) add('warn', n.rel, 'no summary. Give it one line, so the index says what the page holds');
   if (!PAGE_KINDS.includes(n.kind)) add('warn', n.rel, `a page needs kind: ${joinList(PAGE_KINDS, 'or')}`);
   if (n.kind === 'source' && source == null) add('warn', n.rel, 'no source. A source page names the file under raw/ or the URL it is about');
+  const needs = SECTIONS[n.kind] ?? [];
+  const missing = needs.filter(s => !hasSection(n, s)).map(s => `## ${s}`);
+  if (missing.length) {
+    add('warn', n.rel, `no ${joinList(missing, 'or')} section. A ${n.kind} page has ${joinList(needs.map(s => `## ${s}`), 'and')}, even when ${needs.length > 1 ? 'one is' : 'it is'} empty`);
+  }
+  const sourceFields = ['source', 'source_date'].filter(f => n.data[f] != null);
+  if (n.kind !== 'source' && sourceFields.length) {
+    add('warn', n.rel, `${joinList(sourceFields, 'and')} ${sourceFields.length > 1 ? 'are' : 'is'} for source pages. Cite a source with a footnote instead`);
+  }
   if (n.kind === 'source') return;
   const mine = changed(n);
-  for (const r of rules) {
+  for (const r of watched) {
     const theirs = changed(r);
     if (theirs > mine) add('warn', n.rel, `${r.key} changed on ${theirs}, after this page (${mine}). Check the page still matches it, then set updated`);
   }

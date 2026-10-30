@@ -8,7 +8,7 @@ disable-model-invocation: true
 
 Work in the vault root. AGENTS.md has the note and page formats. A rule applies as soon as its note is written, so fixing the wiki changes the notes themselves.
 
-1. **Status.** Run `node tools/review.mjs status`, which also records this run, quieting the session-start error line and reminder. Tell the user its lint tally, any hook errors, quoting the newest, and the listed topics no rule has yet: taste not captured, not a fault. Then relay the missed rules. Taste rules never expire, so each one gets a fix to bring it up, not a deletion:
+1. **Status.** Run `node tools/review.mjs status`, which also records this run, quieting the session-start error line and reminder, and logs its tally. Tell the user its lint tally, any hook errors, quoting the newest, and the listed topics no rule has yet: taste not captured, not a fault. Then relay the missed rules. Taste rules never expire, so each one gets a fix to bring it up, not a deletion:
    - **Rules corrected again in later sessions.** For a session marked shown, the rule reached the agent and the user still corrected it: suggest how its wording or triggers could change. For one marked not shown, add the keywords or applies_to that would have brought it up. An unknown session ran before the hooks recorded deliveries, or was pruned.
    - **Rules no session was shown.** Suggest the keywords or applies_to that would bring each up in the sessions its domain gets.
 2. **Lint.** Run `node tools/build.mjs`, then `node tools/lint.mjs`. For each error and warning, say what it means and the fix you propose. Name the rules with an empty **Because:** in one line; only the user can give their reason.
