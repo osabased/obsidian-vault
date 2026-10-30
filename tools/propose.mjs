@@ -2,6 +2,7 @@ import fs from 'node:fs';
 import crypto from 'node:crypto';
 import {
   config, vaultPath, proposeDomains, writeSettled, appendJsonl, appendLog, inboxFile, proposalRows, recordedRows, statePath, withLock, today, localDay, toPosix, guarded,
+  shortHash,
 } from './lib/vault.mjs';
 import {
   KEY_RE, BASES, wrongBasis, parseNote, noteErrors, ruleText, ruleTextParts, readNote, liveRules, mentions, isUrl, validDay, byKey, normTopic, domainTopics, vaultFile, joinList,
@@ -9,8 +10,9 @@ import {
 } from './lib/rules.mjs';
 import { build } from './lib/build.mjs';
 import { normGlob } from './lib/glob.mjs';
-import { typedMessages, saidIn, normText } from './lib/quotes.mjs';
-import { ownEntry, marked, mark, wasShown } from './lib/sessions.mjs';
+import { typedMessages, saidIn, normText, sourceTexts } from './lib/quotes.mjs';
+import { ownEntry, marked, mark, wasShown, carryMarkers } from './lib/sessions.mjs';
+import { setField } from './lib/frontmatter.mjs';
 import { subjectRows, laterRows, endedBy, otherLabels } from './lib/picks.mjs';
 import { UsageError, readInput, refuse, failure, line } from './lib/input.mjs';
 
@@ -56,7 +58,7 @@ const help = () => [
   'If the rule may repeat ones in the vault, propose.mjs lists them and refuses once. If it repeats one, propose',
   'it again with repeats set to that rule; if not, propose it again as it is.',
   '',
-  "A knowledge rule's as_of is set for you: the source_date for a source, today otherwise.",
+  "A knowledge rule's as_of is set for you: the source_date for a source, today otherwise. With repeats, it moves up when that day is later.",
 ].join('\n');
 
 const topicLines = () => [...domainTopics()].flatMap(([d, topics]) => (topics.length ? [`                 ${d}: ${topics.join(', ')}`] : []));
@@ -106,41 +108,18 @@ function evidence(f, p) {
   return { kind: 'source', said: quote, date, source: cited, cite: `${cited} · dated ${date} · "${quote}"` };
 }
 
-const ENTITIES = {
-  amp: '&', lt: '<', gt: '>', quot: '"', apos: "'", nbsp: ' ',
-  lsquo: '‘', rsquo: '’', ldquo: '“', rdquo: '”', ndash: '–', mdash: '—', hellip: '…',
-};
-const INLINE_TAGS = /<\/?(?:a|abbr|b|bdi|bdo|cite|code|data|dfn|em|i|kbd|mark|q|s|samp|small|span|strong|sub|sup|time|u|var)\b[^>]*>/gi;
-
-function decodeEntity(m, name) {
-  if (name[0] !== '#') return ENTITIES[name.toLowerCase()] ?? m;
-  const code = /^#x/i.test(name) ? parseInt(name.slice(2), 16) : parseInt(name.slice(1), 10);
-  return code > 0 && code <= 0x10ffff ? String.fromCodePoint(code) : m;
-}
-
-// A binary source such as a screenshot or PDF has no words to check, and a saved web page is quoted as it reads, not
-// as its markup: inline tags sit inside words and other tags between them.
-function sourceText(rel) {
-  const buf = fs.readFileSync(vaultPath(...rel.split('/')));
-  let text;
-  try { text = new TextDecoder('utf-8', { fatal: true }).decode(buf); } catch { return null; }
-  if (text.includes('\0')) return null;
-  if (!/\.html?$/i.test(rel)) return text;
-  return text.replace(/<(script|style)\b[\s\S]*?<\/\1\s*>/gi, ' ').replace(INLINE_TAGS, '').replace(/<[^>]*>/g, ' ')
-    .replace(/&(#\d+|#x[0-9a-f]+|[a-z]+);/gi, decodeEntity);
-}
-
 function checkQuote(session, e) {
   if (e.kind === 'source') {
-    const text = REFS.test(e.source) ? sourceText(e.source) : null;
-    if (text !== null && !saidIn(e.said, [text])) refuse(`the quote isn't in ${e.source}. Quote the file's own words.`);
+    const texts = REFS.test(e.source) ? sourceTexts(e.source) : null;
+    if (texts && !saidIn(e.said, texts)) refuse(`the quote isn't in ${e.source}. Quote the file's own words.`);
     return;
   }
   if (e.pick || !['stated', 'correction'].includes(e.kind)) return;
-  if (!session.transcript || !fs.existsSync(session.transcript)) {
+  const typed = session.transcript ? typedMessages(session.transcript) : null;
+  if (!typed) {
     refuse("the taste vault has no transcript for this session, so it can't check the quote is the user's words. Give your own reading with basis reading instead.");
   }
-  if (!saidIn(e.said, typedMessages(session.transcript))) {
+  if (!saidIn(e.said, typed)) {
     refuse("the quote isn't in anything the user typed in this session. Quote their words exactly, leaving words out with … if you need to, or give your own reading with basis reading.");
   }
 }
@@ -300,14 +279,26 @@ function addEvidence(f, e, scope, rules, same, row) {
   if (!rules[target] || !scope.includes(rules[target].domain)) refuse(`repeats names ${target}, which isn't a delivered rule in ${joinList(scope, 'or')}. Give the key of a rule the refusal listed.`);
   if (same?.note === target) refuse(`these words already back ${target}.`);
   const file = `${vaultPath('wiki', ...target.split('/'))}.md`;
-  writeSettled(file, withEvidence(fs.readFileSync(file, 'utf8'), evidenceLine(f, e)));
+  const before = fs.readFileSync(file, 'utf8');
+  const n = parseNote(before, `wiki/${target}.md`);
+  let after = withEvidence(before, evidenceLine(f, e));
+  // as_of is the day the fact was last checked, so newer evidence of any kind moves it up: a source's date, or the day
+  // the Evidence line gives.
+  const checked = e.date ?? e.day ?? f.day;
+  if (n.kind === 'knowledge' && validDay(n.as_of) && checked > n.as_of) after = setField(after, 'as_of', checked);
+  const now = parseNote(after, `wiki/${target}.md`);
+  writeSettled(file, after);
   appendJsonl(inboxFile(), [row(target)]);
   appendLog([`added evidence to ${target} · session ${f.sid.slice(0, 8)}`]);
+  guarded('build', build);
+  const [was, is] = [n, now].map(x => shortHash(ruleText(x)));
+  if (was !== is) carryMarkers(f.sid, target, was, is);
+  const moved = now.as_of !== n.as_of;
   return [
     `Added the Evidence line to wiki/${target}.md. End your reply with these two lines as they are:`,
     '',
-    `**Rule backed again** ${target}: ${rules[target].text}`,
-    `Its note has a new Evidence line. To change or remove it, edit ${toPosix(file)}.`,
+    `**Rule backed again** ${target}: ${ruleText(now)}`,
+    `Its note has a new Evidence line${moved ? `, and as_of ${now.as_of}` : ''}. To change or remove it, edit ${toPosix(file)}.`,
   ].join('\n');
 }
 

@@ -28,7 +28,7 @@ test('review sources says so when every source has a page, and takes no other ar
   v.write('wiki/demo/source-named.md', sourcePage({ source: 'raw/refs/named.md' }));
   assert.deepEqual(v.run('review.mjs', ['sources']), done);
   assert.equal(v.run('review.mjs', ['sources', 'raw/refs']).code, 2);
-  assert.equal(v.run('review.mjs', []).code, 2);
+  assert.deepEqual(v.run('review.mjs', []), { code: 2, stdout: '', stderr: 'usage: node tools/review.mjs status\n       node tools/review.mjs sources\n' });
 });
 
 test('review sources leaves out the files other tools drop in raw/refs/, and links to folders', t => {
