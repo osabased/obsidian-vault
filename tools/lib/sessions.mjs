@@ -1,6 +1,6 @@
 import fs from 'node:fs';
 import path from 'node:path';
-import { vaultPath, statePath, stateDir, readJsonSafe, writeJson, safeId, shortHash, logError, guarded, hookErrors, errorsLog } from './vault.mjs';
+import { config, vaultPath, statePath, stateDir, readJsonSafe, writeJson, safeId, shortHash, logError, guarded, hookErrors, errorsLog } from './vault.mjs';
 
 const DAY = 86400e3;
 
@@ -55,6 +55,22 @@ export function mark(kind, sid, key) {
 // Kept with the excerpt markers, so clearMarkers resets both.
 export const markAlways = (sid, key, r) => mark('excerpts', sid, `always|${key}|${r.hash}`);
 
+// mark() is the check as well, so two hooks racing deliver each one once.
+export function markFirst(kind, sid, items, max, keyOf) {
+  const due = [];
+  for (const x of items) {
+    if (due.length >= max) break;
+    if (mark(kind, sid, keyOf(x))) due.push(x);
+  }
+  return due;
+}
+
+// Both hooks mark a page under one kind, so an agent hears of each page once, whichever hook brings it up.
+// A subagent's context is its own, so it hears of a page apart from the agent that started it.
+export const markPages = (input, ranked) => markFirst(
+  'pages', input.session_id, ranked, config().delivery.maxPages, h => (input.agent_id ? `${input.agent_id}|${h.key}` : h.key),
+);
+
 // Two markers, both keyed by the rule alone, so a rule reworded since still counts as shown. The delivered one is
 // kept through compaction, so /lint can tell a rule a session was shown from one nothing brought up; the excerpt one
 // goes with compaction, so propose.mjs calls a rule shown only while it may still be in context. A failed write costs
@@ -104,7 +120,7 @@ export function trackedSessions() {
 }
 
 export function clearMarkers(sid) {
-  for (const kind of ['gate', 'notes', 'excerpts']) fs.rmSync(vaultPath('.state', kind, safeId(sid)), { recursive: true, force: true });
+  for (const kind of ['gate', 'notes', 'excerpts', 'pages']) fs.rmSync(vaultPath('.state', kind, safeId(sid)), { recursive: true, force: true });
 }
 
 const lastLint = () => readJsonSafe(vaultPath('.state', 'lint.json')) ?? {};
@@ -128,7 +144,7 @@ export function errorsSinceLint() {
   return size > seen ? hookErrors(errorsLog(), seen) : [...hookErrors(errorsLog('.1'), seen), ...hookErrors()];
 }
 
-const KINDS = ['gate', 'notes', 'excerpts', 'repeats', 'delivered'];
+const KINDS = ['gate', 'notes', 'excerpts', 'pages', 'repeats', 'delivered'];
 
 // The registry goes last, so a session whose markers can't be removed yet is tried again next time.
 function prune(id) {

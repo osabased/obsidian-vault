@@ -1,8 +1,8 @@
 import fs from 'node:fs';
 import { runHook, config, domainsFor, inside, vaultRel, toPosix, cwdOf, FILE_TOOLS, toolFile, shortHash } from '../lib/vault.mjs';
-import { settledRules, ruleLine, tryRegex, cmp, clip, parseNote, QUOTED } from '../lib/rules.mjs';
+import { settledNotes, liveRules, livePages, ruleLine, pagePointers, tryRegex, cmp, clip, parseNote, QUOTED } from '../lib/rules.mjs';
 import { bestMatch, specificity, bySpecificity } from '../lib/glob.mjs';
-import { marked, mark, markShown } from '../lib/sessions.mjs';
+import { marked, mark, markShown, markPages } from '../lib/sessions.mjs';
 
 function vaultGuard(file, cwd) {
   const rel = vaultRel(file, cwd);
@@ -79,26 +79,29 @@ function newText(tool, ti) {
   return String(ti.new_string ?? '');
 }
 
-function gate(input, file, cwd) {
-  // The vault's notes and sources are the user's taste, not project work, so no rule gates them.
-  if (/^(?:wiki|raw)\//i.test(vaultRel(file, cwd) ?? '')) return null;
-  const { maxRulesPerEdit, maxBlockChars } = config().delivery;
-  const sid = input.session_id;
+// Global's globs are read from the file's first project folder, or from the session's folder when no domain has the file.
+function matcher(file, cwd) {
   const doms = domainsFor(file, cwd);
   const fallback = doms[0]?.rel ?? inside(cwd, file, cwd);
+  return notes => Object.entries(notes).flatMap(([key, note]) => {
+    const rel = note.domain === 'global' ? fallback : doms.find(d => d.domain === note.domain)?.rel;
+    if (!note.applies_to?.length || typeof rel !== 'string') return [];
+    const glob = bestMatch(note.applies_to, rel);
+    return glob ? [{ key, note, rel, spec: specificity(glob) }] : [];
+  });
+}
+
+function gate(input, matched) {
+  const { maxRulesPerEdit, maxBlockChars } = config().delivery;
+  const sid = input.session_id;
   const text = newText(input.tool_name, input.tool_input ?? {});
   const hits = [];
-  for (const [key, r] of Object.entries(settledRules())) {
-    if (!r.applies_to?.length) continue;
-    const rel = r.domain === 'global' ? fallback : doms.find(d => d.domain === r.domain)?.rel;
-    if (typeof rel !== 'string') continue;
-    const glob = bestMatch(r.applies_to, rel);
-    if (!glob) continue;
-    const triggered = r.triggers?.length > 0;
-    if (triggered && !r.triggers.some(t => tryRegex(t)?.test(text))) continue;
+  for (const { key, note, rel, spec } of matched) {
+    const triggered = note.triggers?.length > 0;
+    if (triggered && !note.triggers.some(t => tryRegex(t)?.test(text))) continue;
     // The hash is in the id, so a reworded rule is refused once more on files it already gated.
-    const id = `${key}|${r.hash}|${rel.toLowerCase()}`;
-    if (!marked('gate', sid, id)) hits.push({ key, r, rel, id, triggered, spec: specificity(glob) });
+    const id = `${key}|${note.hash}|${rel.toLowerCase()}`;
+    if (!marked('gate', sid, id)) hits.push({ key, note, rel, id, triggered, spec });
   }
   if (!hits.length) return null;
   hits.sort((a, b) => Number(b.triggered) - Number(a.triggered) || bySpecificity(a.spec, b.spec) || cmp(a.key, b.key));
@@ -106,7 +109,7 @@ function gate(input, file, cwd) {
   const foot = 'Revise this edit to follow them, then retry. The retry is allowed.';
   const shown = [];
   for (const hit of hits.slice(0, maxRulesPerEdit)) {
-    const line = ruleLine(hit.key, hit.r);
+    const line = ruleLine(hit.key, hit.note);
     if (shown.length && [head, ...shown.map(s => s.line), line, foot].join('\n').length > maxBlockChars) break;
     shown.push({ ...hit, line });
   }
@@ -117,11 +120,24 @@ function gate(input, file, cwd) {
   return [head, ...shown.map(s => s.line), foot].join('\n');
 }
 
+const deny = why => ({ hookSpecificOutput: { hookEventName: 'PreToolUse', permissionDecision: 'deny', permissionDecisionReason: why } });
+
 runHook('edit', input => {
   if (!FILE_TOOLS.includes(input.tool_name)) return null;
   const file = toolFile(input.tool_name, input.tool_input ?? {});
   if (!file) return null;
   const cwd = cwdOf(input);
-  const why = vaultGuard(file, cwd) ?? noteGuard(input, file, cwd) ?? gate(input, file, cwd);
-  return why ? { hookSpecificOutput: { hookEventName: 'PreToolUse', permissionDecision: 'deny', permissionDecisionReason: why } } : null;
+  const why = vaultGuard(file, cwd) ?? noteGuard(input, file, cwd);
+  if (why) return deny(why);
+  // The vault's notes and sources are the user's taste, not project work, so no rule gates them and no page applies.
+  if (/^(?:wiki|raw)\//i.test(vaultRel(file, cwd) ?? '')) return null;
+  const notes = settledNotes();
+  const matching = matcher(file, cwd);
+  const refused = gate(input, matching(liveRules(notes)));
+  if (refused) return deny(refused);
+  // A page comes up only on an edit that goes through, so the agent reads it beside the work rather than as a refusal.
+  const due = markPages(input, matching(livePages(notes)).sort((a, b) => bySpecificity(a.spec, b.spec) || cmp(a.key, b.key)));
+  if (!due.length) return null;
+  const context = pagePointers(`Vault pages on ${due[0].rel}. Read the ones that bear on this work:`, due);
+  return { hookSpecificOutput: { hookEventName: 'PreToolUse', additionalContext: context } };
 });

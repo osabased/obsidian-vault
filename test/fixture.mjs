@@ -58,8 +58,8 @@ export function makeVault(t, { config = {}, domain = 'demo', topics = ['layout',
       return v.hook('session-start', { session_id: sid, transcript_path: transcript, cwd, hook_event_name: 'SessionStart', source });
     },
     propose: (sid, input) => v.run('propose.mjs', [sid], { input }),
-    edit: (sid, tool, toolInput, { cwd = project } = {}) => v.hook('edit', {
-      session_id: sid, cwd, hook_event_name: 'PreToolUse', tool_name: tool, tool_input: toolInput,
+    edit: (sid, tool, toolInput, { cwd = project, agent } = {}) => v.hook('edit', {
+      session_id: sid, cwd, hook_event_name: 'PreToolUse', tool_name: tool, tool_input: toolInput, ...(agent ? { agent_id: agent } : {}),
     }),
     import: rel => import(pathToFileURL(at('tools', ...rel.split('/'))).href),
   };
@@ -79,7 +79,17 @@ function cleanEnv(extra) {
   return { ...env, ...extra };
 }
 
+let sessions = 0;
+export const sessionId = () => `a1b2c3d4-0000-4000-8000-${String(++sessions).padStart(12, '0')}`;
+
+export const editFile = (v, sid, rel, { tool = 'Edit', text = 'local x = 1', abs, cwd, agent } = {}) => v.edit(sid, tool, {
+  file_path: abs ?? path.join(v.project, ...rel.split('/')), ...(tool === 'Write' ? { content: text } : { old_string: 'a', new_string: text }),
+}, { cwd, agent });
+export const prompt = (v, sid, text, { cwd = v.project } = {}) => v.hook('prompt', { session_id: sid, cwd, prompt: text, hook_event_name: 'UserPromptSubmit' });
+
 export const denied = out => (out?.hookSpecificOutput?.permissionDecision === 'deny' ? out.hookSpecificOutput.permissionDecisionReason : null);
+
+export const lintFound = async (v, re) => (await v.import('lib/lint.mjs')).lint().filter(f => f.file.startsWith('wiki/') && re.test(f.msg));
 
 export const userTurn =text => ({ type: 'user', message: { role: 'user', content: text } });
 export const assistantTurn = text => ({ type: 'assistant', message: { role: 'assistant', content: [{ type: 'text', text }] } });
@@ -87,13 +97,15 @@ export const toolResult = (text, toolUseResult = {}) => ({
   type: 'user', toolUseResult, message: { role: 'user', content: [{ type: 'tool_result', tool_use_id: 'toolu_1', content: text }] },
 });
 
-export const pageNote = ({ domain = 'demo', kind = 'topic', topic = 'code', summary = "'What we know.'", extra = [], body = ['Body.'] } = {}) => [
-  '---', 'type: page', `domain: ${domain}`, ...(kind ? [`kind: ${kind}`] : []), `topic: ${topic}`, `summary: ${summary}`, ...extra,
+const list = (name, xs) => (xs.length ? [`${name}:`, ...xs.map(x => `  - '${x}'`)] : [`${name}: []`]);
+
+export const pageNote = ({ domain = 'demo', kind = 'topic', topic = 'code', summary = "'What we know.'", keywords = [], applies_to = [], extra = [], body = ['Body.'] } = {}) => [
+  '---', 'type: page', `domain: ${domain}`, ...(kind ? [`kind: ${kind}`] : []), `topic: ${topic}`, `summary: ${summary}`,
+  ...(keywords.length ? list('keywords', keywords) : []), ...(applies_to.length ? list('applies_to', applies_to) : []), ...extra,
   'created: 2026-10-01', 'updated: 2026-10-01', '---', '', ...body, '',
 ].join('\n');
 
 export function ruleNote({ domain = 'demo', topic = 'code', basis = 'stated', kind = 'taste', applies_to = [], keywords = [], always = false, doLine = 'Do the thing.', notLine = 'Skip the thing.', because = '', extra = [], evidence = ['- 2026-10-01 · stated · session 1a2b3c4d · "do the thing" (a-00000001)'] } = {}) {
-  const list = (name, xs) => (xs.length ? [`${name}:`, ...xs.map(x => `  - '${x}'`)] : [`${name}: []`]);
   return [
     '---', 'type: rule', `domain: ${domain}`, `kind: ${kind}`, `basis: ${basis}`, ...extra, `topic: ${topic}`, `always: ${always}`,
     ...list('applies_to', applies_to), 'triggers: []', ...list('keywords', keywords), 'created: 2026-10-01', 'updated: 2026-10-01', '---', '',

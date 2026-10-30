@@ -1,7 +1,7 @@
 import fs from 'node:fs';
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { makeVault, ruleNote, pageNote as page, userTurn } from './fixture.mjs';
+import { makeVault, ruleNote, pageNote as page, userTurn, lintFound } from './fixture.mjs';
 
 const SID = '9f8e7d6c-0000-4000-8000-000000000003';
 
@@ -9,8 +9,6 @@ const parsed = (rules, opts) => rules.parseNote(page(opts), 'wiki/demo/code.md')
 
 // A research domain has no project folders; the vault folder is where its pages are read.
 const researchVault = t => makeVault(t, { domains: { reading: { title: 'Reading', projects: [], topics: ['solvers'] } } });
-
-const lintFound = async (v, re) => (await v.import('lib/lint.mjs')).lint().filter(f => f.file.startsWith('wiki/') && re.test(f.msg));
 
 test('a page needs a kind from the list, and only a topic page is a topic page', async t => {
   const v = makeVault(t);

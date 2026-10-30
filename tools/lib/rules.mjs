@@ -5,6 +5,7 @@ import { validGlob, overlapping } from './glob.mjs';
 import { config, vaultPath, shortHash, toPosix, today, inside, plural } from './vault.mjs';
 
 export const LIST_FIELDS = ['applies_to', 'triggers', 'keywords'];
+const PAGE_LIST_FIELDS = ['applies_to', 'keywords'];
 export const KEY_RE = /^[a-z0-9-]+\/[a-z0-9-]+$/;
 export const BASES = { taste: ['stated', 'inferred', 'pick', 'reading'], knowledge: ['stated', 'failure', 'source'] };
 export const PAGE_KINDS = ['topic', 'concept', 'entity', 'synthesis', 'source'];
@@ -111,6 +112,11 @@ export function noteErrors(n) {
   return checked.get(n);
 }
 
+const listErrors = (n, fields) => [
+  ...fields.filter(f => n[f] === null).map(f => `${f} must be a list`),
+  ...(n.applies_to ?? []).filter(g => !validGlob(g)).map(g => `bad glob in applies_to: ${g}`),
+];
+
 function checkNote(n) {
   if (!n.ok) return ['no frontmatter'];
   const errs = [];
@@ -118,6 +124,7 @@ function checkNote(n) {
   if (n.type !== 'rule' && n.type !== 'page') errs.push('type must be rule or page');
   if (n.domain && n.data.domain !== undefined && n.data.domain !== n.domain) errs.push(`domain is ${n.data.domain} but the note is in wiki/${n.domain}/`);
   if (n.data.domain === undefined) errs.push('no domain');
+  if (n.type === 'page') return [...errs, ...listErrors(n, PAGE_LIST_FIELDS)];
   if (n.type !== 'rule') return errs;
   if (isResearch(n.domain)) errs.push(`${n.domain} is a research domain, with no project folders, so it holds pages only. Put the rule in a project domain or global`);
   if (!BASES[n.kind]) errs.push('kind must be taste or knowledge');
@@ -130,8 +137,7 @@ function checkNote(n) {
   } else if (n.kind === 'taste' && n.as_of !== null) errs.push('as_of is only for knowledge rules; taste rules never expire');
   if (!n.do) errs.push('no **Do:** line');
   if (!n.not) errs.push('no **Not:** line');
-  for (const f of LIST_FIELDS) if (n[f] === null) errs.push(`${f} must be a list`);
-  for (const g of n.applies_to ?? []) if (!validGlob(g)) errs.push(`bad glob in applies_to: ${g}`);
+  errs.push(...listErrors(n, LIST_FIELDS));
   for (const t of n.triggers ?? []) if (!tryRegex(t)) errs.push(`bad regex in triggers: ${t}`);
   if (n.data.always !== undefined && n.data.always !== null && typeof n.data.always !== 'boolean') errs.push('always must be true or false');
   if (n.data.superseded_by != null && typeof single(n.data.superseded_by) !== 'string') errs.push('superseded_by must name one note');
@@ -174,7 +180,7 @@ export const knownDomain = d => d === 'global' || Object.hasOwn(config().domains
 // Global rules apply in every project, so an entry that only lists global's topics doesn't make it one.
 export const isResearch = d => d !== 'global' && Object.hasOwn(config().domains, d) && !config().domains[d].projects?.length;
 
-// Why a rule note never reaches a session, or null when it does. A superseded note says so on its own.
+// Why a note never reaches a session, or null when it does. A superseded note says so on its own.
 function undelivered(n) {
   if (n.depth !== 2) return 'it is not directly in wiki/<domain>/';
   if (!knownDomain(n.domain)) return `${n.domain} isn't a domain in vault.config.json`;
@@ -231,6 +237,22 @@ export function settledNotes(notes = loadNotes()) {
 }
 
 export const settledRules = (notes = loadNotes()) => liveRules(settledNotes(notes));
+
+// The pages the hooks point sessions to, read from the notes as they are now.
+export function livePages(notes = loadNotes()) {
+  const pages = {};
+  for (const n of notes) {
+    if (n.type !== 'page' || !(n.keywords?.length || n.applies_to?.length) || undelivered(n)) continue;
+    pages[n.key] = { domain: n.domain, kind: n.kind, summary: n.summary, keywords: n.keywords, applies_to: n.applies_to };
+  }
+  return pages;
+}
+
+const kindLabel = kind => (PAGE_KINDS.includes(kind) ? `${kind} page` : 'page');
+
+const pageLine = (k, p) => `- ${k} (${kindLabel(p.kind)}): ${p.summary ? `${clip(sentence(p.summary), 150)} ` : ''}${toPosix(vaultPath('wiki', `${k}.md`))}`;
+
+export const pagePointers = (head, due) => (due.length ? [head, ...due.map(h => pageLine(h.key, h.note))].join('\n') : '');
 
 // For each pair of two domains' project folders where one holds the other, the folder each domain's globs sit under
 // when both are read from the outer one, since the gate matches a domain's globs from its own folder.
@@ -422,7 +444,7 @@ function indexLine(n, refs, sources) {
   const link = linkTo(n.key);
   if (n.type === 'page') {
     const [why] = noteErrors(n);
-    return `- ${link} · ${PAGE_KINDS.includes(n.kind) ? `${n.kind} page` : 'page'}${sources(n)}${why ? ` · not valid: ${why}` : ''} · ${n.summary ? clip(n.summary, 150) : '(no summary)'}`;
+    return `- ${link} · ${kindLabel(n.kind)}${sources(n)}${why ? ` · not valid: ${why}` : ''} · ${n.summary ? clip(n.summary, 150) : '(no summary)'}`;
   }
   const why = n.superseded_by ? null : undelivered(n);
   const gone = n.superseded_by ? ` · superseded by ${linkTo(n.superseded_by)}` : why ? ` · not delivered: ${why}` : '';

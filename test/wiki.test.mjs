@@ -1,12 +1,11 @@
 import fs from 'node:fs';
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { makeVault, ruleNote, pageNote as page, userTurn, assistantTurn } from './fixture.mjs';
+import { makeVault, ruleNote, pageNote as page, userTurn, assistantTurn, lintFound } from './fixture.mjs';
 
 const SID = '9f8e7d6c-0000-4000-8000-000000000004';
 const SID8 = SID.slice(0, 8);
 
-const lintFound = async (v, re) => (await v.import('lib/lint.mjs')).lint().filter(f => f.file.startsWith('wiki/') && re.test(f.msg));
 const sourcePage = (source, body = ['## You said', '', "## Agent's reading", '', '## Rules'], extra = []) => page({ kind: 'source', extra: [`source: ${source}`, ...extra], body });
 
 test('the index lists a topic\'s pages by kind, each but a source page with how many sources it draws on', async t => {

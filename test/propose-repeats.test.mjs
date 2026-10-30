@@ -1,10 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
-import { makeVault, ruleNote, userTurn } from './fixture.mjs';
-
-let n = 0;
-const sessionId = () => `a1b2c3d4-0000-4000-8000-${String(++n).padStart(12, '0')}`;
+import { makeVault, ruleNote, userTurn, sessionId } from './fixture.mjs';
 
 function setup(t, { quote } = {}) {
   const v = makeVault(t);

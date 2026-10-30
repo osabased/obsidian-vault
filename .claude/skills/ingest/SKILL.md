@@ -19,7 +19,7 @@ Work in the vault root. AGENTS.md has the page and rule formats. The user's type
    - Give a rule about code or files `applies_to` globs from the project root; `always` is the user's to set.
 
    End your reply with the lines it prints; the rule applies from then on. If the user doesn't want it, delete its note, and if they want it worded otherwise, edit it. Then propose the next.
-6. **Update the topic pages.** For each topic the source touched, find the topic's page in `index.md` (the page under that topic marked `topic page`) and add what the source and the user's words show, linking the source page in the body and the new rules under `## Rules`. Start one, with `kind: topic`, if the topic has none. Set `updated` to today on every page you change.
+6. **Update the topic pages.** For each topic the source touched, find the topic's page in `index.md` (the page under that topic marked `topic page`) and add what the source and the user's words show, linking the source page in the body and the new rules under `## Rules`. Start one, with `kind: topic`, if the topic has none, and give it the `keywords` a request on the topic would use, and `applies_to` when the topic is about certain files, so the hooks point sessions to it. Set `updated` to today on every page you change.
 7. **Link and log.** Link each rule you proposed under the source page's `## Rules`, and the source page under the rule note's `## Examples`. Run `node tools/log.mjs ingest <source> <page>...` once, naming the source and every page you wrote or changed, then `node tools/lint.mjs`, and fix any errors.
 
 Done when the source page holds their words, each preference they stated is a rule, each topic the source touched has a topic page that reflects it, and lint shows no errors.
