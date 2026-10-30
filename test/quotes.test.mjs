@@ -26,7 +26,7 @@ test('a stated quote the user typed is written', t => {
   const v = session(t, [userTurn('please, I want scripts in strict mode always')]);
   const r = v.propose(SID, rule({ quote: 'I want scripts in strict mode always' }));
   assert.equal(r.code, 0, r.stderr);
-  assert.match(v.read('wiki/demo/strict-scripts.md'), /"I want scripts in strict mode always"/);
+  assert.match(v.read('wiki/demo/rules/strict-scripts.md'), /"I want scripts in strict mode always"/);
 });
 
 test('case, spacing and curly quotes do not count against a quote', t => {
@@ -44,7 +44,7 @@ test('an ellipsis may skip words, in order, within one message', t => {
 test('a stated quote the user never typed is refused', t => {
   const v = session(t, [userTurn('make the buttons bigger')]);
   notTyped(v.propose(SID, rule({ quote: 'I want scripts in strict mode always' })));
-  assert.equal(v.exists('wiki/demo/strict-scripts.md'), false);
+  assert.equal(v.exists('wiki/demo/rules/strict-scripts.md'), false);
 });
 
 test("the agent's own words, tool output and injected context are not the user's", t => {

@@ -9,6 +9,9 @@ const PAGE_LIST_FIELDS = ['applies_to', 'keywords'];
 export const KEY_RE = /^[a-z0-9-]+\/[a-z0-9-]+$/;
 export const BASES = { taste: ['stated', 'inferred', 'pick', 'reading'], knowledge: ['stated', 'failure', 'source'] };
 export const PAGE_KINDS = ['topic', 'concept', 'entity', 'synthesis', 'source'];
+const FOLDERS = { topic: 'topics', concept: 'concepts', entity: 'entities', synthesis: 'syntheses', source: 'sources' };
+// The folder of its domain a note's type and kind put it in, or null for a page with no kind lint knows.
+export const kindFolder = n => (n.type === 'rule' ? 'rules' : n.type === 'page' ? FOLDERS[n.kind] ?? null : null);
 export const joinList = (xs, word) => (xs.length < 2 ? xs.join('') : `${xs.slice(0, -1).join(', ')} ${word} ${xs.at(-1)}`);
 export const wrongBasis = (kind, basis) => (kind === 'knowledge' ? `a knowledge rule's basis must be ${joinList(BASES.knowledge, 'or')}`
   : BASES.knowledge.includes(basis) ? `basis ${basis} is for knowledge rules; set kind: knowledge` : `basis must be ${joinList(BASES.taste, 'or')}`);
@@ -31,6 +34,12 @@ export function toKey(ref) {
   if (link) s = link[1];
   return s.trim().replace(/\\/g, '/').replace(/^\.?\/?wiki\//i, '').replace(/\.md$/i, '').toLowerCase();
 }
+
+// A note's key is its domain and name, whichever folder of the domain holds it.
+export const keyOf = ref => {
+  const parts = toKey(ref).split('/');
+  return parts.length > 2 ? `${parts[0]}/${parts.at(-1)}` : parts.join('/');
+};
 
 // A file's path from the vault root as the disk spells it, so each file has one spelling; null when there's no such file.
 export function vaultFile(rel) {
@@ -71,8 +80,9 @@ export function parseNote(text, rel) {
   const successor = single(data.superseded_by);
   const note = {
     rel,
-    key: parts.join('/'),
+    key: parts.length > 1 ? `${parts[0]}/${parts.at(-1)}` : parts[0],
     domain: parts.length > 1 ? parts[0] : '',
+    folder: parts.slice(1, -1).join('/'),
     slug: parts.at(-1),
     depth: parts.length,
     ok,
@@ -118,8 +128,8 @@ const listErrors = (n, fields) => [
 ];
 
 function checkNote(n) {
-  if (!n.ok) return ['no frontmatter'];
-  const errs = [];
+  const errs = n.clash ? [`${joinList(n.clash, 'and')} ${n.clash.length > 1 ? 'have' : 'has'} this note's name too. Rename one: each name is used once in a domain`] : [];
+  if (!n.ok) return [...errs, 'no frontmatter'];
   if (!KEBAB.test(n.slug) || (n.domain && !KEBAB.test(n.domain))) errs.push('file and folder names must be lowercase-kebab-case');
   if (n.type !== 'rule' && n.type !== 'page') errs.push('type must be rule or page');
   if (n.domain && n.data.domain !== undefined && n.data.domain !== n.domain) errs.push(`domain is ${n.data.domain} but the note is in wiki/${n.domain}/`);
@@ -160,20 +170,16 @@ export function loadNotes() {
     }
   };
   walk(root);
+  // A key names one note, so two notes in two folders of a domain with one name would each answer for the other.
+  const rels = new Map();
+  for (const n of notes) rels.set(n.key, [...(rels.get(n.key) ?? []), n.rel]);
+  for (const n of notes) if (rels.get(n.key).length > 1) n.clash = rels.get(n.key).filter(r => r !== n.rel);
   const resolve = resolver(notes);
   for (const n of notes) if (n.superseded_by) n.superseded_by = resolve(n.superseded_by);
   return notes.sort((a, b) => cmp(a.key, b.key));
 }
 
-export function readNote(key) {
-  if (!KEY_RE.test(key)) return null;
-  try {
-    return parseNote(fs.readFileSync(`${vaultPath('wiki', ...key.split('/'))}.md`, 'utf8'), `wiki/${key}.md`);
-  } catch (e) {
-    if (e.code === 'ENOENT') return null;
-    throw e;
-  }
-}
+export const readNote = (key, notes = loadNotes()) => (KEY_RE.test(key) ? notes.find(n => n.key === key) ?? null : null);
 
 export const knownDomain = d => d === 'global' || Object.hasOwn(config().domains, d);
 // No session runs in a research domain's projects, so it holds only pages, which sessions read from the vault folder.
@@ -181,8 +187,8 @@ export const knownDomain = d => d === 'global' || Object.hasOwn(config().domains
 export const isResearch = d => d !== 'global' && Object.hasOwn(config().domains, d) && !config().domains[d].projects?.length;
 
 // Why a note never reaches a session, or null when it does. A superseded note says so on its own.
-function undelivered(n) {
-  if (n.depth !== 2) return 'it is not directly in wiki/<domain>/';
+export function undelivered(n) {
+  if (n.depth < 2) return 'it is not in a domain folder, wiki/<domain>/';
   if (!knownDomain(n.domain)) return `${n.domain} isn't a domain in vault.config.json`;
   return noteErrors(n)[0] ?? null;
 }
@@ -207,7 +213,7 @@ export const topicNotes = (notes = loadNotes()) => byTopic(notes.filter(isLive))
 export function domainTopics(notes = loadNotes()) {
   const { domains } = config();
   const used = topicNotes(notes);
-  const pages = byTopic(notes.filter(n => n.type === 'page' && n.depth === 2 && !noteErrors(n).length));
+  const pages = byTopic(notes.filter(n => n.type === 'page' && n.depth > 1 && !noteErrors(n).length));
   return new Map([...new Set(['global', ...Object.keys(domains)])].map(d => {
     const known = (domains[d]?.topics ?? []).map(normTopic).filter(Boolean);
     const more = [...(used.get(d)?.keys() ?? []), ...(pages.get(d)?.keys() ?? [])].sort();
@@ -244,14 +250,14 @@ export function livePages(notes = loadNotes()) {
   const pages = {};
   for (const n of notes) {
     if (n.type !== 'page' || !(n.keywords?.length || n.applies_to?.length) || undelivered(n)) continue;
-    pages[n.key] = { domain: n.domain, kind: n.kind, summary: n.summary, keywords: n.keywords, applies_to: n.applies_to };
+    pages[n.key] = { rel: n.rel, domain: n.domain, kind: n.kind, summary: n.summary, keywords: n.keywords, applies_to: n.applies_to };
   }
   return pages;
 }
 
-const kindLabel = kind => (PAGE_KINDS.includes(kind) ? `${kind} page` : 'page');
+export const kindLabel = kind => (PAGE_KINDS.includes(kind) ? `${kind} page` : 'page');
 
-const pageLine = (k, p) => `- ${k} (${kindLabel(p.kind)}): ${p.summary ? `${clip(sentence(p.summary), 150)} ` : ''}${toPosix(vaultPath('wiki', `${k}.md`))}`;
+const pageLine = (k, p) => `- ${k} (${kindLabel(p.kind)}): ${p.summary ? `${clip(sentence(p.summary), 150)} ` : ''}${toPosix(vaultPath(...p.rel.split('/')))}`;
 
 export const pagePointers = (head, due) => (due.length ? [head, ...due.map(h => pageLine(h.key, h.note))].join('\n') : '');
 
@@ -350,13 +356,17 @@ export function renderActive(rules) {
   return `${out.join('\n')}\n`;
 }
 
-export const linkTo = key => `[[wiki/${key}|${key.split('/').at(-1)}]]`;
+// A note is linked by its path from the vault root. Only superseded_by can name a key with no note, and only a rule
+// takes it, so that link points where the rule would go.
+export const linkTo = (key, rel = `wiki/${key.replace('/', '/rules/')}.md`) => `[[${rel.replace(/\.md$/i, '')}|${key.split('/').at(-1)}]]`;
 
-// Obsidian writes a bare [[slug]] when no other note has that name.
+// Obsidian writes a bare [[slug]] when no other note has that name, and the tools write a note's path from the vault
+// root. A key, or a path through a folder of the domain the note isn't in, still names the note.
 export function resolver(notes) {
   const bySlug = new Map();
   for (const n of notes) bySlug.set(n.slug, bySlug.has(n.slug) ? null : n.key);
-  return k => (k.includes('/') ? k : bySlug.get(k) ?? k);
+  const byPath = new Map(notes.map(n => [toKey(n.rel), n.key]));
+  return k => byPath.get(k) ?? (k.includes('/') ? keyOf(k) : bySlug.get(k) ?? k);
 }
 
 // An unclosed fence runs to the end of the note.
@@ -369,15 +379,15 @@ const sections = n => {
   if (!split.has(n)) split.set(n, n.body.replace(FENCES, '').split(/^## /m));
   return split.get(n);
 };
-// Inside a table Obsidian escapes the alias pipe as \|. Every note sits in wiki/<domain>/, so a markdown link to one,
-// relative or from the vault root, ends in its folder and name.
-const targets = text => [
+// Inside a table Obsidian escapes the alias pipe as \|. A markdown link that starts with ./ or ../ is read from the
+// note's folder and any other from the vault root, so each comes back as its path from the vault root.
+const targets = (text, rel) => [
   ...[...text.matchAll(/\[\[[^\]]*\]\]/g)].map(m => m[0].slice(2, -2).split(/\\?[|#]/)[0].trim()),
   ...[...text.matchAll(/\]\(([^()\s]+\.md)(?:#[^()\s]*)?\)/gi)].map(m => m[1]).filter(t => !/^[a-z][\w+.-]*:/i.test(t))
-    .map(t => t.replace(/^(?:\.\.?\/)+/, '')),
+    .map(t => (/^\.\.?\//.test(t) ? path.posix.join(path.posix.dirname(rel), t) : t)),
 ];
 
-export const linksUnder = (n, title) => targets(sections(n).slice(1).find(s => heading(s) === title) ?? '').map(toKey);
+export const linksUnder = (n, title) => targets(sections(n).slice(1).find(s => heading(s) === title) ?? '', n.rel).map(toKey);
 
 const sectionNamed = (n, title) => sections(n).slice(1).find(s => heading(s).toLowerCase() === title.toLowerCase()) ?? '';
 export const hasSection = (n, title) => sectionNamed(n, title) !== '';
@@ -428,7 +438,7 @@ const unquoted = n => {
   return prose.get(n);
 };
 
-export const noteLinks = n => unquoted(n).flatMap(targets);
+export const noteLinks = n => unquoted(n).flatMap(s => targets(s, n.rel));
 export const linkedKeys = (n, resolve) => noteLinks(n).map(t => resolve(toKey(t)));
 
 // A footnote's target is a file under raw/ or a URL, in backticks or not, then ` · ` and its date when it has one.
@@ -507,17 +517,16 @@ function refPages(notes, resolve) {
   return refs;
 }
 
-function indexLine(n, refs, sources) {
-  const link = linkTo(n.key);
+function indexLine(n, refs, sources, link) {
   if (n.type === 'page') {
     const [why] = noteErrors(n);
-    return `- ${link} · ${kindLabel(n.kind)}${sources(n)}${why ? ` · not valid: ${why}` : ''} · ${n.summary ? clip(n.summary, 150) : '(no summary)'}`;
+    return `- ${link(n.key)} · ${kindLabel(n.kind)}${sources(n)}${why ? ` · not valid: ${why}` : ''} · ${n.summary ? clip(n.summary, 150) : '(no summary)'}`;
   }
   const why = n.superseded_by ? null : undelivered(n);
-  const gone = n.superseded_by ? ` · superseded by ${linkTo(n.superseded_by)}` : why ? ` · not delivered: ${why}` : '';
+  const gone = n.superseded_by ? ` · superseded by ${link(n.superseded_by)}` : why ? ` · not delivered: ${why}` : '';
   const kind = n.kind === 'knowledge' ? ` · knowledge as of ${n.as_of ?? '(no date)'}` : '';
   const from = [...(refs.get(n.key) ?? [])].sort(cmp);
-  return `- ${link}${gone}${kind} · Do: ${clip(n.do || '(missing)', 100)}${from.length ? ` · from ${from.map(linkTo).join(', ')}` : ''}`;
+  return `- ${link(n.key)}${gone}${kind} · Do: ${clip(n.do || '(missing)', 100)}${from.length ? ` · from ${from.map(link).join(', ')}` : ''}`;
 }
 
 // Notes with no topic get a section of their own after the topics, so no topic a note names can merge with it.
@@ -533,7 +542,12 @@ export function renderIndex(notes) {
   const resolve = resolver(notes);
   const refs = refPages(notes, resolve);
   const sources = drawsOn(notes, resolve);
-  const out = ['# Index', '', 'Generated by tools/build.mjs from the notes in wiki/. Do not edit.'];
+  const relOf = new Map(notes.map(n => [n.key, n.rel]));
+  const link = key => linkTo(key, relOf.get(key));
+  const out = [
+    '# Index', '',
+    'Generated by tools/build.mjs from the notes in wiki/. Do not edit. To find notes by their words rather than their topic, run `node tools/search.mjs "<words>"` from the vault folder; `--help` lists its filters.',
+  ];
   const nested = notes.filter(n => n.depth > 1);
   const sections = domainOrder([...Object.keys(domains), ...nested.map(n => n.domain)])
     .map(d => [d, `## ${d} · ${domainTitle(d)}`, nested.filter(n => n.domain === d)]);
@@ -553,7 +567,7 @@ export function renderIndex(notes) {
     }
     const rank = g => (g === NO_TOPIC ? topics.length + 1 : topics.includes(g) ? topics.indexOf(g) : topics.length);
     for (const g of [...groups.keys()].sort((a, b) => rank(a) - rank(b) || cmp(a, b))) {
-      out.push('', `### ${typeof g === 'symbol' ? g.description : g}`, '', ...groups.get(g).sort(pagesFirst).map(n => indexLine(n, refs, sources)));
+      out.push('', `### ${typeof g === 'symbol' ? g.description : g}`, '', ...groups.get(g).sort(pagesFirst).map(n => indexLine(n, refs, sources, link)));
     }
   }
   return `${out.join('\n')}\n`;

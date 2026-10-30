@@ -20,11 +20,11 @@ test('a rule alone goes straight through and lands in the inbox', t => {
   const { v, sid } = setup(t);
   const r = v.propose(sid, proposal());
   assert.equal(r.code, 0, r.stderr);
-  assert.match(r.stdout, /^Wrote wiki\/demo\/new-rule\.md\./);
+  assert.match(r.stdout, /^Wrote wiki\/demo\/rules\/new-rule\.md\./);
   assert.match(r.stdout, /\*\*New rule\*\* demo\/new-rule: Do: Zebra quartz mango\. Not: Plover lantern ember\./);
   assert.match(r.stdout, /It applies from now on\./);
-  assert.ok(v.exists('wiki/demo/new-rule.md'));
-  assert.match(v.read('wiki/demo/new-rule.md'), /· agent's reading · session a1b2c3d4 · The user rewrote the screen twice\. \(a-[0-9a-f]{8}\)/);
+  assert.ok(v.exists('wiki/demo/rules/new-rule.md'));
+  assert.match(v.read('wiki/demo/rules/new-rule.md'), /· agent's reading · session a1b2c3d4 · The user rewrote the screen twice\. \(a-[0-9a-f]{8}\)/);
   const files = fs.readdirSync(v.at('raw', 'inbox'));
   assert.equal(files.length, 1);
   assert.match(files[0], /^\d{4}-\d\d-\d\d\.jsonl$/);
@@ -47,13 +47,13 @@ test('a shared glob refuses once with the list, the identical retry goes through
   assert.match(first.stderr, /^Not proposed: it may repeat these rules:/);
   assert.match(first.stderr, /- demo\/old-rule: Do: Alpha bravo charlie\. Not: Delta foxtrot golf\. \[not shown in this session\]/);
   assert.match(first.stderr, /"repeats": "<that rule's key>"/);
-  assert.ok(!v.exists('wiki/demo/new-rule.md'));
+  assert.ok(!v.exists('wiki/demo/rules/new-rule.md'));
   assert.equal(fs.existsSync(v.at('raw', 'inbox')), false);
 
   const retry = v.propose(sid, proposal());
   assert.equal(retry.code, 0, retry.stderr);
   assert.match(retry.stdout, /It may overlap demo\/old-rule\./);
-  assert.ok(v.exists('wiki/demo/new-rule.md'));
+  assert.ok(v.exists('wiki/demo/rules/new-rule.md'));
 });
 
 test('a shared keyword lists the rule', t => {
@@ -106,7 +106,7 @@ test('repeats adds an Evidence line to the named note instead of writing a new o
   assert.equal(r.code, 0, r.stderr);
   assert.match(r.stdout, /^Added the Evidence line to wiki\/demo\/old-rule\.md\./);
   assert.match(r.stdout, /\*\*Rule backed again\*\* demo\/old-rule: Do: Alpha bravo charlie\./);
-  assert.ok(!v.exists('wiki/demo/new-rule.md'));
+  assert.ok(!v.exists('wiki/demo/rules/new-rule.md'));
   const note = v.read('wiki/demo/old-rule.md');
   const evidence = note.split('## Evidence\n')[1].trim().split('\n');
   assert.equal(evidence.length, 2);
@@ -217,7 +217,7 @@ test('the same stated words back two rules: refused once, then through', t => {
   assert.equal(r.code, 1);
   assert.match(r.stderr, /these words already back demo\/first-rule\./);
   assert.equal(v.propose(sid, second).code, 0);
-  assert.ok(v.exists('wiki/demo/second-rule.md'));
+  assert.ok(v.exists('wiki/demo/rules/second-rule.md'));
 });
 
 test('always: true is refused', t => {
@@ -225,7 +225,7 @@ test('always: true is refused', t => {
   const r = v.propose(sid, proposal({ always: true }));
   assert.equal(r.code, 1);
   assert.match(r.stderr, /^Not proposed: always is the user's to set in Obsidian\./);
-  assert.ok(!v.exists('wiki/demo/new-rule.md'));
+  assert.ok(!v.exists('wiki/demo/rules/new-rule.md'));
 });
 
 test('a rule over 300 characters is refused', t => {
@@ -233,7 +233,7 @@ test('a rule over 300 characters is refused', t => {
   const r = v.propose(sid, proposal({ do: `${'Word '.repeat(70)}end.`, not: 'Plover lantern ember.' }));
   assert.equal(r.code, 1);
   assert.match(r.stderr, /Do, Not and Because come to \d+ characters; keep them under 300 together\./);
-  assert.ok(!v.exists('wiki/demo/new-rule.md'));
+  assert.ok(!v.exists('wiki/demo/rules/new-rule.md'));
 });
 
 test('a taste rule with neither keywords nor applies_to is refused', t => {
