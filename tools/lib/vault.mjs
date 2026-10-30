@@ -154,6 +154,19 @@ export function datedFiles(folder) {
   return files.map(f => ({ file: `raw/${folder}/${f}`, rows: readJsonl(path.join(dir, f)) }));
 }
 
+// Windows, Office and browsers leave these beside the files a person saves.
+const LEFTOVER = /^(?:desktop\.ini|thumbs\.db|~\$.*|.*\.(?:tmp|crdownload|part))$/i;
+
+export function filesIn(dir, ext = '', rel = '') {
+  if (!fs.existsSync(dir)) return [];
+  return fs.readdirSync(dir, { withFileTypes: true }).flatMap(e => {
+    if (e.name.startsWith('.') || e.name === 'node_modules' || LEFTOVER.test(e.name)) return [];
+    const r = rel ? `${rel}/${e.name}` : e.name;
+    if (e.isDirectory()) return filesIn(path.join(dir, e.name), ext, r);
+    return e.name.endsWith(ext) ? [r] : [];
+  });
+}
+
 const datedRows = folder => datedFiles(folder).flatMap(f => f.rows);
 
 export const proposalRows = () => datedRows('inbox').filter(r => r.source === 'agent');

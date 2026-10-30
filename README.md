@@ -6,7 +6,7 @@ A taste vault for Claude Code, based on Andrej Karpathy's LLM wiki pattern: a sm
 
 The repo is also a Claude Code plugin with two skills:
 
-- `/obsidian-vault:ingest` goes through one source with you and turns what you say about it into pages and rules.
+- `/obsidian-vault:ingest` goes through a source with you, a file or a URL whose text it saves, and turns it and what you say about it into pages and rules. `/obsidian-vault:ingest batch` takes in every file in `raw/refs/` no source page names yet, and asks before adding any rule.
 - `/obsidian-vault:lint` checks the whole wiki and proposes fixes.
 
 ```

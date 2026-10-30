@@ -189,6 +189,7 @@ function undelivered(n) {
 
 const isLive = n => n.type === 'rule' && !n.superseded_by && !undelivered(n);
 export const isTopicPage = n => n.type === 'page' && n.kind === 'topic';
+export const isSourcePage = n => n.type === 'page' && n.kind === 'source';
 
 export function byTopic(notes) {
   const used = new Map();
@@ -383,6 +384,7 @@ export const hasSection = (n, title) => sectionNamed(n, title) !== '';
 
 // The session prefixes the Evidence lines give, first seen first.
 export const evidenceSessions = n => [...new Set([...sectionNamed(n, 'evidence').matchAll(/^- [^·\n]*· [^·\n]*· session ([^\s·]+)/gm)].map(m => m[1]))];
+export const evidenceSources = n => [...sectionNamed(n, 'evidence').matchAll(/^- [^·\n]*· source · session [^\s·]+ · (.+?) · dated /gm)].map(m => m[1]);
 
 // A line in any other form comes back without a session, so lint can say it can't check it.
 export const youSaid = n => [...sectionNamed(n, 'you said').matchAll(/^- .*$/gm)].map(([line]) => {
@@ -420,9 +422,9 @@ export function footnotes(n) {
 // How many sources a page draws on: the ones its footnotes cite and the source pages it links, a source page by its
 // source. A source page is one source, so it shows no count.
 function drawsOn(notes, resolve) {
-  const sourceAt = new Map(notes.filter(n => n.type === 'page' && n.kind === 'source').map(n => [n.key, typeof n.data.source === 'string' ? n.data.source : n.key]));
+  const sourceAt = new Map(notes.filter(isSourcePage).map(n => [n.key, typeof n.data.source === 'string' ? n.data.source : n.key]));
   return n => {
-    if (n.kind === 'source') return '';
+    if (isSourcePage(n)) return '';
     const count = new Set([...footnotes(n).defs.map(d => d.target), ...linkedKeys(n, resolve).map(k => sourceAt.get(k))].filter(Boolean)).size;
     return ` · ${count ? plural(count, 'source') : 'no sources'}`;
   };
