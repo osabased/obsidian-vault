@@ -27,6 +27,7 @@ These keep the hooks safe to run in every session. Follow them when you change a
 - Command-line scripts: usage errors exit 2, failures exit 1.
 - Comments only for a non-obvious why. No docstrings, banner comments or TODOs.
 - No test-only code. Tests change behavior through `vault.config.json`.
+- Try a change in a test vault from `test/fixture.mjs`, not in this one: `review.mjs status` records a `/lint` run and logs its tally, and `propose.mjs` and `pick.mjs` append to `raw/`, which can't be undone.
 
 ## What lint enforces
 

@@ -104,6 +104,17 @@ test('lint --fix rewrites the paths lint gives outside the quoted words, and reb
   ]);
 });
 
+test('lint --fix leaves a link to a key two notes share', t => {
+  const v = makeVault(t);
+  v.write('wiki/demo/rules/said.md', ruleNote({ because: 'It reads better.' }));
+  v.write('wiki/demo/topics/said.md', pageNote());
+  v.write('wiki/demo/topics/code.md', pageNote({ body: ['See [[demo/said]].', '', '## Rules'] }));
+  const before = v.read('wiki/demo/topics/code.md');
+  const r = v.run('lint.mjs', ['--fix']);
+  assert.doesNotMatch(r.stdout, /^fixed /m);
+  assert.equal(v.read('wiki/demo/topics/code.md'), before);
+});
+
 test('lint --fix takes --fail-on, and refuses other arguments', t => {
   const v = brokenVault(t);
   assert.equal(v.run('lint.mjs', ['--fix', '--fail-on', 'warn']).code, 1);
