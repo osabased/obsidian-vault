@@ -9,7 +9,6 @@ export const sameProject = (a, b) => projectKey(a) === projectKey(b);
 
 const day = r => localDay(r.at);
 
-// Rows from before pick.mjs carry no subject, so they back rules but aren't anyone's decision on a piece of work.
 export const subjectRows = (rows = pickRows()) => rows.filter(r => typeof r.subject === 'string' && r.subject && typeof r.domain === 'string');
 
 // A row stops being live once a later row replaces or confirms it.
