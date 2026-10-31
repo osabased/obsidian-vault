@@ -76,6 +76,9 @@ test('the vault guard refuses edits to generated files, .state and existing raw 
   assert.match(guard('active.md'), /^active\.md is generated/);
   assert.match(guard('decisions.md'), /^decisions\.md is generated from the picks/);
   assert.equal(guard('.state/sessions.json'), ".state/ is the hooks' own bookkeeping. Leave it to them.");
+  assert.equal(guard('.live/tools/hooks/edit.mjs'), '`.live/` is a copy of `tools/` as of the last commit. Change `tools/` and commit instead.');
+  assert.equal(guard('.LIVE'), guard('.live/tools/hooks/edit.mjs'));
+  assert.equal(guard('.lively.md'), null);
   assert.match(guard('raw/refs/old.md'), /^raw\/ is append-only: raw\/refs\/old\.md already exists and can't be changed\./);
   assert.match(guard('raw/inbox/2026-10-01.jsonl'), /already exists/);
   assert.match(guard('raw/inbox/new.jsonl'), /^raw\/ is append-only\. New files go under raw\/refs\//);

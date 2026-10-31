@@ -185,4 +185,4 @@ A pick is the user's choice between options the agent showed them for one piece 
 - Change the user's words: the quotes under `## Evidence` and `## You said`. Add a line instead.
 - Write outside the vault.
 
-The hooks refuse the first, and edits to `active.md`, `index.md`, `decisions.md` and `.state/`. They guard against mistakes, not deliberate workarounds.
+The hooks refuse the first, and edits to `active.md`, `index.md`, `decisions.md`, `.state/` and `.live/`. They guard against mistakes, not deliberate workarounds.
