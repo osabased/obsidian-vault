@@ -32,7 +32,7 @@ Work in the vault root. AGENTS.md has the page and rule formats. With `batch`, f
    - Start a topic page, `kind: topic`, for a topic with none, with the `keywords` a request on the topic would use, and `applies_to` when the topic is about certain files, so the hooks point sessions to it.
    - Start a concept or entity page for an idea, API or named thing that the source explains, or that two pages now mention, and that has no page yet. Give it `keywords` too, and link it from its topic page.
    - Link the source page from the page of the topic it is mostly about, and the new rules under the topic page's `## Rules`. Set `updated` to today on every page you change.
-7. **Link and log.** Link each rule you proposed under the source page's `## Rules`, and the source page under the rule note's `## Examples`. Run `node tools/log.mjs ingest <source> <page>...` once, naming the source and every page you wrote or changed, then `node tools/lint.mjs`, and fix any errors.
+7. **Link and log.** Link each rule you proposed under the source page's `## Rules`, and the source page under the rule note's `## Examples`. Run `node tools/log.mjs ingest <source> <page>...` once, naming the source and every page you wrote or changed, then `node tools/lint.mjs --fix`, and fix any errors it leaves.
 
 Done when the source page holds their words, each preference they stated is a taste rule, each dated fact they kept is a knowledge rule, every page the source bears on reflects it with a footnote, and lint shows no errors.
 
