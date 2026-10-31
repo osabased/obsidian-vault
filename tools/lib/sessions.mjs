@@ -146,6 +146,15 @@ const fileSize = file => fs.statSync(file, { throwIfNoEntry: false })?.size ?? 0
 // runs /lint again, and a session nobody reads can't use them up.
 export const lintRan = () => writeJson(vaultPath('.state', 'lint.json'), { at: new Date().toISOString(), errors: fileSize(errorsLog()) });
 
+// /lint marks its end too, so the notes it changed itself don't count toward the next reminder.
+export const lintDone = () => writeJson(vaultPath('.state', 'lint.json'), { ...lastLint(), done: new Date().toISOString() });
+
+export function notesSinceLint(notes) {
+  const { at, done } = lastLint();
+  const since = Math.max(Date.parse(at), Date.parse(done) || 0);
+  return Number.isNaN(since) ? notes : notes.filter(n => n.saved > since);
+}
+
 export function daysSinceLint() {
   const at = Date.parse(lastLint().at);
   return Number.isNaN(at) ? null : Math.floor((Date.now() - at) / DAY);

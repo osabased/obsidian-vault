@@ -1,7 +1,7 @@
 import { runHook, domainsFor, inVaultFolder, readableDomains, vaultPath, toPosix, guarded, config, plural, clock } from '../lib/vault.mjs';
 import { alwaysContext, alwaysIn, loadNotes, settledNotes, liveRules, domainTopics, joinList, clip, undelivered, knownDomain } from '../lib/rules.mjs';
 import { build } from '../lib/build.mjs';
-import { touchSession, clearMarkers, markAlways, markShown, tidy, errorsSinceLint, daysSinceLint } from '../lib/sessions.mjs';
+import { touchSession, clearMarkers, markAlways, markShown, tidy, errorsSinceLint, daysSinceLint, notesSinceLint } from '../lib/sessions.mjs';
 
 function proposeNote(sid) {
   const script = toPosix(vaultPath('tools', 'propose.mjs'));
@@ -60,10 +60,15 @@ function undeliveredNote(scope, vaultFolder, notes) {
   return `Taste vault: ${plural(broken.length, 'note')} ${broken.length === 1 ? "has an error and isn't" : "have an error and aren't"} delivered: ${broken.slice(0, 3).join(', ')}${more}. Tell the user; /lint in \`${toPosix(vaultPath())}\` lists the fixes.`;
 }
 
-function lintNote() {
+// A vault nobody changes has nothing new to lint, however long it sits.
+function lintNote(notes) {
   const days = daysSinceLint();
-  if (days !== null && days < config().lint.remindAfterDays) return '';
-  return `Taste vault: /lint ${days === null ? "hasn't run yet" : `last ran ${plural(days, 'day')} ago`}. Remind the user to run /lint in \`${toPosix(vaultPath())}\`.`;
+  const changed = notesSinceLint(notes).length;
+  const { remindAfterDays, remindAfterNotes } = config().lint;
+  if (!changed || (days !== null && days < remindAfterDays && changed < remindAfterNotes)) return '';
+  const ran = days === null ? `hasn't run yet, and the vault has ${plural(changed, 'note')}`
+    : `last ran ${days ? `${plural(days, 'day')} ago` : 'today'}, and ${plural(changed, 'note')} changed since`;
+  return `Taste vault: /lint ${ran}. Remind the user to run /lint in \`${toPosix(vaultPath())}\`.`;
 }
 
 runHook('session-start', input => {
@@ -98,7 +103,7 @@ runHook('session-start', input => {
   const health = ['compact', 'clear'].includes(input.source) ? [] : [
     guarded('hook errors', errorsNote),
     guarded('undelivered notes', () => undeliveredNote(readableDomains(doms, vaultFolder), vaultFolder, ready)),
-    guarded('lint reminder', lintNote),
+    guarded('lint reminder', () => lintNote(notes)),
   ];
   const context = [always.text, index, propose, pick, ...health].filter(Boolean).join('\n\n');
   return context ? { hookSpecificOutput: { hookEventName: 'SessionStart', additionalContext: context } } : null;

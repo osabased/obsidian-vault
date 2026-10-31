@@ -14,4 +14,23 @@ claude plugin marketplace add osabased/obsidian-vault
 claude plugin install obsidian-vault@obsidian-vault
 ```
 
-The skills run this vault's `tools/` in the working folder, so open a checkout of the vault before using them. The hooks in `tools/hooks/` are not part of the plugin; install them in `settings.json`.
+The skills run this vault's `tools/` in the working folder, so open a checkout of the vault before using them.
+
+## Hooks
+
+The hooks are not part of the plugin. Sessions run them from `.live/tools/`, a copy of `tools/` as of the last commit, so a half-made change to `tools/` never runs in a session. In a checkout of the vault, turn on the git hooks and make the first copy:
+
+```
+git config core.hooksPath .githooks
+.githooks/post-commit
+```
+
+`pre-commit` runs the tests, rebuilds the generated files and lints. `post-commit` refreshes `.live/tools/` after each commit, and the other hooks run it after a checkout, merge or rebase. Then add the three hooks to `settings.json`, with the vault's path:
+
+```json
+"hooks": {
+  "SessionStart": [{ "hooks": [{ "type": "command", "command": "node <vault>/.live/tools/hooks/session-start.mjs", "timeout": 10 }] }],
+  "UserPromptSubmit": [{ "hooks": [{ "type": "command", "command": "node <vault>/.live/tools/hooks/prompt.mjs", "timeout": 10 }] }],
+  "PreToolUse": [{ "matcher": "Edit|Write|MultiEdit|NotebookEdit|Bash|PowerShell", "hooks": [{ "type": "command", "command": "node <vault>/.live/tools/hooks/edit.mjs", "timeout": 10 }] }]
+}
+```
