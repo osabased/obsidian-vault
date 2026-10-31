@@ -4,7 +4,7 @@ import {
   savedUrl, rankPair,
 } from './lib/rules.mjs';
 import { lint, tally } from './lib/lint.mjs';
-import { lintRan, trackedSessions } from './lib/sessions.mjs';
+import { lintRan, lintDone, trackedSessions } from './lib/sessions.mjs';
 import { subjectRows, liveRows, newestFirst, projectName } from './lib/picks.mjs';
 import { UsageError } from './lib/input.mjs';
 
@@ -158,6 +158,7 @@ function runStatus() {
 
 const COMMANDS = {
   status: runStatus,
+  done: lintDone,
   sources: () => console.log(unnamedSources().join('\n') || 'Every file in raw/refs/ has a source page.'),
 };
 const USAGE = `usage: ${Object.keys(COMMANDS).map(c => `node tools/review.mjs ${c}`).join('\n       ')}`;

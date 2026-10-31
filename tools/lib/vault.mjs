@@ -2,13 +2,22 @@ import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
 
-export const ROOT = path.resolve(import.meta.dirname, '..', '..');
+// The hooks in settings.json run a copy of tools/ inside the vault, which .githooks/post-commit keeps at the last
+// commit, so the vault is the nearest folder above the code that holds vault.config.json.
+function findRoot() {
+  const home = path.resolve(import.meta.dirname, '..', '..');
+  for (let dir = home; ; dir = path.dirname(dir)) {
+    if (fs.existsSync(path.join(dir, 'vault.config.json'))) return dir;
+    if (path.dirname(dir) === dir) return home;
+  }
+}
+export const ROOT = findRoot();
 export const vaultPath = (...xs) => path.join(ROOT, ...xs);
 
 const DEFAULTS = {
   delivery: { maxRulesPerEdit: 3, maxRuleChars: 300, maxBlockChars: 1200, maxPromptExcerpts: 3, maxPages: 3, activeMaxLines: 60, activeMaxBytes: 4096, settleSeconds: 60 },
   knowledge: { staleAfterDays: 180 },
-  lint: { remindAfterDays: 14 },
+  lint: { remindAfterDays: 14, remindAfterNotes: 10 },
   picks: { maxSheetBytes: 3_000_000 },
 };
 

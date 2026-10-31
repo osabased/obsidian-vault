@@ -20,6 +20,7 @@
     "staleAfterDays": 180
   },
   "lint": {
-    "remindAfterDays": 14
+    "remindAfterDays": 14,
+    "remindAfterNotes": 10
   }
 }
