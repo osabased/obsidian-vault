@@ -4,7 +4,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
-import { makeVault, ruleNote, sessionId } from './fixture.mjs';
+import { makeVault, ruleNote, sessionId, cleanEnv } from './fixture.mjs';
 
 const HOOKS = path.resolve(import.meta.dirname, '..', '.githooks');
 
@@ -12,10 +12,8 @@ test('a copy of tools/ inside the vault reads and writes the vault, not its own 
   const v = makeVault(t);
   v.write('wiki/demo/rules/said.md', ruleNote({ always: true, doLine: 'Zebra quartz mango.' }));
   fs.cpSync(v.at('tools'), v.at('.live', 'tools'), { recursive: true });
-  const env = { ...process.env };
-  delete env.CLAUDE_CODE_SESSION_ID;
   const r = spawnSync(process.execPath, [v.at('.live', 'tools', 'hooks', 'session-start.mjs')], {
-    input: JSON.stringify({ session_id: sessionId(), cwd: v.project, hook_event_name: 'SessionStart', source: 'startup' }), env, encoding: 'utf8',
+    input: JSON.stringify({ session_id: sessionId(), cwd: v.project, hook_event_name: 'SessionStart', source: 'startup' }), env: cleanEnv(), encoding: 'utf8',
   });
   assert.match(JSON.parse(r.stdout).hookSpecificOutput.additionalContext, /Zebra quartz mango\./);
   assert.ok(fs.existsSync(v.at('.state', 'sessions')));

@@ -149,15 +149,12 @@ export const lintRan = () => writeJson(vaultPath('.state', 'lint.json'), { at: n
 // /lint marks its end too, so the notes it changed itself don't count toward the next reminder.
 export const lintDone = () => writeJson(vaultPath('.state', 'lint.json'), { ...lastLint(), done: new Date().toISOString() });
 
-export function notesSinceLint(notes) {
+export function sinceLint(notes) {
   const { at, done } = lastLint();
-  const since = Math.max(Date.parse(at), Date.parse(done) || 0);
-  return Number.isNaN(since) ? notes : notes.filter(n => n.saved > since);
-}
-
-export function daysSinceLint() {
-  const at = Date.parse(lastLint().at);
-  return Number.isNaN(at) ? null : Math.floor((Date.now() - at) / DAY);
+  const ran = Date.parse(at);
+  if (Number.isNaN(ran)) return { days: null, changed: notes.length };
+  const since = Math.max(ran, Date.parse(done) || 0);
+  return { days: Math.floor((Date.now() - ran) / DAY), changed: notes.filter(n => n.saved > since).length };
 }
 
 // logError moves a full log to errors.log.1, so a log shorter than /lint saw has rotated since, and the end of

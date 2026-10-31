@@ -1,7 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { isBuiltin } from 'node:module';
-import { config, vaultPath, plural, today, datedFiles, filesIn, pickRows, rewriteText } from './vault.mjs';
+import { config, vaultPath, plural, today, datedFiles, filesIn, pickRows, rewriteText, lf } from './vault.mjs';
 import {
   loadNotes, noteErrors, ruleText, ruleTextParts, liveRules, knownDomain, alwaysSize, isUrl, validDay, normTopic, topicNotes, rawFile, toKey, resolver, linksUnder, noteLinks, byTopic, isTopicPage, isSourcePage, PAGE_KINDS, joinList,
   hasSection, footnotes, youSaid, linkedKeys, clip, isResearch, citedSources, evidenceQuotes, keyOf, kindFolder, kindLabel, linkTo, parseNote, noteLinkSpans,
@@ -26,7 +26,7 @@ export const tally = found => {
 
 export function lint(notes = loadNotes()) {
   const found = [];
-  const add = (level, file, msg, fix) => found.push({ level, file, msg, ...(fix ? { fix } : {}) });
+  const add = (level, file, msg, fix) => found.push({ level, file, msg, fix });
   const { domains, delivery, knowledge } = config();
   const keys = new Set(notes.map(n => n.key));
   const named = new Map();
@@ -109,15 +109,16 @@ export function lint(notes = loadNotes()) {
 // read a note with \n line ends, as parseNote does, and a file saved with \r\n gets them back.
 export function fix(found) {
   const fixable = found.filter(f => f.fix);
-  const written = [...new Set(fixable.map(f => f.file))].filter(rel => {
+  const written = [];
+  for (const rel of new Set(fixable.map(f => f.file))) {
     const file = vaultPath(rel);
     const text = fs.readFileSync(file, 'utf8');
-    const lf = text.replace(/\r\n/g, '\n');
-    const out = fixable.filter(f => f.file === rel).reduce((t, f) => f.fix(t), lf);
-    if (out === lf) return false;
+    const before = lf(text);
+    const out = fixable.filter(f => f.file === rel).reduce((t, f) => f.fix(t), before);
+    if (out === before) continue;
     rewriteText(file, text.includes('\r\n') ? out.replace(/\n/g, '\r\n') : out);
-    return true;
-  });
+    written.push(rel);
+  }
   return { fixed: fixable.filter(f => written.includes(f.file)), written, rebuilt: build() };
 }
 
