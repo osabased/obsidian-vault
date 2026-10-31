@@ -8,14 +8,18 @@ import { makeVault, ruleNote, sessionId, cleanEnv } from './fixture.mjs';
 
 const HOOKS = path.resolve(import.meta.dirname, '..', '.githooks');
 
-test('a copy of tools/ inside the vault reads and writes the vault, not its own folder', t => {
+test('a copy of tools/ inside the vault reads and writes the vault, and names its own scripts', t => {
   const v = makeVault(t);
   v.write('wiki/demo/rules/said.md', ruleNote({ always: true, doLine: 'Zebra quartz mango.' }));
   fs.cpSync(v.at('tools'), v.at('.live', 'tools'), { recursive: true });
   const r = spawnSync(process.execPath, [v.at('.live', 'tools', 'hooks', 'session-start.mjs')], {
     input: JSON.stringify({ session_id: sessionId(), cwd: v.project, hook_event_name: 'SessionStart', source: 'startup' }), env: cleanEnv(), encoding: 'utf8',
   });
-  assert.match(JSON.parse(r.stdout).hookSpecificOutput.additionalContext, /Zebra quartz mango\./);
+  const context = JSON.parse(r.stdout).hookSpecificOutput.additionalContext;
+  assert.match(context, /Zebra quartz mango\./);
+  for (const script of ['propose.mjs', 'pick.mjs']) {
+    assert.ok(context.includes(`node "${v.root.replace(/\\/g, '/')}/.live/tools/${script}"`), `the start hook names .live/tools/${script}`);
+  }
   assert.ok(fs.existsSync(v.at('.state', 'sessions')));
   assert.ok(!fs.existsSync(v.at('.live', '.state')));
 });

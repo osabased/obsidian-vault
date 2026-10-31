@@ -1,10 +1,10 @@
-import { runHook, domainsFor, inVaultFolder, readableDomains, vaultPath, toPosix, guarded, config, plural, clock } from '../lib/vault.mjs';
+import { runHook, domainsFor, inVaultFolder, readableDomains, vaultPath, toolsPath, toPosix, guarded, config, plural, clock } from '../lib/vault.mjs';
 import { alwaysContext, alwaysIn, loadNotes, settledNotes, liveRules, domainTopics, joinList, clip, undelivered, knownDomain } from '../lib/rules.mjs';
 import { build } from '../lib/build.mjs';
 import { touchSession, clearMarkers, markAlways, markShown, tidy, errorsSinceLint, sinceLint } from '../lib/sessions.mjs';
 
 function proposeNote(sid) {
-  const script = toPosix(vaultPath('tools', 'propose.mjs'));
+  const script = toPosix(toolsPath('propose.mjs'));
   return [
     'Taste vault: propose a rule when the user corrects you or says how they want things, in a way that should hold in later sessions too (a taste rule),',
     "or when something only worked after a failure caused by an API, version or tool your training gets wrong or doesn't know, or a dated source shows it (a knowledge rule).",
@@ -20,7 +20,7 @@ function proposeNote(sid) {
 }
 
 function pickNote(sid) {
-  const script = toPosix(vaultPath('tools', 'pick.mjs'));
+  const script = toPosix(toolsPath('pick.mjs'));
   return [
     'Taste vault: when the user picks between options you showed them, or comments on one piece of work, record it by piping JSON',
     `to \`node "${script}" ${sid}\` the same way; a pick you make alone while the user is away is provisional.`,
