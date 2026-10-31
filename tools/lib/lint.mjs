@@ -1,11 +1,12 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { isBuiltin } from 'node:module';
-import { config, vaultPath, plural, today, datedFiles, filesIn, recordedRows } from './vault.mjs';
+import { config, vaultPath, plural, today, datedFiles, filesIn, recordedRows, rewriteText } from './vault.mjs';
 import {
   loadNotes, noteErrors, ruleText, ruleTextParts, liveRules, knownDomain, alwaysSize, isUrl, validDay, normTopic, topicNotes, rawFile, toKey, resolver, linksUnder, noteLinks, byTopic, isTopicPage, isSourcePage, PAGE_KINDS, joinList,
-  hasSection, footnotes, youSaid, linkedKeys, clip, isResearch, citedSources, evidenceQuotes, keyOf, kindFolder, kindLabel, linkTo,
+  hasSection, footnotes, youSaid, linkedKeys, clip, isResearch, citedSources, evidenceQuotes, keyOf, kindFolder, kindLabel, linkTo, parseNote, noteLinkSpans,
 } from './rules.mjs';
+import { setField } from './frontmatter.mjs';
 import { build } from './build.mjs';
 import { transcriptFor } from './sessions.mjs';
 import { typedMessages, saidIn, sourceTexts } from './quotes.mjs';
@@ -25,7 +26,7 @@ export const tally = found => {
 
 export function lint(notes = loadNotes()) {
   const found = [];
-  const add = (level, file, msg) => found.push({ level, file, msg });
+  const add = (level, file, msg, fix) => found.push({ level, file, msg, ...(fix ? { fix } : {}) });
   const { domains, delivery, knowledge } = config();
   const keys = new Set(notes.map(n => n.key));
   const named = new Map();
@@ -104,6 +105,48 @@ export function lint(notes = loadNotes()) {
   return found.sort((a, b) => (a.level === b.level ? 0 : a.level === 'error' ? -1 : 1));
 }
 
+// Applies the fixes lint gives whole, then rebuilds the generated files, which a fixed note can change too. The fixes
+// read a note with \n line ends, as parseNote does, and a file saved with \r\n gets them back.
+export function fix(found) {
+  const fixable = found.filter(f => f.fix);
+  const written = [...new Set(fixable.map(f => f.file))].filter(rel => {
+    const file = vaultPath(rel);
+    const text = fs.readFileSync(file, 'utf8');
+    const lf = text.replace(/\r\n/g, '\n');
+    const out = fixable.filter(f => f.file === rel).reduce((t, f) => f.fix(t), lf);
+    if (out === lf) return false;
+    rewriteText(file, text.includes('\r\n') ? out.replace(/\n/g, '\r\n') : out);
+    return true;
+  });
+  return { fixed: fixable.filter(f => written.includes(f.file)), written, rebuilt: build() };
+}
+
+// Each fix parses the text it's given afresh, so the fixes to one file apply one after another, and a fix for a link
+// another fix already rewrote finds nothing left to change.
+function editBody(text, rel, edits) {
+  const n = parseNote(text, rel);
+  const at = text.length - n.body.length;
+  return edits(n).sort((a, b) => b.at - a.at)
+    .reduce((t, e) => `${t.slice(0, at + e.at)}${e.text}${t.slice(at + e.at + e.length)}`, text);
+}
+
+// A link keeps its heading and alias. One with no alias gets the note's name, escaped in a table row as Obsidian
+// escapes it.
+function relink(rel, target, note) {
+  const to = note.rel.replace(/\.md$/i, '');
+  return text => editBody(text, rel, n => noteLinkSpans(n).filter(s => s.target === target).map(s => {
+    if (!s.wiki) return { at: s.at, length: s.raw.length, text: note.rel };
+    const row = /^\s*\|/.test(n.body.slice(n.body.lastIndexOf('\n', s.at) + 1, s.at));
+    const alias = /\\?\|/.test(s.rest) ? '' : `${row ? '\\|' : '|'}${note.slug}`;
+    return { at: s.at, length: s.raw.length + s.rest.length, text: `${to}${s.rest}${alias}` };
+  }));
+}
+
+function refootnote(rel, id, target, to) {
+  return text => editBody(text, rel, n => footnotes(n).defs.filter(d => d.id === id && d.target === target)
+    .map(d => ({ at: d.at, length: d.raw.length, text: d.raw === d.target ? to : `\`${to}\`` })));
+}
+
 // The model picks topics freely, so a topic only one rule has, and that its domain doesn't list, is likely a typo
 // or a near-duplicate. Global has no list to check a one-off against. A listed topic no rule has is taste not
 // captured yet rather than a fault, so /lint reports it from review.mjs status.
@@ -162,7 +205,7 @@ function lintFootnotes(n, add) {
     if (isUrl(target)) continue;
     const rel = rawFile(target);
     if (!rel) add('warn', n.rel, `footnote [^${id}] names ${target || 'nothing'}. Cite a URL or a file under raw/ that exists`);
-    else if (rel !== target) add('warn', n.rel, `footnote [^${id}] names ${target}. Write it as ${rel}, the path from the vault root`);
+    else if (rel !== target) add('warn', n.rel, `footnote [^${id}] names ${target}. Write it as ${rel}, the path from the vault root`, refootnote(n.rel, id, target, rel));
   }
   const written = new Set(defs.map(d => d.id));
   for (const id of cited) if (!written.has(id)) add('warn', n.rel, `cites [^${id}], which has no footnote`);
@@ -217,7 +260,7 @@ function lintLinks(n, noteAt, named, md, add) {
     const same = named.get(key) ?? [];
     if (!key.includes('/') && (same.length === 1 || (!same.length && md.names.has(key)))) continue;
     const note = key.includes('/') && noteAt.get(keyOf(key));
-    if (note) add('warn', n.rel, `links [[${target}]], a note at ${note.rel}. Link it by that path, as ${linkTo(note.key, note.rel)}`);
+    if (note) add('warn', n.rel, `links [[${target}]], a note at ${note.rel}. Link it by that path, as ${linkTo(note.key, note.rel)}`, relink(n.rel, target, note));
     else if (same.length > 1) add('warn', n.rel, `links [[${target}]], which names more than one note. Write its path from the vault root: ${joinList(same.map(x => `[[${x.rel.slice(0, -3)}]]`), 'or')}`);
     else add('warn', n.rel, `links [[${target}]], which has no note`);
   }
@@ -244,7 +287,7 @@ function lintPage(n, watched, add) {
     if (source != null && !isUrl(source)) {
       const rel = rawFile(source);
       if (!rel) add('error', n.rel, 'source must be a URL or a file under raw/ that exists');
-      else if (rel !== source) add('error', n.rel, `write source as ${rel}, the path from the vault root`);
+      else if (rel !== source) add('error', n.rel, `write source as ${rel}, the path from the vault root`, text => setField(text, 'source', rel));
     }
     if (dated != null && !validDay(dated)) add('error', n.rel, 'source_date must be a date as YYYY-MM-DD');
     else if (dated > today()) add('error', n.rel, `source_date ${dated} is in the future`);

@@ -381,11 +381,17 @@ const sections = n => {
 };
 // Inside a table Obsidian escapes the alias pipe as \|. A markdown link that starts with ./ or ../ is read from the
 // note's folder and any other from the vault root, so each comes back as its path from the vault root.
-const targets = (text, rel) => [
-  ...[...text.matchAll(/\[\[[^\]]*\]\]/g)].map(m => m[0].slice(2, -2).split(/\\?[|#]/)[0].trim()),
-  ...[...text.matchAll(/\]\(([^()\s]+\.md)(?:#[^()\s]*)?\)/gi)].map(m => m[1]).filter(t => !/^[a-z][\w+.-]*:/i.test(t))
-    .map(t => (/^\.\.?\//.test(t) ? path.posix.join(path.posix.dirname(rel), t) : t)),
+// Each link comes with where its path starts and its path as written.
+const linkSpans = (text, rel) => [
+  ...[...text.matchAll(/\[\[([^\]]*)\]\]/g)].map(m => {
+    const raw = m[1].split(/\\?[|#]/)[0];
+    return { at: m.index + 2, raw, rest: m[1].slice(raw.length), target: raw.trim(), wiki: true };
+  }),
+  ...[...text.matchAll(/\]\(([^()\s]+\.md)(?:#[^()\s]*)?\)/gi)].filter(m => !/^[a-z][\w+.-]*:/i.test(m[1])).map(m => ({
+    at: m.index + 2, raw: m[1], target: /^\.\.?\//.test(m[1]) ? path.posix.join(path.posix.dirname(rel), m[1]) : m[1],
+  })),
 ];
+const targets = (text, rel) => linkSpans(text, rel).map(s => s.target);
 
 export const linksUnder = (n, title) => targets(sections(n).slice(1).find(s => heading(s) === title) ?? '', n.rel).map(toKey);
 
@@ -455,27 +461,36 @@ export const youSaid = n => [...sectionNamed(n, 'you said').matchAll(/^- .*$/gm)
 // The user's quoted words are left out: a broken link there could be fixed only by editing them.
 export const QUOTED = ['evidence', 'you said'];
 
-const unquotedSections = n => {
-  const [lead, ...rest] = sections(n);
-  return [lead, ...rest.filter(s => !QUOTED.includes(heading(s).toLowerCase()))];
-};
-// Read as often as sections, so cached the same way.
+// Fences and quoted sections are blanked rather than cut, so an offset into what the checks read is one into the body,
+// and lint --fix can change what a check found in place.
+const blank = s => s.replace(/[^\n]/g, ' ');
 const prose = new WeakMap();
-const unquoted = n => {
-  if (!prose.has(n)) prose.set(n, unquotedSections(n).map(s => s.replace(/`[^`\n]*`/g, '')));
+const proseBody = n => {
+  if (!prose.has(n)) {
+    const parts = n.body.replace(FENCES, blank).split(/^(?=## )/m);
+    prose.set(n, parts.map(s => (s.startsWith('## ') && QUOTED.includes(heading(s.slice(3)).toLowerCase()) ? blank(s) : s)).join(''));
+  }
   return prose.get(n);
 };
+const unquotedText = new WeakMap();
+const unquoted = n => {
+  if (!unquotedText.has(n)) unquotedText.set(n, proseBody(n).replace(/`[^`\n]*`/g, blank));
+  return unquotedText.get(n);
+};
 
-export const noteLinks = n => unquoted(n).flatMap(s => targets(s, n.rel));
+export const noteLinkSpans = n => linkSpans(unquoted(n), n.rel);
+export const noteLinks = n => noteLinkSpans(n).map(s => s.target);
 export const linkedKeys = (n, resolve) => noteLinks(n).map(t => resolve(toKey(t)));
 
 // A footnote's target is a file under raw/ or a URL, in backticks or not, then ` · ` and its date when it has one.
 // Definitions are read with inline code kept, so a target in backticks survives. A citation may sit before a colon,
 // so only a definition's own [^id]: at the start of its line is left out of the citations.
 export function footnotes(n) {
-  const defs = [...unquotedSections(n).join('\n').matchAll(/^\[\^([^\]\s]+)\]:[ \t]*(.*)$/gm)]
-    .map(m => ({ id: m[1], target: m[2].split(' · ')[0].trim().replace(/^`([^`]*)`$/, '$1') }));
-  const cited = new Set([...unquoted(n).join('\n').replace(/^\[\^[^\]\s]+\]:/gm, '').matchAll(/\[\^([^\]\s]+)\]/g)].map(m => m[1]));
+  const defs = [...proseBody(n).matchAll(/^\[\^([^\]\s]+)\]:[ \t]*(.*)$/gm)].map(m => {
+    const raw = m[2].split(' · ')[0].trim();
+    return { id: m[1], target: raw.replace(/^`([^`]*)`$/, '$1'), raw, at: m.index + m[0].length - m[2].length };
+  });
+  const cited = new Set([...unquoted(n).replace(/^\[\^[^\]\s]+\]:/gm, '').matchAll(/\[\^([^\]\s]+)\]/g)].map(m => m[1]));
   return { defs, cited };
 }
 

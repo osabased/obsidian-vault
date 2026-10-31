@@ -107,6 +107,14 @@ export function writeSettled(file, text) {
   fs.utimesSync(file, t, t);
 }
 
+// For a change that leaves what a note says as it was. The file keeps the day it was saved, so the pages that watch the
+// note don't go stale, but moves on a second, since editors such as VS Code tell a file changed by its time and size.
+export function rewriteText(file, text) {
+  const { atime, mtime } = fs.statSync(file);
+  writeText(file, text);
+  fs.utimesSync(file, atime, new Date(mtime.getTime() + 1000));
+}
+
 // One append per batch, so a reader never sees half of a run's rows.
 export function appendJsonl(file, rows) {
   if (!rows.length) return;
