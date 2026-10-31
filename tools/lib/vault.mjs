@@ -13,6 +13,8 @@ function findRoot() {
 }
 export const ROOT = findRoot();
 export const vaultPath = (...xs) => path.join(ROOT, ...xs);
+// The tools/ this code runs from, so a script a hook names is from the same commit as the hook.
+export const toolsPath = (...xs) => path.join(import.meta.dirname, '..', ...xs);
 
 const DEFAULTS = {
   delivery: { maxRulesPerEdit: 3, maxRuleChars: 300, maxBlockChars: 1200, maxPromptExcerpts: 3, maxPages: 3, activeMaxLines: 60, activeMaxBytes: 4096, settleSeconds: 60 },
