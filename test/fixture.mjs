@@ -22,15 +22,12 @@ export function makeVault(t, { config = {}, domain = 'demo', topics = ['layout',
     project,
     domain,
     at,
-    write(rel, text, { settled = true } = {}) {
+    // Hooks skip notes saved within delivery.settleSeconds, so a fixture note is dated back unless a test wants it fresh.
+    write(rel, text, { settled = true, saved = settled ? new Date(Date.now() - 3600e3) : null } = {}) {
       const file = at(...rel.split('/'));
       fs.mkdirSync(path.dirname(file), { recursive: true });
       fs.writeFileSync(file, text);
-      // Hooks skip notes saved within delivery.settleSeconds, so a fixture note is dated back unless a test wants it fresh.
-      if (settled) {
-        const t = new Date(Date.now() - 3600e3);
-        fs.utimesSync(file, t, t);
-      }
+      if (saved) fs.utimesSync(file, saved, saved);
       return file;
     },
     read: rel => fs.readFileSync(at(...rel.split('/')), 'utf8'),
@@ -72,7 +69,7 @@ export function makeVault(t, { config = {}, domain = 'demo', topics = ['layout',
 }
 
 // The test run may itself be inside a Claude Code session, whose id would make propose.mjs and pick.mjs refuse the fixture's.
-function cleanEnv(extra) {
+export function cleanEnv(extra) {
   const env = { ...process.env };
   delete env.CLAUDE_CODE_SESSION_ID;
   delete env.CLAUDE_CODE_SAFE_MODE;

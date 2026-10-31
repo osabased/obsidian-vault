@@ -403,7 +403,7 @@ export const hasSection = (n, title) => sectionNamed(n, title) !== '';
 const EVIDENCE_KINDS = ['stated', 'correction', 'source', 'failure', 'choice', "agent's reading"];
 const evidenceLines = n => [...sectionNamed(n, 'evidence').matchAll(/^- .*$/gm)].map(([line]) => {
   const m = line.match(/^- [^·]*· ([^·]*)· session ([^\s·]+)(?: · (.*))?/);
-  return { line: line.trim(), kind: m?.[1].trim(), session: m?.[2], cite: m?.[3] ?? '' };
+  return { line: line.trim(), day: line.match(/^- (\d{4}-\d\d-\d\d)\b/)?.[1], kind: m?.[1].trim(), session: m?.[2], cite: m?.[3] ?? '' };
 });
 
 // The session prefixes the Evidence lines give, first seen first.
@@ -411,7 +411,7 @@ export const evidenceSessions = n => [...new Set(evidenceLines(n).flatMap(e => e
 export const evidenceSources = n => evidenceLines(n).filter(e => e.kind === 'source').flatMap(e => e.cite.match(/^(.+?) · dated /)?.[1] ?? []);
 
 const TASTE_RANK = ['stated', 'pick', 'inferred', 'reading'];
-const newestEvidence = n => evidenceLines(n).flatMap(e => e.line.match(/^- (\d{4}-\d\d-\d\d)\b/)?.[1] ?? []).sort().at(-1) ?? '';
+const newestEvidence = n => evidenceLines(n).flatMap(e => e.day ?? []).sort().at(-1) ?? '';
 // Each test, a note's value where higher wins and what to say when it decides, in the order AGENTS.md's Evidence
 // section gives.
 const RANKS = {

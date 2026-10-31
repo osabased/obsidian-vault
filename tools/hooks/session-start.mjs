@@ -1,7 +1,7 @@
 import { runHook, domainsFor, inVaultFolder, readableDomains, vaultPath, toPosix, guarded, config, plural, clock } from '../lib/vault.mjs';
 import { alwaysContext, alwaysIn, loadNotes, settledNotes, liveRules, domainTopics, joinList, clip, undelivered, knownDomain } from '../lib/rules.mjs';
 import { build } from '../lib/build.mjs';
-import { touchSession, clearMarkers, markAlways, markShown, tidy, errorsSinceLint, daysSinceLint, notesSinceLint } from '../lib/sessions.mjs';
+import { touchSession, clearMarkers, markAlways, markShown, tidy, errorsSinceLint, sinceLint } from '../lib/sessions.mjs';
 
 function proposeNote(sid) {
   const script = toPosix(vaultPath('tools', 'propose.mjs'));
@@ -62,8 +62,7 @@ function undeliveredNote(scope, vaultFolder, notes) {
 
 // A vault nobody changes has nothing new to lint, however long it sits.
 function lintNote(notes) {
-  const days = daysSinceLint();
-  const changed = notesSinceLint(notes).length;
+  const { days, changed } = sinceLint(notes);
   const { remindAfterDays, remindAfterNotes } = config().lint;
   if (!changed || (days !== null && days < remindAfterDays && changed < remindAfterNotes)) return '';
   const ran = days === null ? `hasn't run yet, and the vault has ${plural(changed, 'note')}`
@@ -75,6 +74,7 @@ runHook('session-start', input => {
   guarded('tidy', tidy);
   const doms = domainsFor(input.cwd).map(d => d.domain);
   const vaultFolder = inVaultFolder(input.cwd);
+  const readable = readableDomains(doms, vaultFolder);
   // Compaction can drop the rules the gate and excerpts already showed, so they show them again.
   if (input.session_id && (input.source === 'compact' || input.source === 'clear')) clearMarkers(input.session_id);
   const scope = [...doms, 'global'];
@@ -84,7 +84,7 @@ runHook('session-start', input => {
   const ready = settledNotes(notes);
   const rules = liveRules(ready);
   const always = alwaysContext(scope, rules);
-  const index = guarded('index note', () => indexNote(readableDomains(doms, vaultFolder), ready));
+  const index = guarded('index note', () => indexNote(readable, ready));
   let propose = '';
   let pick = '';
   // Vault sessions register so /ingest can propose; the skill tells them how, so they get no note.
@@ -102,7 +102,7 @@ runHook('session-start', input => {
   // Compaction and /clear start the context again within one session, which already heard these lines.
   const health = ['compact', 'clear'].includes(input.source) ? [] : [
     guarded('hook errors', errorsNote),
-    guarded('undelivered notes', () => undeliveredNote(readableDomains(doms, vaultFolder), vaultFolder, ready)),
+    guarded('undelivered notes', () => undeliveredNote(readable, vaultFolder, ready)),
     guarded('lint reminder', () => lintNote(notes)),
   ];
   const context = [always.text, index, propose, pick, ...health].filter(Boolean).join('\n\n');

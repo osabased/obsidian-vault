@@ -106,6 +106,7 @@ export function writeText(file, text) {
   }
 }
 
+export const lf = s => String(s ?? '').replace(/\r\n/g, '\n');
 export const writeJson = (file, data) => writeText(file, `${JSON.stringify(data, null, 2)}\n`);
 
 // The hooks wait out delivery.settleSeconds after a save because Obsidian saves half-typed notes;

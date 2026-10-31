@@ -1,5 +1,5 @@
 import fs from 'node:fs';
-import { runHook, config, domainsFor, inside, vaultRel, toPosix, cwdOf, FILE_TOOLS, toolFile, shortHash } from '../lib/vault.mjs';
+import { runHook, config, domainsFor, inside, vaultRel, toPosix, cwdOf, FILE_TOOLS, toolFile, shortHash, lf } from '../lib/vault.mjs';
 import { settledNotes, liveRules, livePages, ruleLine, pagePointers, tryRegex, cmp, clip, parseNote, QUOTED } from '../lib/rules.mjs';
 import { bestMatch, specificity, bySpecificity } from '../lib/glob.mjs';
 import { marked, mark, markShown, markPages } from '../lib/sessions.mjs';
@@ -19,7 +19,6 @@ function vaultGuard(file, cwd) {
   return null;
 }
 
-const lf = s => String(s ?? '').replace(/\r\n/g, '\n');
 const foldQuotes = s => s.replace(/[‘’]/g, "'").replace(/[“”]/g, '"');
 
 // Edit matches as Claude Code does: line endings and curly quotes don't count, and an old_string found more than

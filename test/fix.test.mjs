@@ -2,13 +2,10 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import { makeVault, ruleNote, pageNote, sourcePage } from './fixture.mjs';
+import { today } from '../tools/lib/vault.mjs';
 
 const OLD = new Date(2026, 9, 1, 12);
-const age = (v, rel) => fs.utimesSync(v.at(...rel.split('/')), OLD, OLD);
-const savedOn = (v, rel) => {
-  const t = new Date(fs.statSync(v.at(...rel.split('/'))).mtimeMs);
-  return `${t.getFullYear()}-${String(t.getMonth() + 1).padStart(2, '0')}-${String(t.getDate()).padStart(2, '0')}`;
-};
+const savedOn = (v, rel) => today(fs.statSync(v.at(...rel.split('/'))).mtime);
 
 function brokenVault(t) {
   const v = makeVault(t);
@@ -16,7 +13,7 @@ function brokenVault(t) {
   v.write('wiki/demo/rules/said.md', ruleNote({
     because: 'It reads better.',
     evidence: ['- 2026-10-01 · stated · session 1a2b3c4d · "see [[demo/code]]" (a-00000001)'],
-  }).replace('## Examples\n', '## Examples\n\n- [[demo/code]]\n'));
+  }).replace('## Examples\n', '## Examples\n\n- [[demo/code]]\n'), { saved: OLD });
   v.write('wiki/demo/topics/code.md', pageNote({ body: [
     'Links [[demo/said]] and [[demo/said#Do|the rule]], [the rule](demo/said.md) and [here](./said.md), and [[nowhere]].',
     'The guide is [[wiki/demo/sources/guide|guide]].',
@@ -43,9 +40,8 @@ function brokenVault(t) {
     '## You said',
     '',
     '- 2026-10-01 · session 1a2b3c4d · "see [[demo/said]]"',
-  ] }));
-  v.write('wiki/demo/sources/guide.md', sourcePage({ source: "'./raw/refs/guide.md'", dated: '2026-10-01' }).replace(/\n/g, '\r\n'));
-  for (const rel of ['wiki/demo/rules/said.md', 'wiki/demo/topics/code.md', 'wiki/demo/sources/guide.md']) age(v, rel);
+  ] }), { saved: OLD });
+  v.write('wiki/demo/sources/guide.md', sourcePage({ source: "'./raw/refs/guide.md'", dated: '2026-10-01' }).replace(/\n/g, '\r\n'), { saved: OLD });
   return v;
 }
 
