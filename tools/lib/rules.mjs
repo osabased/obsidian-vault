@@ -404,6 +404,34 @@ const evidenceLines = n => [...sectionNamed(n, 'evidence').matchAll(/^- .*$/gm)]
 export const evidenceSessions = n => [...new Set(evidenceLines(n).flatMap(e => e.session ?? []))];
 export const evidenceSources = n => evidenceLines(n).filter(e => e.kind === 'source').flatMap(e => e.cite.match(/^(.+?) · dated /)?.[1] ?? []);
 
+const TASTE_RANK = ['stated', 'pick', 'inferred', 'reading'];
+const newestEvidence = n => evidenceLines(n).flatMap(e => e.line.match(/^- (\d{4}-\d\d-\d\d)\b/)?.[1] ?? []).sort().at(-1) ?? '';
+// Each test, a note's value where higher wins and what to say when it decides, in the order AGENTS.md's Evidence
+// section gives.
+const RANKS = {
+  taste: {
+    tests: [
+      [n => -TASTE_RANK.indexOf(n.data.basis), (w, l) => `basis ${w.data.basis} over ${l.data.basis}`],
+      [n => evidenceLines(n).length, (w, l) => `${plural(evidenceLines(w).length, 'Evidence line')} to ${evidenceLines(l).length}`],
+      [newestEvidence, (w, l) => `evidence from ${newestEvidence(w)} over ${newestEvidence(l) || 'no date'}`],
+    ],
+    tie: 'same basis, Evidence count and newest Evidence date',
+  },
+  knowledge: { tests: [[n => n.as_of, (w, l) => `as_of ${w.as_of} over ${l.as_of}`]], tie: 'same as_of' },
+};
+
+// Which of two rules that may contradict to recommend first, or null for a taste rule and a knowledge rule, which
+// aren't ranked against each other.
+export function rankPair(a, b) {
+  const rank = a.kind === b.kind ? RANKS[a.kind] : null;
+  if (!rank) return null;
+  for (const [value, why] of rank.tests) {
+    const [x, y] = [value(a), value(b)];
+    if (x !== y) return x > y ? { first: a, last: b, why: why(a, b) } : { first: b, last: a, why: why(b, a) };
+  }
+  return { first: null, why: rank.tie };
+}
+
 // The quotes of the user's words, of sources and of recorded rows, with what each is checked against. A line from a
 // row, whose id comes before the proposal's, quotes the row rather than the session. A line lint can't read comes back
 // as the line alone.

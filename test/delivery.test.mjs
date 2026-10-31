@@ -158,6 +158,24 @@ test('a compact or clear start clears the markers so the edit gate and prompt re
   }
 });
 
+test('session start names the notes in its domains that an error keeps from delivery', t => {
+  const v = makeVault(t, { domains: { other: { title: 'Other', projects: ['C:/nowhere/other'], topics: [] } } });
+  v.write('wiki/demo/rules/bad.md', ruleNote({ basis: 'bogus', keywords: ['x'] }));
+  v.write('wiki/global/rules/no-not.md', ruleNote({ domain: 'global', notLine: '', keywords: ['x'] }));
+  v.write('wiki/other/rules/elsewhere.md', ruleNote({ domain: 'other', basis: 'bogus', keywords: ['x'] }));
+  v.write('wiki/demo/rules/retired.md', ruleNote({ basis: 'bogus', extra: ['superseded_by: demo/bad'] }));
+  v.write('wiki/demo/rules/typing.md', ruleNote({ basis: 'bogus' }), { settled: false });
+  const context = (cwd, source) => v.startSession(sessionId(), { cwd, source })?.hookSpecificOutput.additionalContext ?? '';
+  const line = /^Taste vault: (.*)\. Tell the user; \/lint in `.*` lists the fixes\.$/m;
+  assert.equal(context(v.project).match(line)?.[1],
+    "2 notes have an error and aren't delivered: demo/bad (basis must be stated, inferred, pick or reading), global/no-not (no **Not:** line)");
+  assert.match(context(v.root).match(line)?.[1], /^3 notes have an error and aren't delivered: demo\/bad .*, global\/no-not .*, other\/elsewhere /);
+  assert.doesNotMatch(context(v.project, 'compact'), line);
+  v.write('wiki/demo/rules/bad.md', ruleNote({ keywords: ['x'] }));
+  v.write('wiki/global/rules/no-not.md', ruleNote({ domain: 'global', keywords: ['x'] }));
+  assert.doesNotMatch(context(v.project), line);
+});
+
 test('a rule with a lint error or superseded_by is never delivered', t => {
   const v = makeVault(t);
   v.write('wiki/demo/bad.md', ruleNote({ applies_to: ['src/**'], basis: 'bogus' }));

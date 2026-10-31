@@ -1,5 +1,5 @@
 import { runHook, domainsFor, inVaultFolder, readableDomains, vaultPath, toPosix, guarded, config, plural, clock } from '../lib/vault.mjs';
-import { alwaysContext, alwaysIn, loadNotes, settledNotes, liveRules, domainTopics, joinList, clip } from '../lib/rules.mjs';
+import { alwaysContext, alwaysIn, loadNotes, settledNotes, liveRules, domainTopics, joinList, clip, undelivered, knownDomain } from '../lib/rules.mjs';
 import { build } from '../lib/build.mjs';
 import { touchSession, clearMarkers, markAlways, markShown, tidy, errorsSinceLint, daysSinceLint } from '../lib/sessions.mjs';
 
@@ -47,6 +47,19 @@ function errorsNote() {
   return `Taste vault: ${logged} in \`.state/errors.log\` since /lint last ran, the newest at ${clock(new Date(at))}: \`${clip(message, 200)}\`. Tell the user; /lint in \`${toPosix(vaultPath())}\` shows the count and the newest.`;
 }
 
+// Notes go live without a commit, so a note an error keeps from delivery would otherwise go unnoticed until /lint.
+// A session in this folder also hears of notes outside any domain in vault.config.json.
+function undeliveredNote(scope, vaultFolder, notes) {
+  const broken = notes.filter(n => !n.superseded_by && (scope.includes(n.domain) || (vaultFolder && !knownDomain(n.domain))))
+    .flatMap(n => {
+      const why = undelivered(n);
+      return why ? [`${n.key} (${clip(why, 120)})`] : [];
+    });
+  if (!broken.length) return '';
+  const more = broken.length > 3 ? `, and ${broken.length - 3} more` : '';
+  return `Taste vault: ${plural(broken.length, 'note')} ${broken.length === 1 ? "has an error and isn't" : "have an error and aren't"} delivered: ${broken.slice(0, 3).join(', ')}${more}. Tell the user; /lint in \`${toPosix(vaultPath())}\` lists the fixes.`;
+}
+
 function lintNote() {
   const days = daysSinceLint();
   if (days !== null && days < config().lint.remindAfterDays) return '';
@@ -82,7 +95,11 @@ runHook('session-start', input => {
     }
   }
   // Compaction and /clear start the context again within one session, which already heard these lines.
-  const health = ['compact', 'clear'].includes(input.source) ? [] : [guarded('hook errors', errorsNote), guarded('lint reminder', lintNote)];
+  const health = ['compact', 'clear'].includes(input.source) ? [] : [
+    guarded('hook errors', errorsNote),
+    guarded('undelivered notes', () => undeliveredNote(readableDomains(doms, vaultFolder), vaultFolder, ready)),
+    guarded('lint reminder', lintNote),
+  ];
   const context = [always.text, index, propose, pick, ...health].filter(Boolean).join('\n\n');
   return context ? { hookSpecificOutput: { hookEventName: 'SessionStart', additionalContext: context } } : null;
 });

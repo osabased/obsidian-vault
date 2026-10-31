@@ -28,7 +28,7 @@ A page with `keywords` or `applies_to` comes up as a pointer, its key, kind, sum
 
 Every session start also names the topics of global and the session's domains (the listed ones, then the others rules and pages have) and points to `index.md`, so the agent reads the pages on a topic its task touches. A session in this folder hears every domain's topics.
 
-A new or resumed session also hears, in one line each, how many errors were logged in `.state/errors.log` since `/lint` last ran, and when `/lint` last ran once it has gone `lint.remindAfterDays` (14 by default, in `vault.config.json`) without a run. Both lines repeat until `/lint` runs.
+A new or resumed session also hears, in one line each, how many errors were logged in `.state/errors.log` since `/lint` last ran, and when `/lint` last ran once it has gone `lint.remindAfterDays` (14 by default, in `vault.config.json`) without a run. Both lines repeat until `/lint` runs. A third line names the notes of global and the session's domains that an error keeps from delivery, up to three with their first error, and repeats until they're fixed; a session in this folder hears of every domain's, and of notes outside any domain.
 
 ## Rule notes
 
@@ -176,7 +176,7 @@ A pick is the user's choice between options the agent showed them for one piece 
 
 - A stated preference or a correction from one session is enough for a rule.
 - Cite what backs each rule as it is: the user's words, the error a tool printed and its fix, a dated source and its words, or your own reading. Quote the user's or the source's exact words, marking words left out with …, and give anything else as your reading: `tools/propose.mjs` refuses a quote the user never typed in this session, or one a text file under `raw/refs/` doesn't hold, and lint warns on one already in a note.
-- When evidence conflicts, show the user both sides and let them decide.
+- When evidence conflicts, show the user both sides with the one you recommend first, say what decided it, and let them decide. Between taste rules, prefer the stronger basis (`stated`, then `pick`, then `inferred`, then `reading`), then the one with more Evidence lines, then the newer evidence. Between knowledge rules, prefer the newer `as_of`. A taste rule and a knowledge rule aren't ranked. For rules whose globs overlap, `node tools/review.mjs status` and `tools/propose.mjs` print this ranking; rank the others yourself. When the two rules' `applies_to` cover different files, keeping both may be the answer.
 - The user's own taste beats general best practice. Write rules they expressed, ones a failure or a dated source backs, or your reading of what they showed you, labelled as yours.
 
 ## Never
