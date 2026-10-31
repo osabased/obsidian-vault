@@ -6,7 +6,7 @@ import {
 } from './lib/vault.mjs';
 import {
   KEY_RE, BASES, wrongBasis, parseNote, noteErrors, ruleText, ruleTextParts, loadNotes, readNote, liveRules, mentions, isUrl, validDay, byKey, normTopic, domainTopics, vaultFile, joinList,
-  sharedFiles,
+  sharedFiles, rankPair,
 } from './lib/rules.mjs';
 import { build } from './lib/build.mjs';
 import { normGlob } from './lib/glob.mjs';
@@ -219,11 +219,18 @@ function checkRepeats(f, text, scope, rules, same, notes) {
 
 // Named once the rule is written, since a global rule or another domain's can gate the same files without being on
 // the repeat list.
-function sameFiles(f, rules) {
+function sameFiles(f, n, notes, rules) {
   const mine = { domain: f.domain, topic: normTopic(f.topic), applies_to: f.applies_to };
   const near = Object.entries(rules).sort(byKey).filter(([, r]) => sharedFiles(r, mine)).map(([k]) => k);
+  if (!near.length) return '';
   const one = near.length === 1;
-  return near.length ? `On ${f.topic}, ${joinList(near, 'and')} cover${one ? 's' : ''} files this rule covers too. Check the new rule doesn't contradict ${one ? 'it' : 'them'}. ` : '';
+  const ranked = near.flatMap(k => {
+    const rank = rankPair(n, readNote(k, notes));
+    if (!rank) return [];
+    return [rank.first ? `${rank.first.key} ranks before ${rank.last.key} (${rank.why})` : `${n.key} and ${k} tie (${rank.why})`];
+  });
+  const order = ranked.length ? `If ${one ? 'it does' : 'one does'}, show the user both with the higher-ranked first: ${ranked.join('; ')}. ` : '';
+  return `On ${f.topic}, ${joinList(near, 'and')} cover${one ? 's' : ''} files this rule covers too. Check the new rule doesn't contradict ${one ? 'it' : 'them'}. ${order}`;
 }
 
 function gone(key, notes) {
@@ -370,7 +377,7 @@ function propose(sid, p) {
       ...(overlaps.length ? [`It may overlap ${joinList(overlaps, 'and')}.`] : []),
       `It applies from now on. To change or remove it, edit or delete ${toPosix(file)}.`,
     ];
-    return [`Wrote ${rel}. ${sameFiles(f, rules)}End your reply with these ${['two', 'three'][reply.length - 2]} lines as they are:`, '', ...reply].join('\n');
+    return [`Wrote ${rel}. ${sameFiles(f, n, notes, rules)}End your reply with these ${['two', 'three'][reply.length - 2]} lines as they are:`, '', ...reply].join('\n');
   });
 }
 

@@ -1,7 +1,7 @@
 import { config, plural, toPosix, guarded, hookErrors, errorsLog, domainsFor, localDay, appendLog, filesIn, vaultPath } from './lib/vault.mjs';
 import {
   clip, normTopic, topicNotes, loadNotes, liveRules, evidenceSessions, validDay, byKey, cmp, sharedFiles, isResearch, rawFile, resolver, linkedKeys, evidenceSources, isSourcePage, joinList,
-  savedUrl,
+  savedUrl, rankPair,
 } from './lib/rules.mjs';
 import { lint, tally } from './lib/lint.mjs';
 import { lintRan, trackedSessions } from './lib/sessions.mjs';
@@ -86,9 +86,13 @@ function neverShown() {
 
 function globPairs() {
   const rules = liveNotes().filter(([, r]) => r.applies_to?.length);
-  return rules.flatMap(([a, ra], i) => rules.slice(i + 1).flatMap(([b, rb]) => {
+  const order = (na, nb) => {
+    const rank = rankPair(na, nb);
+    return !rank ? '' : ` · ${rank.first ? `${rank.first.key} ranks first` : 'neither ranks first'}: ${rank.why}`;
+  };
+  return rules.flatMap(([a, ra, na], i) => rules.slice(i + 1).flatMap(([b, rb, nb]) => {
     const pair = sharedFiles(ra, rb);
-    return pair ? [`- ${a} and ${b}, on ${ra.topic}: '${pair[0]}' and '${pair[1]}'`] : [];
+    return pair ? [`- ${a} and ${b}, on ${ra.topic}: '${pair[0]}' and '${pair[1]}'${order(na, nb)}`] : [];
   }));
 }
 
