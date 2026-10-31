@@ -260,7 +260,7 @@ function lintLinks(n, noteAt, named, md, add) {
     const same = named.get(key) ?? [];
     if (!key.includes('/') && (same.length === 1 || (!same.length && md.names.has(key)))) continue;
     const note = key.includes('/') && noteAt.get(keyOf(key));
-    if (note) add('warn', n.rel, `links [[${target}]], a note at ${note.rel}. Link it by that path, as ${linkTo(note.key, note.rel)}`, relink(n.rel, target, note));
+    if (note) add('warn', n.rel, `links [[${target}]], a note at ${note.rel}. Link it by that path, as ${linkTo(note.key, note.rel)}`, note.clash ? null : relink(n.rel, target, note));
     else if (same.length > 1) add('warn', n.rel, `links [[${target}]], which names more than one note. Write its path from the vault root: ${joinList(same.map(x => `[[${x.rel.slice(0, -3)}]]`), 'or')}`);
     else add('warn', n.rel, `links [[${target}]], which has no note`);
   }
