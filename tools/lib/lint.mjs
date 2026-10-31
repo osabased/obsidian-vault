@@ -1,7 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { isBuiltin } from 'node:module';
-import { config, vaultPath, plural, today, datedFiles, filesIn, recordedRows, rewriteText } from './vault.mjs';
+import { config, vaultPath, plural, today, datedFiles, filesIn, pickRows, rewriteText } from './vault.mjs';
 import {
   loadNotes, noteErrors, ruleText, ruleTextParts, liveRules, knownDomain, alwaysSize, isUrl, validDay, normTopic, topicNotes, rawFile, toKey, resolver, linksUnder, noteLinks, byTopic, isTopicPage, isSourcePage, PAGE_KINDS, joinList,
   hasSection, footnotes, youSaid, linkedKeys, clip, isResearch, citedSources, evidenceQuotes, keyOf, kindFolder, kindLabel, linkTo, parseNote, noteLinkSpans,
@@ -54,7 +54,7 @@ export function lint(notes = loadNotes()) {
     try { return sourceTexts(rel); } catch { return null; }
   });
   let rows;
-  const rowOf = id => (rows ??= new Map(recordedRows().map(r => [r.id, r]))).get(id);
+  const rowOf = id => (rows ??= new Map(pickRows().map(r => [r.id, r]))).get(id);
 
   for (const n of notes) {
     if (n.depth === 1) add('error', n.rel, 'notes go in wiki/<domain>/');
@@ -232,7 +232,7 @@ function lintEvidence(n, { typedIn, textsOf, rowOf }, add) {
       add('warn', n.rel, `an Evidence line isn't in the form propose.mjs writes, so lint can't check it: ${clip(line, 100)}`);
     } else if (pick) {
       const row = rowOf(pick);
-      if (!row) add('warn', n.rel, `an Evidence line cites ${pick}, which no row in raw/picks/ or raw/inbox/ has`);
+      if (!row) add('warn', n.rel, `an Evidence line cites ${pick}, which no row in raw/picks/ has`);
       else if (!saidIn(quote, [String(row.text ?? '')])) add('warn', n.rel, `"${quote}" isn't in what row ${pick} recorded. Quote the row's own words, with … where you leave some out`);
     } else if (source === undefined) {
       checkTyped(n, session, quote, typedIn, add);

@@ -1,7 +1,7 @@
 import fs from 'node:fs';
 import crypto from 'node:crypto';
 import {
-  config, vaultPath, proposeDomains, writeSettled, appendJsonl, appendLog, inboxFile, proposalRows, recordedRows, statePath, withLock, today, localDay, toPosix, guarded,
+  config, vaultPath, proposeDomains, writeSettled, appendJsonl, appendLog, inboxFile, proposalRows, pickRows, statePath, withLock, today, localDay, toPosix, guarded,
   shortHash,
 } from './lib/vault.mjs';
 import {
@@ -36,7 +36,7 @@ const help = () => [
   '    inferred     taste only: you generalized a correction. quote: the words you generalized, as the user typed them',
   '                 A quote may leave words out with …; propose.mjs refuses one the user never typed in this session.',
   "    pick         taste only: the user's recorded answer from an earlier session backs the rule.",
-  '                 pick: the id of a row in raw/picks/ (q-) or of an older user-written row in raw/inbox/ (c-, p-).',
+  '                 pick: the id of a row in raw/picks/ (q-).',
   "                 The row's own words are cited; a row backs one rule. A provisional, replaced or confirmed pick backs none.",
   "    reading      taste only: your own reading of what you saw, labelled as yours. reading: what you saw, in one line",
   '    failure      knowledge only: something worked only after a failure.',
@@ -124,11 +124,11 @@ function checkQuote(session, e) {
   }
 }
 
-// A pick's label is the user's answer verbatim, and an older captured row holds their message; either backs a rule
-// on its own, so the row's text is cited and nothing has to be typed again.
+// A pick's label is the user's answer verbatim, and a comment row holds their words; either backs a rule on its own,
+// so the row's text is cited and nothing has to be typed again.
 function pickEvidence(id, domain) {
-  const row = recordedRows().find(r => r.id === id);
-  if (!row) refuse(`there's no row ${id} in raw/picks/ or raw/inbox/.`);
+  const row = pickRows().find(r => r.id === id);
+  if (!row) refuse(`there's no row ${id} in raw/picks/.`);
   if (row.domain && row.domain !== domain && domain !== 'global') refuse(`${id} was recorded in ${row.domain}, not ${domain}.`);
   // A reversed or confirmed pick no longer stands on its own, and a provisional one is the agent's choice, not the user's.
   const by = laterRows(subjectRows()).get(id);

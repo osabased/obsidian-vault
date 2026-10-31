@@ -145,14 +145,14 @@ test('lint re-checks Evidence quotes against the session and the source, and ski
   v.write('raw/refs/notes.md', 'The solver is on by default.\n');
   v.write('raw/refs/grid.html', '<p>The <b>grid</b> is 8&nbsp;px.</p>\n');
   v.write('raw/refs/guide.md', 'Use **strict mode** in the [shop](https://example.com/shop) scripts.\n');
-  v.write('raw/inbox/2026-09-01.jsonl', `${JSON.stringify({ id: 'c-1234abcd', source: 'capture', text: 'an old captured message' })}\n`);
+  v.write('raw/picks/2026-09-01.jsonl', `${JSON.stringify({ id: 'q-1234abcd', at: '2026-09-01T10:00:00.000Z', source: 'pick', domain: 'demo', subject: 'cards', text: 'a comment on the cards', status: 'user' })}\n`);
   const line = (kind, rest, id = '(a-00000001)') => `- 2026-10-22 · ${kind} · session ${SID8} · ${rest} ${id}`.trimEnd();
   v.write('wiki/demo/cards.md', ruleNote({ keywords: ['cards'], evidence: [
     line('stated', '"the cards breathe … feel cramped"'),
     line('stated', '"the tabs feel cramped"', ''),
     line('correction', '"the tabs look tight"'),
     '- 2026-10-22 · stated · session 00000000 · "said in a session long gone" (a-00000001)',
-    line('stated', '"an old captured message"', '(c-1234abcd; proposed as a-00000001)'),
+    line('stated', '"a comment on the cards"', '(q-1234abcd; proposed as a-00000001)'),
     line('source', 'raw/refs/notes.md · dated 2026-10-01 · "The solver is on by default"'),
     line('source', 'raw/refs/notes.md · dated 2026-10-01 · "The solver is off"'),
     line('source', 'raw/refs/grid.html · dated 2026-10-01 · "The grid is 8 px"'),
@@ -198,17 +198,17 @@ test('lint warns on an Evidence line it can\'t read, and on one whose source is 
 
 test('lint checks an Evidence line from a recorded row against the row\'s words', async t => {
   const v = makeVault(t);
-  v.write('raw/inbox/2026-09-01.jsonl', `${JSON.stringify({ id: 'c-1234abcd', source: 'capture', text: 'keep the cards roomy please' })}\n`);
+  v.write('raw/picks/2026-09-01.jsonl', `${JSON.stringify({ id: 'q-1234abcd', at: '2026-09-01T10:00:00.000Z', source: 'pick', domain: 'demo', subject: 'cards', text: 'keep the cards roomy please', status: 'user' })}\n`);
   const pick = (quote, id) => `- 2026-09-01 · stated · session ${SID8} · "${quote}" (${id}; proposed as a-00000001)`;
   v.write('wiki/demo/cards.md', ruleNote({ keywords: ['cards'], evidence: [
-    pick('keep the cards roomy', 'c-1234abcd'),
-    pick('keep the tabs roomy', 'c-1234abcd'),
-    pick('anything', 'c-99999999'),
+    pick('keep the cards roomy', 'q-1234abcd'),
+    pick('keep the tabs roomy', 'q-1234abcd'),
+    pick('anything', 'q-99999999'),
   ] }));
-  const found = await lintFound(v, /c-1234abcd|c-99999999/);
+  const found = await lintFound(v, /q-1234abcd|q-99999999/);
   assert.deepEqual(found.map(f => [f.level, f.msg]), [
-    ['warn', `"keep the tabs roomy" isn't in what row c-1234abcd recorded. Quote the row's own words, with … where you leave some out`],
-    ['warn', "an Evidence line cites c-99999999, which no row in raw/picks/ or raw/inbox/ has"],
+    ['warn', `"keep the tabs roomy" isn't in what row q-1234abcd recorded. Quote the row's own words, with … where you leave some out`],
+    ['warn', "an Evidence line cites q-99999999, which no row in raw/picks/ has"],
   ]);
 });
 
