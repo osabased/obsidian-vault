@@ -95,13 +95,8 @@ function copyName(prev, hash, ext) {
   }
 }
 
-// The chains keep each copy's frontmatter only, so the latest copy's text is read when it is checked.
-const bodyOf = rel => parsedFile(rel)?.body ?? '';
-
-async function checkUrl(id, chain, chains, was) {
+async function checkUrl(id, chain, chains, was, { data, body }) {
   const latest = chain.at(-1);
-  const { data } = chains.files.get(latest);
-  const body = bodyOf(latest);
   // A stored etag belongs to the copy that was latest when it came, so a copy saved since then sends its own.
   const stored = was?.chain?.at(-1) === latest && (was.etag || was.lastModified);
   const sent = stored ? { etag: was.etag, lastModified: was.lastModified } : { etag: data.etag, lastModified: data.last_modified };
@@ -155,10 +150,8 @@ function syncClone(repo) {
   return dir;
 }
 
-function checkGit(chain, chains) {
+function checkGit(chain, { data, body }) {
   const latest = chain.at(-1);
-  const { data } = chains.files.get(latest);
-  const body = bodyOf(latest);
   const problems = sourceProblems(data, { body });
   if (problems.length) throw new Failed(`${latest}: ${problems.join('; ')}`);
   const repo = String(data.repo);
@@ -179,10 +172,9 @@ function checkGit(chain, chains) {
   };
 }
 
-async function check(id, chain, chains, was) {
+async function check(id, chain, chains, was, copy) {
   try {
-    const { data } = chains.files.get(chain.at(-1));
-    return isUrl(data.url) ? await checkUrl(id, chain, chains, was) : checkGit(chain, chains);
+    return isUrl(copy.data.url) ? await checkUrl(id, chain, chains, was, copy) : checkGit(chain, copy);
   } catch (e) {
     if (e instanceof Failed || /^(?:git |no answer in )/.test(e.message)) return { result: 'failed', why: e.message };
     throw e;
@@ -206,14 +198,19 @@ async function main() {
   ({ timeoutSeconds, maxBytes } = config().refresh);
   timeout = timeoutSeconds * 1000;
   const chains = sourceChains();
-  if (chains.unreadable.length) throw new Error(`can't read ${chains.unreadable.join(', ')}`);
   const before = readDerived() ?? {};
   const ids = [...chains.chains.keys()].sort(cmp);
-  const isGit = id => !isUrl(chains.files.get(chains.chains.get(id).at(-1)).data.url);
+  // The chains hold each copy's frontmatter from a cache that doesn't open the file while its size and mtime hold, so the
+  // latest copy of each source is read here, once, for the frontmatter and the text its check goes by.
+  const latestOf = id => chains.chains.get(id).at(-1);
+  const copies = new Map(ids.map(id => [id, parsedFile(latestOf(id))]));
+  const unreadable = [...chains.unreadable, ...ids.filter(id => !copies.get(id)).map(latestOf)];
+  if (unreadable.length) throw new Error(`can't read ${unreadable.join(', ')}`);
+  const isGit = id => !isUrl(copies.get(id).data.url);
   const results = new Map();
-  for (const id of ids.filter(isGit)) results.set(id, await check(id, chains.chains.get(id), chains, before.sources?.[id]));
+  for (const id of ids.filter(isGit)) results.set(id, await check(id, chains.chains.get(id), chains, before.sources?.[id], copies.get(id)));
   const urls = ids.filter(id => !isGit(id));
-  (await inPool(urls, 8, id => check(id, chains.chains.get(id), chains, before.sources?.[id]))).forEach((r, i) => results.set(urls[i], r));
+  (await inPool(urls, 8, id => check(id, chains.chains.get(id), chains, before.sources?.[id], copies.get(id)))).forEach((r, i) => results.set(urls[i], r));
 
   const day = today();
   // The copies are written under build.lock, where their names are taken, and before build reads raw/refs/ for the chains.

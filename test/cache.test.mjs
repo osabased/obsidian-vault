@@ -213,6 +213,18 @@ test('a note that cannot be read for a moment keeps its last entry, and a note n
   assert.equal(notes.find(n => n.key === 'glim/b').seen, seen);
 });
 
+test('loadNotesAsync gives the notes loadNotes does, for some domains and for all', async t => {
+  const v = makeVault(t);
+  v.write('wiki/glim/a.md', pageNote({ topic: 'layout' }));
+  v.write('wiki/glim/rules/b.md', ruleNote({ keywords: ['y'], doLine: 'Do b.' }), { settled: false });
+  v.write('wiki/global/c.md', pageNote({}));
+  const { loadNotes, loadNotesAsync } = await v.import('lib/rules.mjs');
+  for (const domains of [['glim'], null, ['glim', 'absent', 'global']]) {
+    loadNotes(domains);
+    assert.deepEqual(await loadNotesAsync(domains), loadNotes(domains), JSON.stringify(domains));
+  }
+});
+
 test('a walk stopped at the deadline keeps the notes it read', async t => {
   const v = makeVault(t);
   for (let i = 0; i < 5; i++) v.write(`wiki/glim/rules/r${i}.md`, ruleNote({ keywords: [`k${i}`], doLine: `Do ${i}.` }));
