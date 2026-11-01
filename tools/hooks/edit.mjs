@@ -6,7 +6,7 @@ import {
 import { bestMatch, matchTarget, targetNames, specificity, bySpecificity } from '../lib/glob.mjs';
 import { parse } from '../lib/frontmatter.mjs';
 import { extension } from '../lib/ext.mjs';
-import { marked, mark, markShown, markPages, agentKey, sessionHits } from '../lib/sessions.mjs';
+import { marked, mark, markMany, markShown, markPages, agentKey, sessionHits } from '../lib/sessions.mjs';
 
 function vaultGuard(file, cwd) {
   const rel = vaultRel(file, cwd);
@@ -269,8 +269,8 @@ function refusal(input, hits, pages) {
     { noun: 'rule pointer', head: 'Also due, in brief. Open the ones that bear on this edit:', items: hits.slice(full.length).map(h => rulePointer(h.key, h.note)) },
     { noun: 'page', head: `Vault pages on ${rel}. Read the ones that bear on this work:`, items: pages.map((h, i) => pageLine(h.key, h.note, i >= maxPages)) },
   ], { tail: foot, gap: '\n' });
-  for (const hit of hits) mark('gate', sid, hit.id);
-  for (const s of full.slice(0, kept[0])) markShown(sid, s.key);
+  markMany('gate', sid, hits.map(h => h.id));
+  markShown(sid, full.slice(0, kept[0]).map(s => s.key));
   return text;
 }
 

@@ -257,7 +257,7 @@ function show(sid, subject, domain, project) {
     if (d !== s.domain && !rules.length) continue;
     out.push('', skipped.length ? `${d} rules, leaving out ${joinList(skipped, 'and')}:` : `${d} rules:`);
     out.push(...(rules.length ? rules.map(([k, r]) => ruleLine(k, r)) : ['None.']));
-    for (const [k] of rules) markShown(sid, k);
+    markShown(sid, rules.map(([k]) => k));
   }
   return out.join('\n');
 }
