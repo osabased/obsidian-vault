@@ -1,6 +1,6 @@
 # All-rounder vault: design draft
 
-Status: draft, 2026-11-01. Phase 0 (checks), phase 1 (format) and phase 2 (delivery) are built and merged into main. Phase 3 (neutral fixtures) is built, reviewed and landed on `phase-3-delivery`, not yet merged into main. Phase 4 (knowledge mechanisms) is built on `phase-4-integration`, not yet reviewed.
+Status: draft, 2026-11-01. Phase 0 (checks), phase 1 (format) and phase 2 (delivery) are built and merged into main. Phase 3 (neutral fixtures) is built, reviewed and landed on `phase-3-delivery`, not yet merged into main. Phase 4 (knowledge mechanisms) is built on `phase-4-integration`, not yet reviewed. Phase 5 (media and tool triggers) is designed in §8 item 5, not built.
 
 Scope: structure, design and architecture only. This design adds no knowledge to the vault. It names no domain, platform, package ecosystem or site as built in. Where it needs an example, it uses a placeholder.
 
@@ -763,9 +763,164 @@ The phases build mechanism only. Adding real knowledge and taste is the user's c
      - The start line counts global's sources with the session's domains, and names the smallest `checkAfterDays` among the domains it counts.
      - A bundle with a `source.md` is not refreshed, since nothing fetches one yet.
    - **Done** when the phase 4 check in §9 passes: the suite passes with 2 `todo` tests (6.3c, 6.4a), each red for its reason, lint reports 0 errors, and the grep finds nothing. The perf group still passes.
-5. **Media and tool triggers.**
-   - 6.4a–c and e, with the extractor interface; real extractors go through build-or-reuse;
-   - 6.3c.
+5. **Media and tool triggers.** Designed, not built. Phase 5 builds the extractor interface with one fixture extractor, quotes checked against derived text, the unverifiable-evidence warnings, a bundle manifest tool, the privacy scan and tool triggers (6.4a–c, 6.4e, 6.3c). 6.4d needs no change. Every real extractor (PDF text, transcription, OCR) is build-or-reuse: the user chooses before one is written, and phase 5 ships none. Phase 4's interfaces are cited by their bullets in item 4, since its code isn't on this branch. Four §6 lines are settled here: an extractor returns parts and the core writes the anchors (6.4a), the refusal names the tool to run rather than "add derived text" (6.4a), lint tallies URL and gone-session quotes rather than warning on each (6.4c), and lint also refuses a `tools` name that edits a file (6.3c).
+   - **What phases 1 to 3 built.**
+     - 6.4a: the `derived/<sha256>.md` format and its lint (`lint.mjs:354-378`): name, frontmatter, the binary's hash, and bad anchors. Footnote locators and their anchor check (`lint.mjs:277-306`, `sources.mjs:69`, `:87-103`). `KINDS` (`sources.mjs:7`). The guard on `derived/` (`edit.mjs:12-27`). Missing: an extractor, a tool that writes derived text, quotes against it, and sheets.
+     - 6.4b: the bundle format, its lint (`lint.mjs:325-351`), quotes against files in a bundle, and `bundleOf` and `sourceItem` (`rules.mjs:707-725`). Missing: only a tool that writes `source.md`.
+     - 6.4c: nothing. `checkTyped` (`lint.mjs:381-384`) and `lintEvidence` (`lint.mjs:412-414`) pass silently, and `pick.mjs` checks no quote.
+     - 6.4e: nothing.
+     - 6.3c: the `tools` field, its no-spaces check (`rules.mjs:190`) and `hasChannel` (`rules.mjs:195-196`). The plugin's PreToolUse matcher already sends `AskUserQuestion` and `mcp__.*` to the edit hook (`hooks/hooks.json:11`, `EDIT_HOOK_MATCHER`, `vault.mjs:406`), pinned by `plugin.test.mjs:30-33`. The vault registers no hooks in `.claude/settings.json` (README.md:20), so registration doesn't change. Missing: matching on `tools` in the hook, and `tools` in `liveRules` (`rules.mjs:328-340`).
+   - **Fixtures.**
+     - The `archive` preset's `raw/refs/paper.pdf` holds the text the fixture extractor reads. It still starts `%PDF-` and still isn't UTF-8, so `sourceTexts` (`quotes.mjs:91-98`) still returns null for it:
+
+       ```js
+       const pdf = Buffer.concat([Buffer.from('%PDF-1.4\n'), Buffer.from('The glimmer index counts each lit cell.\fA cell lit twice still counts once.\n'), Buffer.from([0xff, 0xfe])]);
+       ```
+
+     - The preset writes `tools/ext/extractors/fixture.mjs`, as `glim` writes its alias, and its config gains `extractors: ['fixture']`. The derived text stays written by hand, under the new hash, and is byte for byte what the extractor writes (verified in a scratch script, §11):
+
+       ```js
+       import fs from 'node:fs';
+       export const kinds = ['pdf'];
+       export const extensions = ['.pdf'];
+       export const version = '1.0';
+       export function extract(file) {
+         const bytes = fs.readFileSync(file);
+         if (bytes.subarray(0, 5).toString('latin1') !== '%PDF-') throw new Error("doesn't start %PDF-");
+         const text = Buffer.from(bytes.subarray(bytes.indexOf(0x0a) + 1).filter(b => b < 0x80)).toString('latin1');
+         return { kind: 'pdf', parts: text.split('\f').map((t, i) => ({ page: i + 1, text: t.trim() })) };
+       }
+       ```
+
+     - `raw/refs/talk.mp4` keeps no derived text, and no extractor reads `.mp4`, so it stays the binary with none.
+     - `glim`'s `ask-rule` already has `tools: [AskUserQuestion]` (`fixture.mjs:236`). The everywhere test writes its own `tools` rule into `commons`, so the preset, which 6.1a, 6.6e and `reach.test.mjs:90-103` use, doesn't change.
+   - **Extractors (6.4a).**
+     - **Interface.** `tools/ext/extractors/<name>.mjs` exports:
+       - `kinds`, the `KINDS` it can return;
+       - `extensions`, the lowercase file extensions it reads, each with its dot, such as `.pdf`;
+       - `version`, a non-empty string, written to `extractor_version`;
+       - `extract(file)`, sync or async, given the absolute path. It returns `{ kind, parts }`: `kind` is one of its `kinds`, and `parts` a non-empty list of `{ page, text }` for a paged file, `{ t, text }` for audio or video with `t` in whole seconds, or `{ text }` for one with neither. Pages and times rise from part to part. It throws on a file it can't read.
+
+       It is loaded with `extension('extractors', name, ['extract'])` (`ext.mjs:15-20`), as phase 4 loads readers (item 4, Version readers). `extension()` loads through `createRequire`, so an extractor must not use top-level `await`: `require` of such a module throws `ERR_REQUIRE_ASYNC_MODULE` (§11). An async `extract` is fine.
+     - **Rendering.** The core writes the anchors, so no extractor can get them wrong. Each part becomes its anchor on a line of its own, `[p. N]` or `[t=hh:mm:ss]`, then its text and a newline. A part with neither has no anchor. The frontmatter is `kind`, `extractor` (the module's name), `extractor_version` (quoted, so `1.0` stays a string) and `source`, the binary's path under `raw/`.
+     - **Config.** A top-level `extractors` list in `vault.config.json`, in order of preference, since sources live in `raw/` for the whole vault, not per domain. A file goes to the first extractor whose `extensions` holds its lowercase extension. `DEFAULTS` (`vault.mjs:20-28`) gains `extractors: []`.
+     - **Lint.** As for aliases (`lint.mjs:223-232`) and readers (item 4): an extractor listed with no module, a module that won't load (its error message), a missing export, `kinds` empty or outside `KINDS`, an extension without its dot or with uppercase, and an empty `version`. Each is an error. Lint also warns on derived text whose `extractor` is a listed extractor with another `version` now: `made by fixture 0.9, and fixture is 1.0 now. Run node tools/extract.mjs raw/refs/paper.pdf`. Derived text from an extractor not listed, such as one written by hand, gets no such warning.
+     - **Rules that change.** Phase 4 makes lint treat `tools/ext/` as it treats `lib/` (item 4, Rules that change), so an extractor may not run another program or reach the network. A real extractor that wraps an external program needs an exception for `tools/ext/extractors/`, which no hook loads. That exception is decided with the build-or-reuse choice, not in phase 5.
+   - **`tools/extract.mjs` (6.4a).** `node tools/extract.mjs <file>... [--force]`, each file under `raw/`. It is a top-level tool. `/ingest` runs it, never a hook.
+     - For each file, in the order given, one line:
+
+       ```
+       wrote raw/refs/paper.pdf: derived/3f9c…e1.md (fixture 1.0, 2 pages)
+       unchanged raw/refs/paper.pdf: derived/3f9c…e1.md
+       replaced raw/refs/paper.pdf: derived/3f9c…e1.md (fixture 1.0 over fixture 0.9)
+       skipped raw/refs/notes.md: it is text, so quotes are checked against it as it is
+       failed raw/refs/talk.mp4: no extractor in extractors reads .mp4
+       ```
+
+     - `unchanged` when the derived text's `extractor` and `extractor_version` are the chosen extractor's. `replaced` when either differs, which is how a better extraction lands. `--force` extracts again and rewrites even an `unchanged` one. A file `sourceTexts` reads as text is `skipped`.
+     - **Failures.** Each is a `failed` line, and nothing is written for that file:
+       - no extractor reads the extension: `no extractor in extractors reads .mp4`;
+       - the extractor throws: `fixture threw: doesn't start %PDF-`;
+       - a bad result: `fixture returned page 0`, or a `kind` outside its `kinds`, no parts, a part with both `page` and `t`, or pages or times that don't rise;
+       - the text holds a key- or token-shaped value (Privacy): `its text holds 1 key-shaped value; run node tools/scan.mjs raw/refs/paper.pdf`.
+     - **Exit code.** 0 when no line is `failed`, 1 when one is, 2 on no file, an unknown flag, or a path outside `raw/` or not a file.
+     - It writes with `writeText` (`vault.mjs:223`). `derived/` is outside `raw/`, so a replaced text breaks no append-only rule. Lint re-checks every quote on every run, so a replaced text that drops a quoted sentence is a warning at once.
+   - **Quotes against derived text (6.4a).**
+     - **`quoteTexts(rel)`** in `quotes.mjs` takes the place of `sourceTexts` in `propose.mjs:141-142` and lint's `textsOf` (`lint.mjs:53-55`). It returns `{ texts }` or `{ why }`:
+       - a file `sourceTexts` reads gives its readings, as today;
+       - an image gives `{ why: 'image' }`. An image is a file whose derived text has `kind: image`, or, with none, one whose extension `pick.mjs:110` accepts;
+       - another binary with derived text gives that text's body with its anchor lines dropped, so a quote may run across a page break;
+       - one with none gives `{ why: 'no derived text' }`.
+     - **Anchors.** `anchorsIn` (`sources.mjs:87-99`) reads an anchor only on a line of its own, as the rendering writes it. A line that starts like one and isn't one is still a bad anchor. So a `[p. 3]` inside a sentence the source quotes is text, not an anchor.
+     - **Locators.** A quote is checked against the whole derived text, and footnote locators keep their phase 1 check. Evidence lines take no locator, so `evidenceSources` (`rules.mjs:609`) and phase 4's chains don't change (open question).
+     - **Refusals in `propose.mjs`.** `checkQuote` refuses in place of passing a binary:
+       - `{ why: 'image' }`: "raw/refs/shot.png is an image, and what it shows is your reading. Give it as basis reading instead.";
+       - no derived text: "raw/refs/spec.pdf has no text propose.mjs can read: it isn't UTF-8 and has no derived text. Run node tools/extract.mjs raw/refs/spec.pdf, or save it as UTF-8, then propose again.";
+       - a quote the text doesn't hold: "the quote isn't in raw/refs/paper.pdf. Quote the file's own words." The 6.4a test matches `quote isn't in`.
+
+       A file that isn't UTF-8 text, such as a page saved in another encoding, gets the second refusal too, which is why it names both fixes.
+     - **Sheets.** `sheetOf` (`pick.mjs:113-124`) also takes a file whose SHA-256 names derived text, such as a PDF saved in `raw/refs/` and extracted. The refusal becomes "sheet must be a .png, .jpg, .jpeg or .webp image, or a file with derived text (node tools/extract.mjs)."
+   - **Unverifiable evidence (6.4c).**
+     - **A pruned transcript.** `evidenceQuotes` (`rules.mjs:642-651`) also returns the row id, `a-…`, when `ids` holds one with no `;`. When `typedIn(session)` is null, `checkTyped` (`lint.mjs:381-384`) looks the id up in `proposalRows()` (`vault.mjs:335`), whose `text` `propose.mjs` checked when it wrote the row (`propose.mjs:391`). It warns when the row doesn't hold the quote: `"<quote>" isn't in what row a-00000002 recorded`. A line with no id, or an id no row has, can't be checked.
+     - **A binary with no derived text.** One warning per quote: `"<quote>" can't be checked: raw/refs/talk.mp4 has no derived text. Run node tools/extract.mjs raw/refs/talk.mp4`.
+     - **An image.** One warning per line: `an Evidence line quotes raw/refs/shot.png, an image, as a source. What an image shows is a reading: give it basis reading`.
+     - **A URL, or a session whose transcript is gone with no row to fall back on.** These are common and the user can't fix them, so lint gives one tally warning, `warn wiki: 14 quotes can't be checked: 11 cite a URL, 3 a session whose transcript is gone. node tools/review.mjs status lists them.`, and `review.mjs status` gains a section, "Quotes lint can't check", listing each note, what it cites and the quote clipped to 80 characters (open question). `## You said` lines on a gone session count in the tally too.
+     - **`pick.mjs`.** It checks `notes` (on a pick and a confirmation) and a comment's `text` with `saidIn` (`quotes.mjs:42`) against `typedMessages(session.transcript)`, as `checkQuote` does (`propose.mjs:146-152`):
+       - not typed: "notes aren't in anything the user typed in this session. Put their exact words in notes, with … where you leave some out, or your own in reason." For a comment: "the comment isn't in anything the user typed in this session. Record their exact words, with … where you leave some out.";
+       - no transcript: "the taste vault has no transcript for this session, so it can't check these are the user's words." A pick may still be recorded without `notes`.
+     - No delivery label marks a rule whose quote can't be checked (open question): a hook can't afford to read transcripts, and lint and `review.mjs status` are where the user looks.
+   - **Bundles (6.4b).** `node tools/bundle.mjs raw/refs/<folder> [--url <u> | --repo <r>] [--commit <c>]` writes the folder's `source.md` (open question).
+     - With `--url` or `--repo`, `--commit` is required, and `source.md` holds those fields. Otherwise it holds the `sha256` list: one `'<hash>  <path>'` line per file, as `manifestLine` reads them (`sources.mjs:110`), paths from the folder with `/`, sorted.
+     - It prints `wrote raw/refs/<folder>/source.md: 42 files` and exits 0. It refuses, with exit 1 and nothing written, a folder that already holds `source.md` (`raw/` is append-only), one inside another bundle, and an empty one. Exit 2 on a path outside `raw/refs/`, a missing folder or a bad flag.
+     - It writes with `writeText`. Lint checks the result as it checks any bundle (`lint.mjs:325-351`). Fetching a repo into a folder isn't built: a public repo is a git source (item 4).
+   - **Privacy (6.4e).**
+     - **Patterns.** `tools/lib/secrets.mjs` exports `secretsIn(text)`, which returns `[{ line, kind, value, masked, allow }]`, one per value per line. The patterns name no vendor's key prefix:
+
+       ```js
+       const PEM = /-----BEGIN (?:[A-Z0-9]+ )*PRIVATE KEY-----/g;
+       const ASSIGN = /(?<![\p{L}\p{N}])[\p{L}\p{N}_.-]{0,40}?(?:key|token|secret|passw(?:or)?d|credential)s?["']?[ \t]*[:=][ \t]*["']?([^\s"'`<>,;]{8,})/giu;
+       const PLACEHOLDER = /^(?:\$\{|\{\{|%|<)|^(?:x+|\*+|\.+|your[_-].*|changeme|example.*|placeholder.*|redacted)$/i;
+       const RUN = /(?<![A-Za-z0-9+/_=-])[A-Za-z0-9+/_=-]{32,}(?![A-Za-z0-9+/_=-])/g;
+       ```
+
+       - `private key`: a PEM private key block. Its value runs to the matching `-----END` line, or to the end of the text.
+       - `assignment`: a name ending in key, token, secret, password or credential, assigned a value of 8 or more characters that holds a letter and a digit and isn't a `PLACEHOLDER`. So `token = getToken()`, `apiKey: process.env.API_KEY`, `API_KEY=<your key>`, `primary_key = 42` and `keyboard=qwerty123` pass.
+       - `token`: a `RUN` of 32 or more that holds a digit, an uppercase and a lowercase letter and has a Shannon entropy of at least 4.2 bits a character. A run after `base64,` (a data URI) or starting `sha256-`, `sha384-` or `sha512-` (an integrity hash) is skipped. Hex hashes, commit ids and UUIDs have no uppercase, so they pass. A value both `assignment` and `token` match is listed once.
+
+       The patterns are bounded, so they use the default engine. A 1.86 MB line scans in about 25 ms (§11).
+     - **Output.** `masked` is the value's first 2 and last 2 characters around `…`, and a private key shows as its kind alone. `allow` is the first 16 hex digits of the value's SHA-256, which identifies it without repeating it.
+     - **Override.** `privacy.allow` in `vault.config.json`, a list of `allow` ids, which the user sets. `DEFAULTS` gains `privacy: { allow: [] }`. A listed value is never reported. Lint checks each id is 16 lowercase hex digits.
+     - **`tools/scan.mjs`.** `node tools/scan.mjs <file>...`. A file that isn't UTF-8 is scanned through its derived text, under the binary's name, and skipped when it has none. Output, then exit 1 when anything was found, 0 when nothing was, 2 on no file given, a bad flag or a file that can't be read:
+
+       ```
+       raw/refs/notes.md:12 assignment api_key=ab…9f · allow 3f9c01ab77e0d2c1
+       raw/refs/notes.md:40 private key · allow 77e0d2c1a4b5c6d7
+       2 key- or token-shaped values in 1 file. Remove them, or add an allow id to privacy.allow in vault.config.json if it isn't a secret.
+       ```
+
+     - **Where it runs.**
+       - `/ingest` step 2 runs `node tools/scan.mjs <file>` after saving or copying a source, and on exit 1 shows the user the lines and stops until they remove the values or allow them. This is 6.4e's refusal.
+       - `extract.mjs` scans the text before writing it (above).
+       - The edit hook and the pre-commit hook don't scan, so a source saved outside `/ingest` isn't checked. §6.4e keeps privacy small: a deny in the edit hook on writes under `raw/`, and a pre-commit scan of added sources, would catch those too, and are left for the user to choose (open question).
+     - Rows in `raw/inbox/` and `raw/picks/` are the user's words, written by the tools, and aren't scanned.
+   - **Tool triggers (6.3c).**
+     - **Hook and matcher.** The edit hook on PreToolUse, through the matcher it already has (`hooks.json:11`). No registration changes.
+     - **The match.** `liveRules` gains `tools: n.tools`. For a call whose `tool_name` isn't in `FILE_TOOLS` (`vault.mjs:404`), the hook takes the rules whose `tools` holds the name exactly, in the domains a prompt's keywords reach: `readableDomains` (`vault.mjs:196`) of the session's domains (`sessionHits`), so global and every everywhere domain's rules count, and in the vault folder every domain's. Each becomes `{ key, note, rel: <tool>, place: 'tool:<tool>', spec: [0, 0] }`, no more specific than `**`, since `bySpecificity` (`glob.mjs:214`) reads both numbers, and goes through `dueRules` (`scope.mjs:31-43`) unchanged.
+     - **Triggers.** A rule with `tools` and `triggers` fires only when a trigger matches `plainText(asText(tool_input))` (`edit.mjs:151`), the call's input as JSON text. A rule with both `tools` and `applies_to` is reached by either.
+     - **The marker.** The gate id is `agentKey(input, '<key>|<hash>|tool:<tool>')`, which `dueRules` already builds from `place`. So a rule is refused once per session per agent per tool, again after a reword, and again when phase 4 changes its label (item 4, Delivery: the labelled hash). Hits go through phase 4's `deliverable()` like the edit hook's other hits.
+     - **A mapped MCP tool.** A call `editTools` maps gets its name's rules from `nameScope` and its tool's rules here. They join in one list, keeping the first per key, so a rule both reach refuses once.
+     - **Unmapped and unknown tools.** A call with no rule on its name returns null after the match step, as an edit outside every glob does. `tools` holds no pages, since `livePages` (`rules.mjs:357-363`) has no `tools`.
+     - **Copy.** `refusal()` (`edit.mjs:220-241`) gains the noun. For a tool call the head is "Taste rules apply to AskUserQuestion:" and the foot "Revise this call to follow them, then retry. The retry is allowed." (open question; `CODING_STANDARDS.md:15`). A tool call writes no turn marker for the Stop hook.
+     - **Lint.** `listErrors` (`rules.mjs:190`) adds two errors: a name the matcher never sends, `tools names Bash, which the edit hook's matcher, Edit|Write|…, never sends to the hook, so it would never bring the rule up`, and a name in `FILE_TOOLS`, `tools names Edit, which edits a file; give the rule applies_to instead`. A name the matcher sends but no tool has, such as a misspelt MCP tool, can't be caught: `/lint`'s rules no session was shown lists it. `hasChannel`'s comment loses "nothing delivers on it yet".
+     - **Latency.** A tool call with no rule on it costs what an edit outside every glob costs: the notes load from the cache (`cache.mjs`) and the scan is one pass over `liveRules`. The perf group gains `an AskUserQuestion call takes under 300 ms at 3,000 notes`, fastest of 3, with one `tools` rule among the generated notes. That is well inside the 10 s deadline (6.6b). An index of rules by tool is a scale item, left until the perf test says so.
+   - **Rules that change.**
+     - `.claude/skills/ingest/SKILL.md` step 2: after saving a binary source, run `node tools/extract.mjs <file>`, and stop and tell the user when it fails; then run `node tools/scan.mjs <file>` on every source and handle exit 1 as Privacy says. Step 5 quotes a binary source from its derived text. `/ingest batch` does the same, and leaves a source that fails either for the user.
+     - AGENTS.md changes as §10 says.
+   - **Tests.** Each new test is written before its code and seen red for its reason.
+     - `later-phases.test.mjs`: 6.3c and 6.4a lose `todo` and are otherwise unchanged.
+     - `quotes.test.mjs:178` is inverted into "a binary source is checked against its derived text": `shot.png` is refused with the image refusal, `spec.pdf` with no derived text is refused naming `node tools/extract.mjs raw/refs/spec.pdf`, and with derived text written a fabricated quote is refused and a real one passes, as does one across a page break. A file that isn't UTF-8 gets the no-text refusal.
+     - `test/extract.test.mjs`:
+       - with `archive`'s derived text removed, `extract.mjs raw/refs/paper.pdf` writes the preset's text byte for byte, and prints `wrote`;
+       - with it present, `unchanged`; with `--force`, identical bytes;
+       - a version bump in the module gives `replaced`, and lint's drift warning before it;
+       - each failure: `.mp4` with no extractor, a file not starting `%PDF-`, an extractor returning page 0, both `page` and `t`, a kind outside its `kinds` and no parts, and a text holding a key-shaped value. Each exits 1 and writes nothing;
+       - a text file is `skipped`, a path outside `raw/` exits 2, and an async `extract` works;
+       - lint on an unknown extractor, a missing `extract`, a module with top-level `await`, bad `kinds`, `extensions` and `version`.
+     - `test/privacy.test.mjs`:
+       - `secretsIn` catches the cases under Patterns and passes the cases listed as passing, plus a PEM public key, data URIs, integrity hashes, sha256 hex, commit ids, UUIDs, slugs and long camelCase words;
+       - `scan.mjs`'s output, exit codes, a binary scanned through its derived text, and `privacy.allow`.
+     - `test/tool-triggers.test.mjs`:
+       - an everywhere domain's `tools` rule reaches a session outside its projects, and a session in the vault folder gets every domain's;
+       - a second agent of the session is refused once too, and a reworded rule is refused again;
+       - a rule with `tools` and `triggers` fires only when the input's text matches;
+       - a mapped MCP tool reached by a glob and by `tools` refuses once;
+       - a call with no rule on its name passes;
+       - lint errors on `tools: [Bash]` and `tools: [Edit]`.
+     - `quotes.test.mjs` also gains the lint tests: a pruned transcript checked against its row, a binary with no derived text, an image, and the tally. `review.mjs status` lists the quotes the tally counts.
+     - `rows.test.mjs`: notes and a comment the user didn't type are refused, as is a comment with no transcript. The file's setup (`rows.test.mjs:23-28`) starts each session with a transcript of one user turn holding the words its comments and notes use, so the 26 existing `pick` and `comment` calls change in one place, and `reach.test.mjs:195`'s `pickFor` likewise. A PDF sheet with derived text is taken, and one without is refused.
+     - `source-formats.test.mjs`: an anchor inside a line isn't an anchor, so a footnote's `#page=` needing it is warned.
+     - The perf group gains the AskUserQuestion test.
+   - **Done** when the phase 5 check in §9 passes: the suite passes with 0 `todo` tests, lint reports 0 errors, the grep finds nothing, and the perf group passes, AskUserQuestion test included.
 6. **Second adapter.** The core and adapter split (6.7a–c), the Codex adapter (6.7e) and compiled files (6.7f), built together so a real second agent shapes the split.
 
 ## 9. Checks
@@ -775,6 +930,7 @@ The phases build mechanism only. Adding real knowledge and taste is the user's c
 | `node --test test/*.test.mjs` | All pass; each `todo` fails for the reason its design section names | 434 tests: 431 pass, 1 skipped (making a link needs Developer Mode on Windows), 2 `todo` (6.3c, 6.4a), about 27 s. Lint: 0 errors. |
 | Neutral-core test (§3) | No configured domain's key or title appears in `tools/`, `.claude/skills/`, `test/` or AGENTS.md | Passes on this vault's config, with its `todo` mark removed (phase 3). |
 | Phase 4 check: the suite through the TAP reporter, then lint and the grep, below the table | The suite has no failure and exactly 2 `todo` tests, 6.3c and 6.4a, both failing; lint reports 0 errors; the grep prints nothing. Then 6.1c, 6.2a and 6.2b pass, and only phase 5's checks are open. Run the perf group too, since phase 4 adds a read to every hook. | Passes (phase 4, before review): 431 pass, 0 fail, 2 `todo`, 6.3c (the first AskUserQuestion isn't denied) and 6.4a (a quote the PDF's derived text doesn't hold is written); lint 0 errors; the grep prints nothing. The perf group passes. |
+| Phase 5 check: the suite through the TAP reporter, then lint, the grep and the perf group, below the table | The suite has no failure and no `todo` test; lint reports 0 errors; the grep prints nothing; the perf group passes, AskUserQuestion test included. Then every *Check* in §6 runs on built code. | Not built (phase 5 is designed). |
 | Phase 3 check: the suite, then the grep below the table | With the neutral-core `todo` mark removed, the suite passes with 5 `todo` tests (6.1c, 6.2a, 6.2b, 6.3c, 6.4a), each red for its reason, and the grep prints nothing. Then no test, tool, skill or AGENTS.md example leans on one platform, and only the five later-phase checks are open. | Passes (phase 3): the five `todo` tests fail for their reasons, and the grep prints nothing. |
 | The probes as `todo` tests (phase 0) | Each passes with its `todo` mark removed: slow trigger, subagent gate, settle after an mtime change, negated glob, one refusal per file, frontmatter | All pass with their marks removed (phase 2): slow trigger, subagent gate (2), settle after an mtime change (2), one refusal per file, frontmatter, long-path prefix. Negated glob passes (phase 1). |
 | Perf group: `VAULT_PERF=1 node --test test/perf/*.perf.mjs` (about 10 s, outside the default run) | Fastest of 5 gated edits under 1,000 ms at 1,000 notes; fastest of 3 under 300 ms at 3,000; three parallel proposes of unrelated rules at 3,000 notes all succeed (6.6f) | About 135–166 ms; about 245–290 ms; all succeed in about 4.3–5.4 s (phase 3). With phase 4's reads, 145 ms; 232 ms; all succeed in about 7.4 s, since builds run one at a time under `build.lock`. A warm session start at 3,000 notes takes about 340 ms, including the vault-wide stat for the lint reminder. The timings are noisy on this machine. |
@@ -800,6 +956,14 @@ out=$(node --test --test-reporter=tap test/*.test.mjs); echo "$out" | grep -E '^
 ```
 
 It prints the tally and every top-level test that failed, `todo` ones included. It exits 0 only when the suite has no failure, its 2 `todo` tests are 6.3c and 6.4a and both fail, lint finds no error, and the grep prints nothing. A passing `todo` test still counts as `todo`, so the `not ok` count is what shows both are red.
+
+The phase 5 check, run from the vault folder:
+
+```sh
+out=$(node --test --test-reporter=tap test/*.test.mjs); echo "$out" | grep -E '^# (pass|fail|todo) |^not ok '; echo "$out" | grep -qx '# fail 0' && echo "$out" | grep -qx '# todo 0' && node tools/lint.mjs && ! git grep -nIiE 'luau|\.lua\b|roblox|--!strict|UIListLayout|task\.wait|local x = 1|\bdemo\b' -- test tools .claude/skills AGENTS.md && VAULT_PERF=1 node --test test/perf/*.perf.mjs
+```
+
+It prints the tally and every top-level test that failed. It exits 0 only when the suite has no failure and no `todo` test, lint finds no error, the grep prints nothing, and the perf group passes.
 
 ## 10. AGENTS.md changes
 
@@ -833,6 +997,15 @@ The design changes these parts of AGENTS.md. Each change lands with the phase th
   - Line 207 (Lint): `/lint` runs refresh first. Offline, it reports the failed checks and goes on.
   - Line 213 (conflicting evidence): between knowledge rules, prefer the one that matches the project's version, then the newer `as_of`.
   - Line 222 (what the hooks refuse): add `.sources/`.
+- **Phase 5.** The line numbers are AGENTS.md's at the end of phase 3; phase 4's changes shift them.
+  - Line 11 (`derived/`): `node tools/extract.mjs <file>` writes it, through an extractor in `tools/ext/extractors/` that `extractors` in `vault.config.json` lists.
+  - Line 92 (`tools`): "Nothing delivers on `tools` yet" goes. The first call to a listed tool in a session is refused with the rule, once per agent, and the retry goes through. Lint reports a name the edit hook never sees, or one that edits a file, as an error.
+  - Line 161 (locators): an anchor is a line of its own in the derived text.
+  - Line 162 (bundles): "A later phase's fetch tool makes bundles" becomes: `node tools/bundle.mjs raw/refs/<folder>` writes its `source.md`.
+  - Line 163 (derived text): name `tools/extract.mjs` as the tool that writes and replaces it, and say lint warns when a listed extractor's version has moved on, naming the command to run.
+  - Line 189 (sheets): a file with derived text can be a sheet too. `pick.mjs` refuses `notes` and comments the user didn't type in the session.
+  - Line 204 (Ingest): `/ingest` extracts a binary source's text and scans every source for key- or token-shaped text before going through it, and stops on either until the user decides.
+  - Line 212 (quotes): `propose.mjs` also refuses a quote a binary's derived text doesn't hold, a quote against a binary with none, and a source quote against an image, which backs `basis: reading` only. Lint warns on each such quote in a note, checks a quote whose transcript is gone against its `raw/inbox/` row, and counts in one line the quotes it can't check.
 
 ## 11. Unverified claims the design leans on
 
@@ -849,6 +1022,10 @@ The design changes these parts of AGENTS.md. Each change lands with the phase th
    - Not verified: the cost of reading `derived.json` in each hook with thousands of sources. It is expected to be small; the perf group measures it.
    - Not verified: servers that send weak ETags or ignore `If-None-Match`. They answer 200 with the same body, which refresh still records as `unchanged`, at the cost of the download.
    - Settled by scratch scripts against an in-process `node:http` server and a `git init` repo, not kept: `fetch` with `If-None-Match` or `If-Modified-Since` gets a 304 with an empty body; `redirect: 'manual'` returns the 3xx with its `location`; `AbortSignal.timeout` throws a `TimeoutError`; a refused connection and an unknown host throw `fetch failed` with `err.cause.code` set to `ECONNRESET` or `ENOTFOUND`; a streamed body can be stopped at a byte cap. `git clone --no-checkout` from a `C:/…` path takes about 160 ms, `git fetch` about 215 ms. `git show <commit>:<path>` works with forward slashes and fails with a backslash, and returns CRLF as committed. `git log <commit>..origin/HEAD -- <path>` is empty when only another file changed. `git cat-file -e` on an unknown commit, and a clone from a missing path, exit 128. `spawnSync` blocks a test's own server, and `spawn` doesn't.
+8. For phase 5, on Claude Code 2.1.296 and Node 22.14:
+   - Not verified: that the edit hook's deny reaches the agent for `AskUserQuestion` in an interactive session, with the same deny-then-retry as an edit. A headless trial couldn't test it: `AskUserQuestion` isn't offered in `claude -p`, so the model's tool search found no such tool and the hook never ran. The 6.3c test drives the hook directly, and claim 4 above, no user turn, stays unverified.
+   - Not verified: how often the `token` and `assignment` patterns flag text in real sources. The 4.2-bit entropy threshold was set on a few dozen hand-made samples.
+   - Settled by scratch scripts, not kept: the fixture extractor reads the new `paper.pdf` bytes and its rendering equals the preset's derived text byte for byte; the file still fails `TextDecoder('utf-8', { fatal: true })`. `createRequire` of an ES module with top-level `await` throws `ERR_REQUIRE_ASYNC_MODULE`, and an async `extract` export loads and runs. The secret patterns catch and pass the cases Privacy lists, including integrity hashes after the `sha384-` fix, and scan a 1.86 MB line in about 25 ms.
 
 ## 12. Not doing
 
