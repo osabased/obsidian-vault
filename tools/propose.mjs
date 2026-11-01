@@ -23,7 +23,7 @@ const help = () => [
   RUN,
   '',
   'rule.json is an object with these fields:',
-  "  domain       this session's domain (in the vault folder, any domain with project folders), or global for every project",
+  "  domain       this session's domain (in the vault folder, any domain that isn't vaultOnly), or global for every project",
   '  slug         lowercase-kebab-case',
   '  kind         "taste" (the default), or "knowledge" for a fact about an API, version or tool',
   "               that your training gets wrong or doesn't know",
@@ -63,6 +63,12 @@ const help = () => [
   '',
   "A knowledge rule's as_of is set for you: the source_date for a source, today otherwise. With repeats, it moves up when that day is later.",
 ].join('\n');
+
+// Every field the code below reads, so a field it doesn't read is refused rather than dropped.
+const FIELDS = new Set([
+  'domain', 'slug', 'kind', 'do', 'not', 'because', 'topic', 'basis', 'quote', 'page', 'pick', 'reading', 'error', 'fix', 'file',
+  'source', 'source_date', 'keywords', 'applies_to', 'triggers', 'always', 'repeats',
+]);
 
 const topicLines = () => [...domainTopics()].flatMap(([d, topics]) => (topics.length ? [`                 ${d}: ${topics.join(', ')}`] : []));
 
@@ -332,6 +338,8 @@ function addEvidence(f, e, scope, rules, same, row, notes) {
 
 function propose(sid, p) {
   const session = sessionOf(sid);
+  const unknown = Object.keys(p).find(k => !FIELDS.has(k));
+  if (unknown) refuse(`${unknown} isn't a field propose.mjs takes. Fields like requires and tools are added to the note by hand. node tools/propose.mjs --help lists the fields.`);
   const domains = [...session.domains, 'global'];
   // Slugs compare in NFC, so a slug typed with combining accents names the same note as its composed spelling.
   const f = { sid, domain: line(p, 'domain').normalize('NFC'), slug: line(p, 'slug').normalize('NFC') };

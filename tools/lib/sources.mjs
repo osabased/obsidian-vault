@@ -159,7 +159,7 @@ export function sourceVersion(rel) {
     const where = isUrl(data.url) ? data.url : filled(data.repo) ? (folder || !filled(data.path) ? data.repo : `${data.repo} ${data.path}`) : null;
     if (!where) return null;
     const lines = Array.isArray(data.sha256) ? sha256(data.sha256.map(String).sort().join('\n')) : data.sha256;
-    return { url: where, version: [data.commit, lines].find(v => filled(v)) ?? null };
+    return { url: where, version: [data.commit, lines].find(v => filled(v)) ?? null, sha256: filled(lines) ? lines : null };
   } catch {
     return null;
   }

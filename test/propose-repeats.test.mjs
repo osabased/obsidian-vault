@@ -274,3 +274,18 @@ test('three proposes at once all write their notes and inbox rows', async t => {
   for (const { slug } of rules) assert.ok(v.exists(`wiki/demo/rules/${slug}.md`), `${slug} was written`);
   assert.deepEqual(inbox(v).map(r => r.note).sort(), rules.map(r => `demo/${r.slug}`));
 });
+
+test('a field propose does not take is refused by name, and requires and tools are left to the note', t => {
+  const { v, sid } = setup(t);
+  for (const field of ['requires', 'tools']) {
+    const r = v.propose(sid, proposal({ [field]: ['x'] }));
+    assert.equal(r.code, 1);
+    assert.equal(r.stderr, `Not proposed: ${field} isn't a field propose.mjs takes. Fields like requires and tools are added to the note by hand. node tools/propose.mjs --help lists the fields.\n`);
+  }
+  assert.equal(v.exists('wiki/demo/rules/new-rule.md'), false);
+});
+
+test('propose --help says the vault folder takes any domain that is not vaultOnly', t => {
+  const { v } = setup(t);
+  assert.match(v.run('propose.mjs', ['--help']).stdout, /in the vault folder, any domain that isn't vaultOnly/);
+});

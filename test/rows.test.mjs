@@ -149,3 +149,76 @@ test('a rule in a package\'s domain counts the sessions at the monorepo root in 
   const block = out.trimEnd().split('\n\n').find(b => b.startsWith('Rules no session was shown\n'));
   assert.deepEqual(block?.split('\n').slice(1), ['- alpha/roomy-cards: 1 session since 2026-10-01', '- beta/tight-cards: 1 session since 2026-10-01']);
 });
+
+test('show leaves out the picks of another domain in the same folder', t => {
+  const v = makeVault(t, { domains: { other: { title: 'Other', topics: ['code'], markers: ['other.marker'] } } });
+  fs.writeFileSync(path.join(v.project, 'other.marker'), '');
+  const sid = sessionId();
+  v.startSession(sid);
+  assert.equal(pick(v, sid, comment({ domain: 'other', comment: 'words for the other domain' })).code, 0);
+  assert.equal(pick(v, sid, comment({ domain: 'demo', comment: 'words for demo' })).code, 0);
+  const demo = v.run('pick.mjs', ['show', sid, 'cards', 'demo']).stdout;
+  assert.match(demo, /words for demo/);
+  assert.doesNotMatch(demo, /words for the other domain/);
+  assert.match(v.run('pick.mjs', ['show', sid, 'cards', 'other']).stdout, /words for the other domain/);
+});
+
+// Two packages that hold one domain's marker, under a root outside every configured path.
+function twoPackages(t) {
+  const v = makeVault(t, { domains: { mk: { title: 'Mk', topics: ['code'], markers: ['mk.marker'] } } });
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'vault-mono-')).replace(/\\/g, '/');
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  for (const p of ['a', 'b']) {
+    fs.mkdirSync(`${root}/packages/${p}`, { recursive: true });
+    fs.writeFileSync(`${root}/packages/${p}/mk.marker`, '');
+  }
+  const sid = sessionId();
+  v.startSession(sid, { cwd: root });
+  return { v, sid, root };
+}
+
+test('a domain with several projects in the session needs project, and names them when it is missing or wrong', t => {
+  const { v, sid, root } = twoPackages(t);
+  const rule = `${root}/packages/a and ${root}/packages/b`;
+  const none = pick(v, sid, comment());
+  assert.equal(none.code, 1);
+  assert.equal(lower(none.stderr), lower(`Not recorded: mk has more than one project in this session: ${rule}. Add project with the one this is for.\n`));
+  const wrong = pick(v, sid, comment({ project: `${root}/packages/c` }));
+  assert.equal(wrong.code, 1);
+  assert.equal(lower(wrong.stderr), lower(`Not recorded: ${root}/packages/c isn't a project of this session in mk. It has: ${rule}.\n`));
+  assert.deepEqual(fs.existsSync(v.at('raw', 'picks')) ? fs.readdirSync(v.at('raw', 'picks')) : [], []);
+  assert.equal(pick(v, sid, comment({ project: `${root}/packages/b`, comment: 'about b' })).code, 0);
+  assert.equal(pick(v, sid, comment({ project: 'a', comment: 'about a' })).code, 0);
+  assert.deepEqual(rowsIn(v, 'picks').map(r => [r.comment ?? r.text, lower(r.project)]), [['about b', lower(`${root}/packages/b`)], ['about a', lower(`${root}/packages/a`)]]);
+});
+
+test('a project is refused when it is not one of the domain\'s, even when the domain has only one', t => {
+  const { v, sid } = setup(t);
+  const r = pick(v, sid, comment({ project: 'elsewhere' }));
+  assert.equal(r.code, 1);
+  assert.match(r.stderr, /^Not recorded: elsewhere isn't a project of this session in demo\. It has: /);
+  assert.equal(pick(v, sid, comment({ project: v.project })).code, 0);
+});
+
+test('a confirmation and show take the project too, and a confirmation keeps the project of its pick', t => {
+  const { v, sid, root } = twoPackages(t);
+  assert.equal(pick(v, sid, provisional({ project: `${root}/packages/b` })).code, 0);
+  const [first] = rowsIn(v, 'picks');
+  assert.equal(pick(v, sid, { confirms: first.id }).code, 0);
+  assert.equal(lower(rowsIn(v, 'picks')[1].project), lower(`${root}/packages/b`));
+  const none = v.run('pick.mjs', ['show', sid, 'cards']);
+  assert.equal(none.code, 1);
+  assert.match(none.stderr, /^Not shown: mk has more than one project in this session: /);
+  assert.match(v.run('pick.mjs', ['show', sid, 'cards', 'mk', `${root}/packages/b`]).stdout, /^Picks for cards in b, newest first:/);
+  assert.match(v.run('pick.mjs', ['show', sid, 'cards', 'mk', 'a']).stdout, /^No picks for cards in a yet\./);
+});
+
+test('session start records each domain once, though it has several projects', t => {
+  const { v, sid } = twoPackages(t);
+  assert.deepEqual(JSON.parse(v.read(`.state/sessions/${sid}.json`)).reach.domains, ['mk']);
+});
+
+test('pick --help describes project', t => {
+  const { v } = setup(t);
+  assert.match(v.run('pick.mjs', ['--help']).stdout, /^  project      /m);
+});

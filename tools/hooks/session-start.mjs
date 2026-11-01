@@ -72,7 +72,7 @@ function lintNote(notes) {
 
 runHook('session-start', input => {
   guarded('tidy', tidy);
-  const doms = sessionReach(input.cwd).map(d => d.domain);
+  const doms = [...new Set(sessionReach(input.cwd).map(d => d.domain))];
   const vaultFolder = inVaultFolder(input.cwd);
   const readable = readableDomains(doms, vaultFolder);
   // Compaction can drop the rules the gate and excerpts already showed, so they show them again.

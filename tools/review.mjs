@@ -1,13 +1,12 @@
 import { config, plural, toPosix, guarded, hookErrors, errorsLog, localDay, appendLog } from './lib/vault.mjs';
 import {
   clip, normTopic, topicNotes, loadNotes, liveRules, evidenceSessions, validDay, byKey, cmp, sharedFiles, isResearch, rawFile, resolver, linkedKeys, evidenceSources, isSourcePage, joinList,
-  rankPair,
+  rankPair, bundleOf,
 } from './lib/rules.mjs';
 import { lint, tally } from './lib/lint.mjs';
 import { lintRan, lintDone, trackedSessions, sessionDomains } from './lib/sessions.mjs';
 import { subjectRows, liveRows, newestFirst, projectName } from './lib/picks.mjs';
 import { UsageError } from './lib/input.mjs';
-import { bundleOf } from './lib/rules.mjs';
 import { refSources, sourceVersion } from './lib/sources.mjs';
 
 // Each section reads these once a run; a read that fails is tried again by the next section, which reports it too.
@@ -121,7 +120,9 @@ const savedPages = f => [...f.matchAll(/_files\//g)].flatMap(m => ['html', 'htm'
 
 // /ingest gives each file it takes in a source page, so a file a footnote cites but no source page names is still to do.
 // A file saved from a URL is done once a source page names that URL, or a file saved from it with the same hash, and a
-// file a saved page shows goes with that page. A copy with another hash is a new version of the source, still to do.
+// file a saved page shows goes with that page. A copy with a sha256 is done only when a page names that file or a copy
+// with the same URL and sha256, so a page on the bare URL names only the copies that have none. A copy with another hash
+// is a new version of the source, still to do.
 // A folder with a source.md is one source however many files it holds, named by the folder or a path in it.
 // Only a file a source page could name is listed, which leaves out links to folders.
 const unnamedSources = () => {
@@ -130,16 +131,20 @@ const unnamedSources = () => {
   const versions = new Map([...loose, ...bundles].map(f => [f, sourceVersion(f)]));
   const versionKey = v => `${v.url}
 ${v.version}`;
+  const hashKey = v => `${v.url}
+${v.sha256}`;
   const named = new Set();
   const urls = new Set();
   const pinned = new Set();
   const pinnedUrls = new Set();
+  const hashes = new Set();
   for (const n of sourcePages()) {
     const file = rawFile(n.data.source);
     const item = bundleOf(file ?? n.data.source) ?? file;
     const v = item && versions.get(item);
     if (item) named.add(item);
     else if (n.data.source) urls.add(n.data.source);
+    if (v?.sha256) hashes.add(hashKey(v));
     if (v?.version) {
       pinned.add(versionKey(v));
       pinnedUrls.add(v.url);
@@ -149,7 +154,9 @@ ${v.version}`;
   }
   return [...loose, ...bundles].filter(f => {
     const v = versions.get(f);
-    const done = named.has(f) || (v && (urls.has(v.url) || (v.version ? pinned.has(versionKey(v)) : pinnedUrls.has(v.url))));
+    const done = named.has(f) || (v?.sha256
+      ? hashes.has(hashKey(v))
+      : v && (urls.has(v.url) || (v.version ? pinned.has(versionKey(v)) : pinnedUrls.has(v.url))));
     return !done && !savedPages(f).some(p => all.has(p));
   }).sort();
 };
