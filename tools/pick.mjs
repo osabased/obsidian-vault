@@ -6,6 +6,7 @@ import {
 } from './lib/vault.mjs';
 import { KEBAB, settledRules, ruleLine, normTopic, joinList, byKey, byFit, cmp, domainOrder, deliverable, deliveryFor } from './lib/rules.mjs';
 import { build } from './lib/build.mjs';
+import { IMAGE, hashPath, derivedText } from './lib/sources.mjs';
 import { subjectRows, laterRows, liveRows, endedBy, newestFirst, entry, projectName, sameProject } from './lib/picks.mjs';
 import { UsageError, readInput, refuse, failure, line } from './lib/input.mjs';
 import { ownEntry, markShown, sessionRoots } from './lib/sessions.mjs';
@@ -119,7 +120,6 @@ function optionsOf(v) {
   return options;
 }
 
-const SHEET = /\.(?:png|jpe?g|webp)$/i;
 const mb = n => (n / 1e6).toFixed(1);
 
 function sheetOf(p) {
@@ -128,7 +128,7 @@ function sheetOf(p) {
   const file = toPosix(given);
   const stat = fs.statSync(file, { throwIfNoEntry: false });
   if (!stat?.isFile()) refuse(`there's no file at ${given}.`);
-  if (!SHEET.test(file)) refuse('sheet must be a .png, .jpg, .jpeg or .webp image.');
+  if (!IMAGE.test(file) && !derivedText(hashPath(file))) refuse('sheet must be a .png, .jpg, .jpeg or .webp image, or a file with derived text (node tools/extract.mjs).');
   const { maxSheetBytes } = config().picks;
   const { size } = stat;
   if (size > maxSheetBytes) refuse(`sheet is ${mb(size)} MB; keep it under ${mb(maxSheetBytes)} MB (the contact sheet's --max-size, or JPEG).`);

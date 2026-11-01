@@ -13,8 +13,10 @@ Work in the vault root. AGENTS.md has the page and rule formats. With `batch`, f
 2. **Save it** in `raw/refs/`, so pages and rules cite a copy whose words propose.mjs can check:
    - A file under `raw/refs/` is there already. Copy a file from elsewhere in under a new name.
    - For a URL, save the page's own words, as the browser's `get_page_text` gives them (raise `max_chars` for a long page), to a new `raw/refs/<slug>.md` that starts with frontmatter giving its `url` and the day you `fetched` it, and no `sha256`, `etag` or `last_modified`: a later tool computes those. WebFetch gives a summary rather than the page's words, so if no browser can open the page, ask the user to save it into `raw/refs/`.
+   - For a binary source, such as a PDF or a recording, run `node tools/extract.mjs <file>`, which writes its text to `derived/` for propose.mjs and lint to check quotes against. If its line says `failed`, stop and tell the user what it printed.
+   - Then run `node tools/scan.mjs <file>` on the source, whatever it is. If it exits 1, the source holds a key- or token-shaped value: show the user the lines it printed and stop until they remove the values from the file, or add the allow ids of the ones that aren't secrets to `privacy.allow` in `vault.config.json`.
 
-   Then read it in full.
+   Then read it in full, a binary in its derived text.
 3. **Discuss** the main points with the user, a line or two per topic of the domain (`node tools/propose.mjs --help` lists the ones its rules and pages have and the ones it lists), labelled as your reading.
    - Name each **new fact** in it, a dated fact your training gets wrong or doesn't know, with its date, and ask which to keep as rules.
    - Ask what they like and dislike in it and why, and wait for the answer.
@@ -23,6 +25,7 @@ Work in the vault root. AGENTS.md has the page and rule formats. With `batch`, f
 5. **Propose rules**, the clearest first, with `tools/propose.mjs` (`--help` lists the fields). Pipe the JSON from the Bash tool with a quoted heredoc to `node tools/propose.mjs "$CLAUDE_CODE_SESSION_ID"`.
    - Taste rules come from the user's words: basis `stated` or `inferred`, quoting what they typed, or `reading` for something you saw in the source that they asked you to make a rule of.
    - Knowledge rules come from the new facts the user kept: `kind: knowledge`, basis `source`, with `source` and `source_date` as on the source page, and the source's words as the quote. A source with no date backs none.
+   - Quote a binary source from its derived text, leaving out the `[p. 3]` and `[t=00:12:31]` anchor lines; a quote may run across one. What an image shows is your reading, so an image backs only basis `reading`.
    - Give a rule about code or files `applies_to` globs from the project root, fitting the files in the domain's projects. `always` is the user's to set.
    - A rule goes in its source page's domain. A vault-only domain takes no rules, so a rule from its source goes in the domain, or `global`, whose projects its `applies_to` is for.
 
@@ -42,6 +45,7 @@ Done when the source page holds their words, each preference they stated is a ta
 `/ingest batch` takes in every file `node tools/review.mjs sources` lists, without the user, so it writes pages only: a rule reaches sessions as soon as it is written, and the user approves each one first.
 
 1. Tell the user how many sources there are, then take them one at a time through steps 2, 4, 6 and 7 above, with these changes:
+   - Step 2: run `extract.mjs` and `scan.mjs` as there. Leave a source whose extraction fails, or whose scan exits 1, for the user: write nothing for it, go on to the next, and when the batch ends, list each one left with the lines the tool printed.
    - Step 4: pick the domain whose topics the source fits, or `global` if it fits every project. `## You said` stays empty.
    - Steps 6 and 7: there are no rules to link.
    - Step 7: log each source with `node tools/log.mjs ingest --batch <source> <page>...`.
