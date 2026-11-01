@@ -5,7 +5,7 @@ import { parse } from './frontmatter.mjs';
 import { filesIn, vaultPath, memo, config } from './vault.mjs';
 import {
   isUrl, validDay, rawFile, bundleOf, isDocSet, manifestNames, filled, parsedFile, normUrl, evidenceSources, footnotes, locate, linkedKeys,
-  isSourcePage, undelivered, resolver, cmp, isMap, joinList,
+  isSourcePage, undelivered, resolver, cmp, isMap, joinList, clip,
 } from './rules.mjs';
 
 export const KINDS = ['pdf', 'video', 'audio', 'image'];
@@ -17,9 +17,9 @@ const sha256 = data => createHash('sha256').update(data).digest('hex');
 const readRel = rel => fs.readFileSync(vaultPath(...rel.split('/')));
 
 // Read in chunks, since a source may be a video too big to hold.
-export function hashFile(rel) {
+export function hashPath(file) {
   const hash = createHash('sha256');
-  const fd = fs.openSync(vaultPath(...rel.split('/')), 'r');
+  const fd = fs.openSync(file, 'r');
   try {
     const chunk = Buffer.allocUnsafe(1 << 20);
     for (let n = fs.readSync(fd, chunk, 0, chunk.length, null); n > 0; n = fs.readSync(fd, chunk, 0, chunk.length, null)) hash.update(chunk.subarray(0, n));
@@ -28,6 +28,8 @@ export function hashFile(rel) {
   }
   return hash.digest('hex');
 }
+
+export const hashFile = rel => hashPath(vaultPath(...rel.split('/')));
 
 // The lines a footnote may point at, so a binary or a file another program holds open has none.
 export function lineCount(rel) {
@@ -86,26 +88,37 @@ export function parseLocator(fragment) {
   return null;
 }
 
-// Page anchors [p. 3] and time anchors [t=00:12:31], as the seconds and numbers they stand for, and the ones that
-// start like an anchor but aren't one.
+const PAGE_ANCHOR = /^\[p\. ([1-9]\d*)\]$/;
+const TIME_ANCHOR = /^\[t=(\d\d+):([0-5]\d):([0-5]\d)\]$/;
+export const isAnchor = line => PAGE_ANCHOR.test(line.trim()) || TIME_ANCHOR.test(line.trim());
+
+// Page anchors [p. 3] and time anchors [t=00:12:31], as the seconds and numbers they stand for, and the lines that
+// start like an anchor but aren't one. An anchor sits on a line of its own, as extract.mjs writes it, so a [p. 3] in a
+// sentence the source holds is its text.
 export function anchorsIn(text) {
   const pages = new Set();
   const times = new Set();
   const bad = new Set();
-  for (const [anchor] of text.matchAll(/\[(?:p\.|t=)[^\]\n]*\]/g)) {
-    const page = anchor.match(/^\[p\. ([1-9]\d*)\]$/);
-    const time = anchor.match(/^\[t=(\d\d+):([0-5]\d):([0-5]\d)\]$/);
+  for (const line of text.split('\n').map(l => l.trim())) {
+    if (!/^\[(?:p\.|t=)/.test(line)) continue;
+    const page = line.match(PAGE_ANCHOR);
+    const time = line.match(TIME_ANCHOR);
     if (page) pages.add(Number(page[1]));
     else if (time) times.add(Number(time[1]) * 3600 + Number(time[2]) * 60 + Number(time[3]));
-    else bad.add(anchor);
+    else bad.add(clip(line, 80));
   }
   return { pages, times, bad: [...bad] };
 }
 
+export const derivedText = hash => parsedFile(`derived/${hash}.md`);
+
 export function derivedAnchors(hash) {
-  const parsed = parsedFile(`derived/${hash}.md`);
+  const parsed = derivedText(hash);
   return parsed && anchorsIn(parsed.body);
 }
+
+// The images pick.mjs takes as a sheet, and that quoteTexts reads as images when no derived text says otherwise.
+export const IMAGE = /\.(?:png|jpe?g|webp)$/i;
 
 // A relative path that stays inside its folder.
 const insideFolder = p => !p.startsWith('/') && !p.split('/').includes('..') && !p.includes('\\');

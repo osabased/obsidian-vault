@@ -116,6 +116,16 @@ test('a page or time anchor must exist in the derived text of its source, and a 
   assert.deepEqual(await msgsFor(v, 'derived/'), []);
 });
 
+test('an anchor is read only on a line of its own, so one inside a sentence is text', async t => {
+  const v = makeVault(t);
+  const pdf = 'pdf bytes';
+  v.write('raw/refs/doc.pdf', pdf);
+  v.write(`derived/${sha256(pdf)}.md`, derived({ kind: 'pdf', extractor: 'glim-extract', extractor_version: "'1.0'", source: 'raw/refs/doc.pdf' }, '[p. 1]\nAs the index on [p. 3] shows, a cell counts once.\n[p. 2]\nSecond.\n'));
+  v.write('wiki/glim/anchors.md', cite('raw/refs/doc.pdf#page=2', 'raw/refs/doc.pdf#page=3'));
+  assert.deepEqual(await footnoteMsgs(v), ['footnote [^2] cites page 3 of raw/refs/doc.pdf, and its derived text has no [p. 3]']);
+  assert.deepEqual(await msgsFor(v, 'derived/'), []);
+});
+
 test('derived text is named by the hash of its binary, with a valid kind, its extractor and well-formed anchors', async t => {
   const v = makeVault(t);
   const pdf = 'pdf bytes';
