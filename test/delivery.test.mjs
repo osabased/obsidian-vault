@@ -329,7 +329,12 @@ test('6.6e: session start in the vault folder with 10 domains stays under the ou
   assert.ok(ctx.length <= LIMIT, `${ctx.length} characters`);
   assert.match(ctx, /^Taste vault: when the task touches layout, code, ledger, papers, days, words, topic-0-0-padding, /);
   // The presets' notes bring the lint reminder and the stale-sources line, which rank below the topics.
-  assert.match(ctx, /\(Left out to stay within 8000 characters: \d+ topics, 1 note and 1 note\. `[^`]*index\.md` lists the rest\.\)$/);
+  assert.match(ctx, /\(Left out to stay within 8000 characters: \d+ topics and 2 notes\. `[^`]*index\.md` lists the rest\.\)$/);
+});
+
+test('sections left out under one noun are counted together', async t => {
+  const { fitContext } = await makeVault(t).import('lib/rules.mjs');
+  assert.match(fitContext(['a'.repeat(150), 'b'.repeat(150), 'c'.repeat(150)], { max: 400 }).text, /Left out to stay within 400 characters: 2 notes\./);
 });
 
 test('the output budget is delivery.maxContextChars, and the topics are the first to go', t => {

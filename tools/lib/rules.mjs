@@ -468,7 +468,9 @@ export function fitContext(sections, { max = config().delivery.maxContextChars, 
   const join = parts => parts.filter(Boolean).join(gap);
   const body = (s, n) => (n ? (s.render ? s.render(s.items.slice(0, n)) : [s.head, ...s.items.slice(0, n)].filter(Boolean).join('\n')) : '');
   const overflow = kept => {
-    const left = all.flatMap((s, i) => (s.items.length > kept[i] ? [plural(s.items.length - kept[i], s.noun)] : []));
+    const counts = new Map();
+    all.forEach((s, i) => { if (s.items.length > kept[i]) counts.set(s.noun, (counts.get(s.noun) ?? 0) + s.items.length - kept[i]); });
+    const left = [...counts].map(([noun, n]) => plural(n, noun));
     return left.length ? `(Left out to stay within ${max} characters: ${joinList(left, 'and')}. \`${toPosix(vaultPath('index.md'))}\` lists the rest.)` : '';
   };
   const render = kept => join([...all.map((s, i) => body(s, kept[i])), overflow(kept), tail]);
