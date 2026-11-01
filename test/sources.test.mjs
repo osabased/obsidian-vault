@@ -1,7 +1,10 @@
 import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+import { execFileSync } from 'node:child_process';
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { makeVault, ruleNote, pageNote as page, sourcePage, userTurn, sessionId } from './fixture.mjs';
+import { makeVault, cleanEnv, ruleNote, pageNote as page, sourcePage, userTurn, sessionId } from './fixture.mjs';
 
 const sectionOf = (out, title) => out.trimEnd().split('\n\n').find(b => b.startsWith(`${title}\n`))?.split('\n').slice(1);
 
@@ -149,5 +152,22 @@ test('a file re-fetched from the same URL with a new sha256 is a new version, an
   v.write('wiki/demo/source-page.md', sourcePage({ source: 'raw/refs/page-v1.md' }));
   v.write('wiki/demo/source-old.md', sourcePage({ source: 'https://example.com/old' }));
   v.write('wiki/demo/source-plain.md', sourcePage({ source: 'raw/refs/plain-1.md' }));
-  assert.equal(v.run('review.mjs', ['sources']).stdout, 'raw/refs/page-v2.md\n', 'a source page on the URL itself names every version; a page on a file names its own');
+  assert.equal(v.run('review.mjs', ['sources']).stdout, 'raw/refs/old-v1.md\nraw/refs/old-v2.md\nraw/refs/page-v2.md\n', 'a page on the bare URL names only copies with no sha256; a page on a file names it and copies with its sha256');
+});
+
+test('a fresh checkout with core.autocrlf=true leaves the files in raw/ as they were saved', t => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'vault-eol-'));
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  const env = cleanEnv({ GIT_CONFIG_NOSYSTEM: '1', GIT_CONFIG_GLOBAL: '/dev/null' });
+  const git = (cwd, ...args) => execFileSync('git', ['-c', 'core.autocrlf=true', '-c', 'user.name=t', '-c', 'user.email=t@example.com', '-c', 'commit.gpgsign=false', ...args], { cwd, env, stdio: 'pipe' });
+  const [origin, clone] = ['origin', 'clone'].map(n => path.join(dir, n));
+  fs.mkdirSync(path.join(origin, 'raw', 'refs'), { recursive: true });
+  fs.copyFileSync(path.resolve(import.meta.dirname, '..', '.gitattributes'), path.join(origin, '.gitattributes'));
+  const saved = Buffer.from('---\nurl: https://example.com/a\n---\nOne line.\nAnother.\n');
+  fs.writeFileSync(path.join(origin, 'raw', 'refs', 'a.md'), saved);
+  git(origin, 'init', '-q');
+  git(origin, 'add', '-A');
+  git(origin, 'commit', '-q', '-m', 'save a');
+  git(dir, 'clone', '-q', origin, clone);
+  assert.deepEqual(fs.readFileSync(path.join(clone, 'raw', 'refs', 'a.md')), saved);
 });

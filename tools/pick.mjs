@@ -11,7 +11,7 @@ import { UsageError, readInput, refuse, failure, line } from './lib/input.mjs';
 import { ownEntry, markShown, sessionDomains } from './lib/sessions.mjs';
 
 const RUN = 'usage: node tools/pick.mjs <session-id> < pick.json';
-const SHOW = '       node tools/pick.mjs show <session-id> <subject> [domain]';
+const SHOW = '       node tools/pick.mjs show <session-id> <subject> [domain [project]]';
 const USAGE = `${RUN}\n${SHOW}\n       node tools/pick.mjs --help lists the fields of pick.json`;
 
 const help = () => [
@@ -21,6 +21,9 @@ const help = () => [
   'pick.json is one of three objects. Each records a row in raw/picks/ for a project this session is in, and takes:',
   '  domain       optional when the session is in one domain, which the row then takes; otherwise the domain this is for,',
   "               one the session is in. A session at a monorepo root is in each package's domain.",
+  '  project      optional when the domain has one project folder in this session, which the row then takes; otherwise the',
+  '               project this is for, as the full path or the folder name of one of the projects the refusal lists. A',
+  '               monorepo root has a project for each package.',
   '',
   'A pick, when the user chose between options you showed them, or you chose alone while they were away:',
   '  subject      the piece of work, lowercase-kebab-case, like shop or style-tile; reuse the one its earlier picks have',
@@ -46,26 +49,43 @@ const help = () => [
   "  comment      the user's words, verbatim, one line",
   '',
   'show prints the subject\'s live picks, newest first, then the domain\'s taste rules. Run it before building or',
-  "reviewing the piece, and paste what it prints into the reviewer's prompt. Give the domain when the session is in more than one.",
+  "reviewing the piece, and paste what it prints into the reviewer's prompt. Give the domain when the session is in more than one,",
+  'and the project when the domain has more than one.',
 ].join('\n');
 
 function sessionOf(sid) {
   const { entry: entryRow, notOwn } = ownEntry(sid);
   if (notOwn) refuse(notOwn);
   const names = sessionDomains(sid, entryRow?.cwd);
-  const hits = sessionReach(entryRow?.cwd).filter(h => names.includes(h.domain)).sort((a, b) => cmp(a.domain, b.domain));
+  const hits = sessionReach(entryRow?.cwd).filter(h => names.includes(h.domain)).sort((a, b) => cmp(a.domain, b.domain) || cmp(a.root, b.root));
   if (!hits.length) refuse(`the taste vault has no session ${sid} from a domain's project folder. Pass the session id from the taste vault's note at session start.`);
   return { ...entryRow, hits };
 }
 
-// A confirmation names no domain of its own, so it takes the domain of the pick it confirms.
-function inDomain(s, given, inherited) {
-  const names = s.hits.map(h => h.domain);
-  const want = given ?? (names.includes(inherited) ? inherited : names.length === 1 ? names[0] : null);
+// A project is named by its path, or by its folder name when that names one of the roots alone.
+function rootNamed(roots, project) {
+  const same = roots.filter(r => sameProject(r, project));
+  const named = same.length ? same : roots.filter(r => projectName(r).toLowerCase() === project.toLowerCase());
+  return named.length === 1 ? named[0] : null;
+}
+
+// A confirmation names no domain or project of its own, so it takes those of the pick it confirms.
+function inDomain(s, { domain, project, from } = {}) {
+  const names = [...new Set(s.hits.map(h => h.domain))];
+  const want = domain ?? (names.includes(from?.domain) ? from.domain : names.length === 1 ? names[0] : null);
   if (!want) refuse(`this session is in more than one domain: ${joinList(names, 'and')}. Add domain with the one this is for.`);
-  const hit = s.hits.find(h => h.domain === want);
-  if (!hit) refuse(`${want} isn't a domain of this session. It has: ${joinList(names, 'and')}.`);
-  return { ...s, domain: hit.domain, project: hit.root };
+  if (!names.includes(want)) refuse(`${want} isn't a domain of this session. It has: ${joinList(names, 'and')}.`);
+  const roots = s.hits.filter(h => h.domain === want).map(h => h.root);
+  const all = joinList(roots, 'and');
+  let root;
+  if (project) {
+    root = rootNamed(roots, project);
+    if (!root) refuse(`${project} isn't a project of this session in ${want}. It has: ${all}.`);
+  } else {
+    root = roots.length === 1 ? roots[0] : from?.domain === want ? roots.find(r => sameProject(r, from.project)) : undefined;
+    if (!root) refuse(`${want} has more than one project in this session: ${all}. Add project with the one this is for.`);
+  }
+  return { ...s, domain: want, project: root };
 }
 
 const optional = (p, name) => line(p, name, false) || null;
@@ -121,7 +141,7 @@ function target(rows, later, id, s, subject) {
 const KINDS = {
   options: {
     name: 'pick',
-    fields: ['subject', 'domain', 'question', 'header', 'options', 'pick', 'status', 'notes', 'reason', 'sheet', 'replaces'],
+    fields: ['subject', 'domain', 'project', 'question', 'header', 'options', 'pick', 'status', 'notes', 'reason', 'sheet', 'replaces'],
     read: p => {
       const subject = subjectOf(p);
       const question = line(p, 'question');
@@ -142,7 +162,7 @@ const KINDS = {
   },
   confirms: {
     name: 'confirmation',
-    fields: ['confirms', 'subject', 'domain', 'notes', 'reason'],
+    fields: ['confirms', 'subject', 'domain', 'project', 'notes', 'reason'],
     read: (p, s) => {
       const subject = p.subject === undefined ? null : subjectOf(p);
       const confirms = line(p, 'confirms');
@@ -162,7 +182,7 @@ const KINDS = {
   },
   comment: {
     name: 'comment',
-    fields: ['subject', 'domain', 'comment'],
+    fields: ['subject', 'domain', 'project', 'comment'],
     read: p => {
       const subject = subjectOf(p);
       const text = line(p, 'comment');
@@ -179,8 +199,8 @@ function record(sid, p) {
   const kind = KINDS[kinds[0]];
   const stray = Object.keys(p).find(k => p[k] !== undefined && ALL_FIELDS.has(k) && !kind.fields.includes(k));
   if (stray) refuse(`${stray} doesn't go with a ${kind.name}. node tools/pick.mjs --help lists each one's fields.`);
-  const inherited = kind.name === 'confirmation' ? pickRows().find(r => r.id === p.confirms)?.domain : undefined;
-  const s = inDomain(session, optional(p, 'domain'), inherited);
+  const from = kind.name === 'confirmation' ? pickRows().find(r => r.id === p.confirms) : undefined;
+  const s = inDomain(session, { domain: optional(p, 'domain'), project: optional(p, 'project'), from });
   const { make, sheet = null, replaces = '' } = kind.read(p, s);
   const base = {
     at: new Date().toISOString(), source: 'pick',
@@ -217,10 +237,10 @@ function record(sid, p) {
   return out;
 }
 
-function show(sid, subject, domain) {
-  const s = inDomain(sessionOf(sid), domain ?? null);
+function show(sid, subject, domain, project) {
+  const s = inDomain(sessionOf(sid), { domain, project });
   if (!KEBAB.test(subject)) refuse('subject must be lowercase-kebab-case.');
-  const rows = subjectRows().filter(r => sameProject(r.project, s.project));
+  const rows = subjectRows().filter(r => r.domain === s.domain && sameProject(r.project, s.project));
   const live = newestFirst(liveRows(rows).filter(r => r.subject === subject));
   const name = projectName(s.project);
   const sheet = r => `Sheet: ${toPosix(vaultPath(r.sheet))}`;
@@ -241,9 +261,9 @@ const args = process.argv.slice(2);
 let refused = 'Not recorded';
 try {
   if (args[0] === '--help' && args.length === 1) console.log(help());
-  else if (args[0] === 'show' && (args.length === 3 || args.length === 4)) {
+  else if (args[0] === 'show' && args.length >= 3 && args.length <= 5) {
     refused = 'Not shown';
-    console.log(show(args[1], args[2], args[3]));
+    console.log(show(args[1], args[2], args[3], args[4]));
   } else if (args.length === 1 && !['show', '--help'].includes(args[0])) console.log(record(args[0], readInput()));
   else throw new UsageError();
 } catch (e) {
