@@ -1,5 +1,5 @@
 import { runHook, config, inVaultFolder, readableDomains, everywhereDomains } from '../lib/vault.mjs';
-import { loadNotes, settledNotes, liveRules, livePages, alwaysIn, ruleLine, pageLine, fitContext, cmp, mentions, deliverable, deliveryFor, byFit } from '../lib/rules.mjs';
+import { loadNotesAsync, settledNotes, liveRules, livePages, alwaysIn, ruleLine, pageLine, fitContext, cmp, mentions, deliverable, deliveryFor, byFit } from '../lib/rules.mjs';
 import { touchSession, turnStarted, sessionDomains, markAlways, markShown, markMany, markPages, unmarked, dueAlways, duePages, sessionHits } from '../lib/sessions.mjs';
 
 // Session start marks the always rules it loads, so these are the ones written, reworded or settled since,
@@ -37,7 +37,7 @@ function pointers(input, pageNotes, scope, said) {
   };
 }
 
-runHook('prompt', input => {
+runHook('prompt', async input => {
   const sid = input.session_id;
   if (!sid) return null;
   turnStarted(sid);
@@ -49,7 +49,7 @@ runHook('prompt', input => {
   const said = String(input.prompt ?? '');
   // An everywhere domain's keyword rules reach every session; its always rules only the sessions its reach puts it in.
   const heard = [...new Set([...scope, ...everywhereDomains()])];
-  const notes = settledNotes(loadNotes(readableDomains(doms, vaultFolder)));
+  const notes = settledNotes(await loadNotesAsync(readableDomains(doms, vaultFolder)));
   const ctx = deliveryFor(sessionHits(sid, input.cwd));
   const rules = deliverable(liveRules(notes), ctx);
   const sections = [

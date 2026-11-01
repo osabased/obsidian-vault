@@ -421,11 +421,11 @@ export const hookedTool = name => HOOKED.test(name);
 export const toolFile = (name, input) => (name === 'NotebookEdit' ? input.notebook_path : input.file_path);
 
 // A failed hook exits 1 with one line, so the user sees a hook error and the call goes ahead; exit 2 would block it.
-export function runHook(name, fn) {
+export async function runHook(name, fn) {
   if (process.env.CLAUDE_CODE_SAFE_MODE === '1') return;
   armDeadline();
   try {
-    const out = fn(JSON.parse(fs.readFileSync(0, 'utf8').replace(/^\uFEFF/, '')));
+    const out = await fn(JSON.parse(fs.readFileSync(0, 'utf8').replace(/^\uFEFF/, '')));
     if (out) process.stdout.write(JSON.stringify(out));
   } catch (e) {
     logError(name, e);
