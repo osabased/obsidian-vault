@@ -28,17 +28,22 @@ test('release removes only the lock its own call took', async t => {
   assert.equal(fs.existsSync(file), false, 'its own lock is removed');
 });
 
-test('a lock held by a live process is not taken, however old, and one left by a dead process is', async t => {
+test('a lock held by a live process is kept for staleMs, then taken as a recycled pid, and one left by a dead process is taken at once', async t => {
   const v = makeVault(t);
   const { withLock } = await v.import('lib/vault.mjs');
   const file = v.at('.state', 'y.lock');
   fs.mkdirSync(v.at('.state'), { recursive: true });
   const mine = `${process.pid}:held`;
   fs.writeFileSync(file, mine);
-  const old = new Date(Date.now() - 60e3);
-  fs.utimesSync(file, old, old);
+  const aged = s => { const at = new Date(Date.now() - s * 1e3); fs.utimesSync(file, at, at); };
+  aged(10);
   assert.throws(() => withLock(file, () => {}, { waitMs: 200 }), /held by another process/);
   assert.equal(fs.readFileSync(file, 'utf8'), mine, 'the live holder keeps its lock');
+
+  // Windows reuses pids, so a dead owner can look alive; its lock has to go before a waiter gives up at 60 s.
+  aged(45);
+  assert.equal(withLock(file, () => 'ran', { waitMs: 2000 }), 'ran');
+  fs.writeFileSync(file, mine);
 
   const dead = spawnSync(process.execPath, ['-e', ''], {}).pid;
   fs.writeFileSync(file, `${dead}:gone`);
@@ -59,7 +64,7 @@ test('session start tidies at most delivery.tidyMaxMarkers markers a run, and /l
   assert.equal(left(v, ids), 16);
   v.startSession(sessionId());
   const after = left(v, ids);
-  assert.ok(after < 16 && after >= 11, `${16 - after} markers removed`);
+  assert.equal(after, 11, `${16 - after} markers removed`);
   v.startSession(sessionId());
   assert.ok(left(v, ids) < after, 'the next session start carries on');
   for (let i = 0; i < 4 && left(v, ids); i++) v.startSession(sessionId());
@@ -69,4 +74,22 @@ test('session start tidies at most delivery.tidyMaxMarkers markers a run, and /l
   const r = v.run('review.mjs', ['status']);
   assert.equal(r.code, 0, r.stderr);
   assert.equal(left(v, ['s5', 's6']), 0, '/lint removes them all in one run');
+});
+
+test('a session pruned in full under the room it started with is done, and its stamp is written', t => {
+  const v = makeVault(t, { config: { delivery: { tidyMaxMarkers: 10 } } });
+  oldSession(v, 's1', 6);
+  v.startSession(sessionId());
+  assert.equal(v.exists('.state/gate/s1'), false);
+  assert.ok(v.exists('.state/tidy.json'), 'a finished tidy is not run again today');
+});
+
+test('a partly pruned session keeps its age, so the rest goes at the next run and not 30 days on', t => {
+  const v = makeVault(t, { config: { delivery: { tidyMaxMarkers: 5 } } });
+  oldSession(v, 'old1', 10);
+  v.startSession(sessionId());
+  assert.equal(left(v, ['old1']), 5);
+  assert.equal(v.exists('.state/tidy.json'), false, 'an unfinished tidy tries again');
+  v.startSession(sessionId());
+  assert.equal(left(v, ['old1']), 0);
 });

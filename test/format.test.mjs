@@ -359,3 +359,7 @@ test('a folded block scalar reads as its lines joined by spaces, a literal one b
   const text = front(lines);
   assert.equal(setField(text, 'a', 'new'), text);
 });
+
+test('a literal block scalar keeps the indentation of its lines relative to the first', () => {
+  assert.deepEqual(data(['a: |', '  if x:', '    y()', '  z', 'b: c']), { a: 'if x:\n  y()\nz', b: 'c' });
+});

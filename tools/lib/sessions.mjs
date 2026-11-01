@@ -222,7 +222,8 @@ export function trackedSessions() {
 
 export function clearMarkers(sid) {
   for (const kind of ['gate', 'notes', 'excerpts', 'pages']) {
-    fs.rmSync(markerDir(kind, sid), { recursive: true, force: true });
+    // Windows holds a file a scanner or indexer has open for a moment; a failure that lasts still throws.
+    fs.rmSync(markerDir(kind, sid), { recursive: true, force: true, maxRetries: 3, retryDelay: 50 });
     loaded.delete(markerDir(kind, sid));
   }
 }
@@ -257,18 +258,25 @@ export function errorsSinceLint() {
 const KINDS = ['gate', 'notes', 'excerpts', 'pages', 'repeats', 'delivered', 'turns'];
 
 // Removes up to `room` marker files of a session, then its folders, and returns how many files it removed. The registry
-// goes last, and only once every folder is gone, so a session left half pruned is tried again next time.
+// goes last, and only once every folder is gone, so a session left half pruned is tried again next time. Removing files
+// changes their folder's mtime, which is how an unregistered session's age is read, so a folder left part pruned gets its
+// mtime back and the rest isn't kept another 30 days.
 function prune(id, room) {
   let removed = 0;
   for (const kind of KINDS) {
     const dir = vaultPath('.state', kind, id);
     let files = [];
-    try { files = fs.readdirSync(dir); } catch (e) { if (!stray(e)) throw e; }
-    for (const f of files.slice(0, room - removed)) {
+    let before;
+    try { before = fs.statSync(dir); files = fs.readdirSync(dir); } catch (e) { if (!stray(e)) throw e; }
+    const take = files.slice(0, room - removed);
+    for (const f of take) {
       fs.rmSync(path.join(dir, f), { recursive: true, force: true });
       removed++;
     }
-    if (files.length > room - removed) return { removed, done: false };
+    if (take.length < files.length) {
+      fs.utimesSync(dir, before.atime, before.mtime);
+      return { removed, done: false };
+    }
     fs.rmSync(dir, { recursive: true, force: true });
   }
   fs.rmSync(registry(id), { force: true });

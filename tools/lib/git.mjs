@@ -2,6 +2,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { execFileSync } from 'node:child_process';
 import { toPosix } from './vault.mjs';
+import { checkDeadline, remaining } from './deadline.mjs';
 
 // git status prints paths from the top of the work tree whatever folder it runs in, so they are read from there. A
 // worktree or submodule has a .git file in place of the folder.
@@ -13,10 +14,11 @@ function topOf(dir) {
 }
 
 // The one place tools/ runs another program. Null, not an empty list, when git is missing, the folder isn't in a
-// repository, or git fails or runs past the timeout, so a caller never takes a failure for a clean tree.
+// repository, or git fails or runs past the timeout or the time left before a hook's deadline, so a caller never takes a failure for a clean tree.
 export function changedFiles(cwd, pathspec = [], { ignored = false, timeout = 2000 } = {}) {
   const top = topOf(cwd);
   if (!top) return null;
+  checkDeadline();
   // GIT_DIR and the like, as a git hook sets them, would point git away from the folder asked about.
   const env = Object.fromEntries(Object.entries(process.env).filter(([k]) => !/^GIT_(?:DIR|WORK_TREE|INDEX_FILE|COMMON_DIR)$/i.test(k)));
   let out;
@@ -25,7 +27,7 @@ export function changedFiles(cwd, pathspec = [], { ignored = false, timeout = 20
     out = execFileSync('git', [
       '--no-optional-locks', 'status', '--porcelain=v1', '-z', '--untracked-files=all', ...(ignored ? ['--ignored'] : []),
       '--', ...[].concat(pathspec),
-    ], { cwd, env, timeout, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'], windowsHide: true, maxBuffer: 64 << 20 });
+    ], { cwd, env, timeout: Math.max(1, Math.min(timeout, remaining())), encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'], windowsHide: true, maxBuffer: 64 << 20 });
   } catch {
     return null;
   }

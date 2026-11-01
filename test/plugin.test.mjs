@@ -92,3 +92,21 @@ test('the launcher reports a hook that cannot load', t => {
   assert.equal(r.code, 1);
   assert.match(r.stderr, /^vault prompt failed: .+\n$/);
 });
+
+test('the launcher reads a Git Bash drive path as the Windows one', { skip: process.platform !== 'win32' }, t => {
+  const v = liveVault(t);
+  const gitBash = v.root.replaceAll('\\', '/').replace(/^([a-z]):/i, (_, d) => `/${d.toLowerCase()}`);
+  assert.match(gitBash, /^\/[a-z]\//);
+  const r = launch('session-start', { vault: gitBash, input: JSON.stringify({ session_id: sessionId(), cwd: v.project, hook_event_name: 'SessionStart', source: 'startup' }) });
+  assert.equal(r.code, 0, r.stderr);
+  assert.ok(v.exists('.state/sessions'), 'the hook ran in the vault the path names');
+});
+
+test('the launcher refuses a vault path that is not absolute, so it cannot mean a folder per session', t => {
+  const v = makeVault(t);
+  const r = launch('prompt', { vault: 'some/vault' });
+  assert.equal(r.code, 1);
+  assert.equal(r.stdout, '');
+  assert.match(r.stderr, /^vault prompt failed: the plugin's vault option "some\/vault" is not an absolute path; run claude plugin configure obsidian-vault\n$/);
+  assert.ok(!v.exists('.state/sessions'));
+});

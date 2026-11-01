@@ -111,3 +111,23 @@ test('lint refuses node:child_process anywhere but lib/git.mjs', async t => {
   const found = lint().filter(f => f.file.startsWith('tools/') && /child_process/.test(f.msg));
   assert.deepEqual(found.map(f => [f.file, f.msg]), [['tools/lib/runner.mjs', 'imports node:child_process; only lib/git.mjs runs another program, git status']]);
 });
+
+test('guarded rethrows a deadline error, and git stops at the time left', async t => {
+  const v = makeVault(t);
+  v.checkout();
+  const { guarded } = await v.import('lib/vault.mjs');
+  const { armDeadline, checkDeadline, remaining } = await v.import('lib/deadline.mjs');
+  const { changedFiles } = await v.import('lib/git.mjs');
+  assert.equal(remaining(), Infinity, 'an unarmed process has no deadline');
+  assert.equal(guarded('x', () => { throw new Error('plain'); }, 'fell back'), 'fell back');
+  const env = process.env.VAULT_HOOK_TIMEOUT;
+  process.env.VAULT_HOOK_TIMEOUT = '0.001';
+  try {
+    armDeadline();
+    assert.ok(remaining() <= 0);
+    assert.throws(() => guarded('x', checkDeadline, 'fell back'), /stopped at its deadline/);
+    assert.throws(() => changedFiles(v.root), /stopped at its deadline/);
+  } finally {
+    if (env === undefined) delete process.env.VAULT_HOOK_TIMEOUT; else process.env.VAULT_HOOK_TIMEOUT = env;
+  }
+});

@@ -91,9 +91,12 @@ const childrenEnd = (rows, i, level) => {
 const block = rows => (ITEM.test(rows[0].text) ? sequence(rows) : mapping(rows, rows[0].indent));
 
 // A | or > after the key. The lines below are its text, folded with spaces or kept with newlines. Blank lines are
-// already gone, so a paragraph break folds to a space.
+// already gone, so a paragraph break folds to a space. Lines starting with # are gone too, where YAML would keep them.
+// A literal block keeps each line's indent beyond the first line's.
 const BLOCK_SCALAR = /^[|>][-+]?\d*\s*(?:#.*)?$/;
-const blockScalar = (head, rows) => rows.map(r => r.text).join(head[0] === '>' ? ' ' : '\n');
+const blockScalar = (head, rows) => (head[0] === '>'
+  ? rows.map(r => r.text).join(' ')
+  : rows.map(r => ' '.repeat(Math.max(0, r.indent - rows[0].indent)) + r.text).join('\n'));
 
 // Lines that read as nothing are skipped. An empty mapping or list reads as null, as an empty key always has.
 function mapping(rows, level) {

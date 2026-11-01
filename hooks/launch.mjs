@@ -13,12 +13,22 @@ function fail(why) {
   process.exitCode = 1;
 }
 
+// The option is whatever the user typed, and Git Bash spells C:/x as /c/x, which node on Windows reads as C:\c\x. A
+// relative path would mean a different folder in each session, so it is refused. The vault code that does this for other
+// paths can't be imported, since it lives in the .live copy this file is looking for.
+function vaultFolder(given) {
+  const spelled = process.platform === 'win32' ? given.replace(/^[\\/]([a-z])(?:[\\/]|$)/i, '$1:/') : given;
+  return path.isAbsolute(spelled) ? path.resolve(spelled) : null;
+}
+
 async function launch() {
   if (process.env.CLAUDE_CODE_SAFE_MODE === '1') return;
   if (!HOOKS.includes(hook)) return fail(`no hook of that name, only ${HOOKS.join(', ')}`);
   const vault = process.env.CLAUDE_PLUGIN_OPTION_VAULT;
   if (!vault) return fail("the plugin's vault option is not set; run claude plugin configure obsidian-vault");
-  const tools = path.join(vault, '.live', 'tools');
+  const root = vaultFolder(vault);
+  if (!root) return fail(`the plugin's vault option "${vault}" is not an absolute path; run claude plugin configure obsidian-vault`);
+  const tools = path.join(root, '.live', 'tools');
   if (!fs.existsSync(tools)) return fail(`${tools} does not exist; run .githooks/post-commit in the vault to make it`);
   const file = path.join(tools, 'hooks', `${hook}.mjs`);
   if (!fs.existsSync(file)) return fail(`${file} does not exist; commit the vault's tools/ so post-commit copies it`);

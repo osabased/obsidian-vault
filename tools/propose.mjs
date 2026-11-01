@@ -55,7 +55,7 @@ const help = () => [
   '  triggers     regexes tested against the new text of an edit; when given, the rule applies only if one matches',
   '               A rule needs keywords or applies_to.',
   "               always: true is the user's to set in Obsidian, so propose.mjs refuses it.",
-  '  repeats      optional, the key of the rule in the vault this one repeats, like roblox-ui/flat-buttons:',
+  '  repeats      optional, the key of the rule in the vault this one repeats, like example-ui/flat-buttons:',
   "               propose.mjs adds this rule's Evidence line to that note and writes no new one",
   '',
   'If the rule may repeat ones in the vault, propose.mjs lists them and refuses once. If it repeats one, propose',
@@ -360,7 +360,7 @@ function propose(sid, p) {
   if (!f.applies_to.length && !f.keywords.length) refuse('give it keywords or applies_to, or nothing will deliver it.');
   const scope = f.domain === 'global' ? domains : [f.domain, 'global'];
   f.repeats = line(p, 'repeats', false).normalize('NFC');
-  if (f.repeats && !KEY_RE.test(f.repeats)) refuse('repeats must be a rule key like roblox-ui/flat-buttons.');
+  if (f.repeats && !KEY_RE.test(f.repeats)) refuse('repeats must be a rule key like example-ui/flat-buttons.');
   const e = evidence(f, p);
   checkQuote(session, e);
   if (f.kind === 'knowledge') f.as_of = e.date ?? today();
