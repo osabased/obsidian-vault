@@ -1,6 +1,6 @@
 import fs from 'node:fs';
 import { runHook, vaultRel, vaultOwn, cwdOf, plainText } from '../lib/vault.mjs';
-import { loadNotes, settledNotes, liveRules, ruleLine, fitContext } from '../lib/rules.mjs';
+import { loadNotes, settledNotes, liveRules, deliverable, deliveryFor, ruleLine, fitContext } from '../lib/rules.mjs';
 import { changedFiles } from '../lib/git.mjs';
 import { checkDeadline } from '../lib/deadline.mjs';
 import { fileScope, dueRules, gatedFile } from '../lib/scope.mjs';
@@ -42,9 +42,9 @@ runHook('stop', input => {
   const rules = liveRules(settledNotes(loadNotes([...new Set(scoped.flatMap(s => s.domains))])));
   const listed = new Set();
   const sections = [];
-  for (const { file, size, matching } of scoped) {
+  for (const { file, size, matching, hits: reach } of scoped) {
     checkDeadline();
-    const hits = dueRules(input, matching(rules), () => textOf(file, size));
+    const hits = dueRules(input, deliverable(matching(rules), deliveryFor(reach)), () => textOf(file, size));
     if (!hits.length) continue;
     sections.push({
       noun: 'rule', head: `${hits[0].rel}:`, hits,

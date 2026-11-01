@@ -1,5 +1,5 @@
 import { runHook, sessionReach, inVaultFolder, readableDomains, vaultPath, toolsPath, toPosix, guarded, config, plural, clock } from '../lib/vault.mjs';
-import { alwaysContext, alwaysIn, fitContext, indexNote, scopeTopics, loadNotes, settledNotes, liveRules, clip, undelivered, knownDomain } from '../lib/rules.mjs';
+import { alwaysContext, alwaysIn, fitContext, indexNote, scopeTopics, loadNotes, settledNotes, liveRules, deliverable, deliveryFor, clip, undelivered, knownDomain } from '../lib/rules.mjs';
 import { build } from '../lib/build.mjs';
 import { remaining } from '../lib/deadline.mjs';
 import { changedSinceBuild, noteTimes } from '../lib/cache.mjs';
@@ -82,7 +82,7 @@ runHook('session-start', input => {
     try { build({ waitMs: Math.min(2000, remaining()) }); } catch (e) { if (e?.code !== 'ELOCKED') throw e; }
   });
   const ready = settledNotes(notes);
-  const rules = liveRules(ready);
+  const rules = deliverable(liveRules(ready), deliveryFor(hits));
   const always = alwaysContext(scope, rules);
   const topics = guarded('index note', () => scopeTopics(readable, ready), []);
   let propose = '';

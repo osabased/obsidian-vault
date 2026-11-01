@@ -1,6 +1,6 @@
 import { runHook, config, inVaultFolder, readableDomains, everywhereDomains } from '../lib/vault.mjs';
-import { loadNotes, settledNotes, liveRules, livePages, alwaysIn, ruleLine, pageLine, fitContext, cmp, mentions } from '../lib/rules.mjs';
-import { touchSession, turnStarted, sessionDomains, markAlways, markShown, markMany, markPages, unmarked, dueAlways, duePages } from '../lib/sessions.mjs';
+import { loadNotes, settledNotes, liveRules, livePages, alwaysIn, ruleLine, pageLine, fitContext, cmp, mentions, deliverable, deliveryFor, byFit } from '../lib/rules.mjs';
+import { touchSession, turnStarted, sessionDomains, markAlways, markShown, markMany, markPages, unmarked, dueAlways, duePages, sessionHits } from '../lib/sessions.mjs';
 
 // Session start marks the always rules it loads, so these are the ones written, reworded or settled since,
 // or the ones of a domain the session moved into. A section's keys are the rules its items show, and its mark marks
@@ -17,7 +17,7 @@ const mentioned = (entries, scope, said) => entries
   .filter(([, note]) => note.keywords?.length && scope.includes(note.domain))
   .map(([key, note]) => ({ key, note, score: new Set(note.keywords.filter(kw => mentions(kw, said)).map(kw => kw.toLowerCase())).size }))
   .filter(h => h.score > 0)
-  .sort((a, b) => b.score - a.score || cmp(a.key, b.key));
+  .sort((a, b) => b.score - a.score || byFit(a.note, b.note) || cmp(a.key, b.key));
 
 function excerpts(sid, scope, rules, said) {
   const ranked = mentioned(Object.entries(rules).filter(([, r]) => !r.always), scope, said);
@@ -29,8 +29,8 @@ function excerpts(sid, scope, rules, said) {
   };
 }
 
-function pointers(input, notes, scope, said) {
-  const pages = duePages(input, mentioned(Object.entries(livePages(notes)), scope, said));
+function pointers(input, pageNotes, scope, said) {
+  const pages = duePages(input, mentioned(Object.entries(pageNotes), scope, said));
   return {
     noun: 'page', head: 'Vault pages on this request. Read the ones that bear on it:', items: pages.map(h => pageLine(h.key, h.note)),
     mark: n => markPages(input, pages.slice(0, n), Infinity),
@@ -50,11 +50,12 @@ runHook('prompt', input => {
   // An everywhere domain's keyword rules reach every session; its always rules only the sessions its reach puts it in.
   const heard = [...new Set([...scope, ...everywhereDomains()])];
   const notes = settledNotes(loadNotes(readableDomains(doms, vaultFolder)));
-  const rules = liveRules(notes);
+  const ctx = deliveryFor(sessionHits(sid, input.cwd));
+  const rules = deliverable(liveRules(notes), ctx);
   const sections = [
     registered ? late(sid, scope, rules) : null,
     excerpts(sid, heard, rules, said),
-    pointers(input, notes, readableDomains(doms, vaultFolder), said),
+    pointers(input, deliverable(livePages(notes), ctx), readableDomains(doms, vaultFolder), said),
   ];
   const { text: context, kept } = fitContext(sections);
   // What the budget cut is neither marked delivered nor counted as shown, so a later prompt brings it.

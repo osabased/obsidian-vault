@@ -4,7 +4,7 @@ import crypto from 'node:crypto';
 import {
   config, domainsFor, vaultPath, appendJsonl, picksFile, pickRows, copyNew, today, toPosix, withLock, statePath, guarded,
 } from './lib/vault.mjs';
-import { KEBAB, settledRules, ruleLine, normTopic, joinList, byKey, cmp, domainOrder } from './lib/rules.mjs';
+import { KEBAB, settledRules, ruleLine, normTopic, joinList, byKey, byFit, cmp, domainOrder, deliverable, deliveryFor } from './lib/rules.mjs';
 import { build } from './lib/build.mjs';
 import { subjectRows, laterRows, liveRows, endedBy, newestFirst, entry, projectName, sameProject } from './lib/picks.mjs';
 import { UsageError, readInput, refuse, failure, line } from './lib/input.mjs';
@@ -248,12 +248,13 @@ function show(sid, subject, domain, project) {
     ? [`Picks for ${subject} in ${name}, newest first:`, ...live.flatMap(r => entry(r, { sheet, indent: '  ' }))]
     : [`No picks for ${subject} in ${name} yet.`, ...(others.length ? [`Subjects with picks: ${others.join(', ')}.`] : [])];
   // An edit in the project takes the rules of every domain whose project holds it, so the reviewer hears them all.
-  const near = domainOrder(domainsFor(s.project).map(d => d.domain)).filter(d => d !== s.domain);
-  const all = settledRules();
+  const reach = domainsFor(s.project);
+  const near = domainOrder(reach.map(d => d.domain)).filter(d => d !== s.domain);
+  const all = deliverable(settledRules(), deliveryFor([{ domain: s.domain, root: s.project }, ...reach]));
   for (const d of [s.domain, ...near]) {
     const skipped = [config().domains[d]?.showSkipTopics ?? []].flat().filter(t => typeof t === 'string');
     const skip = skipped.map(normTopic);
-    const rules = Object.entries(all).filter(([, r]) => r.domain === d && !skip.includes(r.topic)).sort(byKey);
+    const rules = Object.entries(all).filter(([, r]) => r.domain === d && !skip.includes(r.topic)).sort((a, b) => byFit(a[1], b[1]) || byKey(a, b));
     if (d !== s.domain && !rules.length) continue;
     out.push('', skipped.length ? `${d} rules, leaving out ${joinList(skipped, 'and')}:` : `${d} rules:`);
     out.push(...(rules.length ? rules.map(([k, r]) => ruleLine(k, r)) : ['None.']));
