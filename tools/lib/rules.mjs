@@ -336,7 +336,7 @@ export function liveRules(notes = loadNotes()) {
       // Only the delivered wording counts, so an edit to a rule's evidence or globs doesn't deliver it again.
       hash: shortHash(text),
       kind: n.kind, always: n.always, applies_to: n.applies_to, triggers: n.triggers, keywords: n.keywords,
-      requires: n.requires, mtime: n.saved, size: n.size,
+      requires: n.requires, mtime: n.saved, size: n.size, contentHash: n.contentHash,
     };
   }
   return rules;
@@ -363,7 +363,7 @@ export function livePages(notes = loadNotes()) {
     if (n.type !== 'page' || !(n.keywords?.length || n.applies_to?.length) || undelivered(n)) continue;
     pages[n.key] = {
       rel: n.rel, domain: n.domain, kind: n.kind, summary: n.summary, keywords: n.keywords, applies_to: n.applies_to, triggers: n.triggers,
-      requires: n.requires, mtime: n.saved, size: n.size,
+      requires: n.requires, mtime: n.saved, size: n.size, contentHash: n.contentHash,
     };
   }
   return pages;
@@ -396,7 +396,7 @@ export function deliverable(items, ctx) {
     checkDeadline();
     const fit = note.requires ? fitOf(note.requires, note.domain, ctx.versions) : null;
     if (fit?.fit === 'mismatch') return null;
-    const u = unverifiedNow(ctx.derived, { ...note, key, saved: note.mtime });
+    const u = unverifiedNow(ctx.derived, { key, saved: note.mtime, size: note.size, contentHash: note.contentHash });
     const labels = [
       ...(fit?.fit === 'unknown' ? ['version unknown'] : []),
       ...(u ? [validDay(u.since) ? `source changed on ${u.since}` : 'source changed'] : []),
