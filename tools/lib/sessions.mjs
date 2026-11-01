@@ -146,6 +146,23 @@ export const agentKey = (input, key) => (input.agent_id ? `${input.agent_id}|${k
 // Both hooks mark a page under one kind, so an agent hears of each page once, whichever hook brings it up.
 export const markPages = (input, ranked, max = config().delivery.maxPages) => markFirst('pages', input.session_id, ranked, max, h => agentKey(input, h.key));
 
+// The first `max` items not yet marked, left unmarked, for a hook that marks only what its output budget keeps.
+export function unmarked(kind, sid, items, keyOf, max = Infinity) {
+  const due = [];
+  const seen = new Set();
+  for (const x of items) {
+    if (due.length >= max) break;
+    const key = keyOf(x);
+    if (!seen.has(key) && !marked(kind, sid, key)) due.push(x);
+    seen.add(key);
+  }
+  return due;
+}
+
+// The [key, rule] entries markAlways would mark, left unmarked.
+export const dueAlways = (sid, entries) => unmarked('excerpts', sid, entries, ([k, r]) => `always|${k}|${r.hash}`);
+export const duePages = (input, ranked, max = config().delivery.maxPages) => unmarked('pages', input.session_id, ranked, h => agentKey(input, h.key), max);
+
 // Two markers, both keyed by the rule alone, so a rule reworded since still counts as shown. The delivered one is
 // kept through compaction, so /lint can tell a rule a session was shown from one nothing brought up; the excerpt one
 // goes with compaction, so propose.mjs calls a rule shown only while it may still be in context. A failed write costs
