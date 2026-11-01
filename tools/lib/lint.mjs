@@ -4,7 +4,7 @@ import { isBuiltin } from 'node:module';
 import {
   config, vaultPath, plural, today, daysBetween, datedFiles, filesIn, pickRows, proposalRows, rewriteText, writeText, lf, readJson, readJsonSafe, toPosix, memo, statePath, isVaultOnly, isMarkerName, clock, inVaultFolder,
 } from './vault.mjs';
-import { editsFile, sentToHook, hookMatchers, typedFor, hasAgent, AGENT_NAME } from './agents.mjs';
+import { editsFile, sentToHook, hookMatchers, listedAgents, typedFor, hasAgent, AGENT_NAME } from './agents.mjs';
 import {
   vaultFile, loadNotes, noteErrors, ruleText, ruleTextParts, liveRules, knownDomain, alwaysSize, isUrl, validDay, normTopic, topicNotes, rawFile, toKey, resolver, linksUnder, noteLinks, byTopic, isTopicPage, isSourcePage, PAGE_KINDS, joinList,
   hasSection, footnotes, youSaid, linkedKeys, clip, citedSources, evidenceQuotes, keyOf, kindFolder, kindLabel, linkTo, parseNote, noteLinkSpans, maxChars, bundleOf, locate,
@@ -16,7 +16,7 @@ import { NAMESPACE_NAME } from './glob.mjs';
 import { EXTENSION_NAME, hasExtension, extensionRel, extension } from './ext.mjs';
 import { SCHEMES } from './versions.mjs';
 import { build } from './build.mjs';
-import { transcriptFor } from './sessions.mjs';
+import { transcriptFor, sessionsByName, sessionName } from './sessions.mjs';
 import { saidIn, quoteTexts, userPageTexts } from './quotes.mjs';
 import { loadExtractor } from './extractors.mjs';
 import {
@@ -64,8 +64,9 @@ export function lint(notes = loadNotes(), chains = sourceChains()) {
       ...sourcePages.filter(s => pages.has(s.key) || (onTopic && s.topic && s.domain === page.domain && s.topic === page.topic)),
     ];
   };
-  const typedIn = memo(prefix => {
-    const entry = transcriptFor(prefix);
+  let byName;
+  const typedIn = memo(name => {
+    const entry = transcriptFor(name, byName ??= sessionsByName());
     return entry ? typedFor(entry) : null;
   });
   // A file that can't be hashed for now is skipped, not reported as changed.
@@ -94,6 +95,7 @@ export function lint(notes = loadNotes(), chains = sourceChains()) {
       add('warn', n.rel, `${/^[aeiou]/.test(what) ? 'an' : 'a'} ${what} goes in wiki/${n.domain}/${folder}/`);
     }
     for (const e of noteErrors(n)) add('error', n.rel, e);
+    for (const e of toolErrors(n)) add('error', n.rel, e);
     // Settling can't go by a save time that hasn't come yet, so such a note waits until its text has held unchanged.
     if (n.saved > Date.now()) add('warn', n.rel, `its file is dated ${clock(new Date(n.saved))}, in the future, so the hooks wait until its text has gone ${plural(delivery.settleSeconds, 'second')} unchanged. Save it again, or fix the clock that dated it`);
     lintLinks(n, noteAt, named, md, add);
@@ -294,6 +296,7 @@ export function lintConfig(add) {
     const at = `editTools.${tool}`;
     if (!/^\S+$/.test(tool)) bad(`${at}: a tool name has no spaces`);
     else if (editsFile(tool)) bad(`${at}: ${tool} edits a file, which the edit hook reads from the call itself; take it out of editTools`);
+    else if (!listedAgents().length) bad(`${at}: agents in vault.config.json lists no agent, so lint can't tell whether an edit hook is sent ${tool}`);
     else if (!sentToHook(tool)) bad(`${at}: the edit hook's matcher, ${hookMatchers()}, never sends ${tool} to the hook, so it would never be gated`);
     if (!isMap(t)) {
       bad(`${at} must be an object with namespace, path and after`);
@@ -512,7 +515,9 @@ function checkTyped(n, { session, quote, id }, { typedIn, inboxRow, unchecked },
   }
   const row = id && inboxRow(id);
   if (!row) unchecked.push({ note: n.rel, cites: `session ${session}`, quote, gone: true });
-  else if (!String(row.session ?? '').startsWith(session)) add('warn', n.rel, `"${quote}" isn't in what row ${id} recorded for session ${session}: it was recorded in session ${String(row.session ?? '').slice(0, 8) || 'unknown'}`);
+  else if (!row.session || ![sessionName(String(row.session), row.agent), String(row.session)].includes(session)) {
+    add('warn', n.rel, `"${quote}" isn't in what row ${id} recorded for session ${session}: it was recorded in session ${row.session ? sessionName(String(row.session), row.agent) : 'unknown'}`);
+  }
   else if (!saidIn(quote, [String(row.text ?? '')])) add('warn', n.rel, `"${quote}" isn't in what row ${id} recorded`);
 }
 
@@ -569,6 +574,12 @@ function lintEvidence(n, ctx, add) {
 // by its path or its bare name. A bare [[slug]] two notes share resolves to neither in index.md, so it has to give its path.
 // A link by a note's key, or through a folder it isn't in, names the note for the tools, but Obsidian may resolve it to
 // another file or none, so lint gives the note's path.
+// Checked here and not in noteErrors, since a rule's delivery mustn't depend on which agents vault.config.json lists.
+const toolErrors = n => (n.tools ?? []).filter(x => /^\S+$/.test(x)).flatMap(x => (editsFile(x) ? [`tools names ${x}, which edits a file; give the rule applies_to instead`]
+  : sentToHook(x) ? []
+  : !listedAgents().length ? [`tools names ${x}, but agents in vault.config.json lists no agent, so lint can't tell whether an edit hook is sent it`]
+  : [`tools names ${x}, which the edit hook's matcher, ${hookMatchers()}, never sends to the hook, so it would never bring the rule up`]));
+
 function lintLinks(n, noteAt, named, md, add) {
   for (const target of noteLinks(n)) {
     if (!target || /\.(?!md$)[^./]+$/i.test(target)) continue;

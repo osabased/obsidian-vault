@@ -93,6 +93,14 @@ test('the launcher fails loudly: one stderr line, exit 1', t => {
   assert.match(missing.stderr, /^vault edit failed: .*edit\.mjs does not exist; commit the vault's tools\/ so post-commit copies it\n$/);
 });
 
+test('the launcher runs tools/hooks/<hook>.mjs from a .live copy made before the adapters', t => {
+  const v = makeVault(t);
+  v.write('.live/tools/hooks/prompt.mjs', "process.stdout.write('ran the old hook');\n");
+  const r = launch('prompt', { vault: v.root });
+  assert.equal(r.code, 0, r.stderr);
+  assert.equal(r.stdout, 'ran the old hook');
+});
+
 test('the launcher reports a hook that cannot load', t => {
   const v = makeVault(t);
   v.write('.live/tools/adapters/claude-code/hooks/prompt.mjs', 'export const = ;\n');
@@ -117,4 +125,9 @@ test('the launcher refuses a vault path that is not absolute, so it cannot mean 
   assert.equal(r.stdout, '');
   assert.match(r.stderr, /^vault prompt failed: the plugin's vault option "some\/vault" is not an absolute path; run claude plugin configure obsidian-vault\n$/);
   assert.ok(!v.exists('.state/sessions'));
+});
+
+test('the install line quotes the vault path, so a path with spaces stays one argument', async () => {
+  const { registration } = await import('../tools/adapters/claude-code/adapter.mjs');
+  assert.match(registration('/home/ledger/my vault').text, /--config "vault=\/home\/ledger\/my vault"$/m);
 });

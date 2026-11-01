@@ -1,4 +1,5 @@
-import { shortHash } from '../../lib/vault.mjs';
+import fs from 'node:fs';
+import { shortHash, plainText, toPosix } from '../../lib/vault.mjs';
 import { mark } from '../../lib/sessions.mjs';
 import { parsePatch, applyChunks, addedText } from './patch.mjs';
 import { continuedMark } from './transcript.mjs';
@@ -10,6 +11,10 @@ export const name = 'codex';
 export const capabilities = { start: true, prompt: true, deny: true, stopContext: true, subagentStart: true, typedText: true };
 
 export const sessionVar = 'CODEX_THREAD_ID';
+
+// Thread ids are UUIDv7: the first 8 hex digits are a timestamp that threads started in the same minute share, and the
+// last ones are random.
+export const shortName = sid => sid.slice(-8);
 
 // Codex has no safe-mode variable: the user turns hooks off in /hooks or with features.hooks = false.
 export const disabled = () => false;
@@ -24,18 +29,40 @@ export const proposeShell = 'from a POSIX shell with a quoted heredoc, since Pow
 
 export const identifiers = ['CODEX_', 'apply_patch', '*** Begin Patch', 'content_item_kinds', 'send_user_message', 'Codex'];
 
-const after = op => {
-  if (op.op === 'add') return () => op.lines.map(l => `${l}\n`).join('');
-  if (op.op === 'delete') return () => '';
-  return before => applyChunks(before, op.chunks);
-};
+const fileKey = (file, cwd) => (process.platform === 'win32' ? toPosix(file, cwd).toLowerCase() : toPosix(file, cwd));
+const readText = file => { try { return plainText(fs.readFileSync(file, 'utf8')); } catch { return null; } };
 
-// One event per file the patch touches, two for a move, so each file is gated and guarded as an edit of its own.
+// One event per file the patch touches, two for a move, so each file is gated and guarded as an edit of its own. Codex
+// applies the hunks in order, so a file's text is built from the hunks before: an add ignores what was there, a delete
+// leaves '', an update applies its chunks, and a move deletes its source and writes the source's new text to its
+// destination. Each event's after() runs the patch up to its own hunk, from the before it is given for its own file and
+// from disk for any other.
 function patchEvents(input, base) {
   const tool = input.tool_name;
-  return parsePatch(input.tool_input?.command ?? '').flatMap(op => [op.path, ...(op.moveTo ? [op.moveTo] : [])].map(file => ({
-    ...base, tool, args: input.tool_input, target: { namespace: 'file', path: file }, added: addedText(op), after: after(op),
-  })));
+  const texts = new Map();
+  const textOf = key => texts.get(key) ?? (read => read(key));
+  const out = [];
+  for (const op of parsePatch(input.tool_input?.command ?? '')) {
+    const from = fileKey(op.path, base.cwd);
+    const to = op.moveTo === undefined ? from : fileKey(op.moveTo, base.cwd);
+    if (op.op === 'add') {
+      const text = op.lines.map(l => `${l}\n`).join('');
+      texts.set(from, () => text);
+    } else if (op.op === 'delete') texts.set(from, () => '');
+    else {
+      const was = textOf(from);
+      texts.set(from, () => '');
+      texts.set(to, read => { const text = was(read); return text === null ? null : applyChunks(text, op.chunks); });
+    }
+    const upTo = new Map(texts);
+    const event = (file, key, added) => ({
+      ...base, tool, args: input.tool_input, target: { namespace: 'file', path: file }, added,
+      after: before => upTo.get(key)(k => (k === key ? before : readText(k))),
+    });
+    if (to !== from) out.push(event(op.path, from, ''));
+    out.push(event(op.moveTo ?? op.path, to, addedText(op)));
+  }
+  return out;
 }
 
 // output() gets only the handlers' results, so the session the Stop continuation is marked under is kept from events().
@@ -59,7 +86,16 @@ export function events(hook, input) {
   }
 }
 
-const EVENT_NAMES = { 'session-start': 'SessionStart', prompt: 'UserPromptSubmit', edit: 'PreToolUse', stop: 'Stop', 'subagent-start': 'SubagentStart' };
+// Codex's event, the vault's hook and whether Codex takes additionalContext from it, for each hook this adapter registers.
+const HOOKS = [
+  ['SessionStart', 'session-start', true],
+  ['UserPromptSubmit', 'prompt', true],
+  ['PreToolUse', 'edit', false],
+  ['SubagentStart', 'subagent-start', true],
+  ['Stop', 'stop', false],
+];
+export const hookNames = HOOKS.map(([, hook]) => hook);
+const EVENT_NAMES = Object.fromEntries(HOOKS.map(([event, hook]) => [hook, event]));
 
 // Stop's decision block continues the turn with the reason as the next prompt. Its hash is marked, so the prompt hook and
 // the transcript provider can tell the vault's text from the user's. No objection gives no output, never an allow.
@@ -74,14 +110,6 @@ export function output(hook, results) {
   }
   return { hookSpecificOutput: { hookEventName: EVENT_NAMES[hook], additionalContext: context } };
 }
-
-const HOOKS = [
-  ['SessionStart', 'session-start', true],
-  ['UserPromptSubmit', 'prompt', true],
-  ['PreToolUse', 'edit', false],
-  ['SubagentStart', 'subagent-start', true],
-  ['Stop', 'stop', false],
-];
 
 // The command names .live, whose content changes with each commit while the definition stays the same, so the trust the
 // user gives in /hooks holds across vault commits. The path is quoted, so cmd.exe keeps one with spaces whole.

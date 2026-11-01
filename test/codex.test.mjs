@@ -4,7 +4,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { execFileSync } from 'node:child_process';
 import { makeVault, ruleNote, pageNote, sourcePage, sessionId, cleanEnv } from './fixture.mjs';
-import { codexInput, codexPatch, codexRollout } from './codex.mjs';
+import { codexInput, codexPatch, codexRollout, hookPrompt } from './codex.mjs';
 import { parsePatch, applyChunks } from '../tools/adapters/codex/patch.mjs';
 
 const SCHEMAS = path.join(import.meta.dirname, 'fixtures', 'codex', 'schema');
@@ -78,6 +78,9 @@ test('the patch parser skips an Environment ID line, allows whitespace around th
   ]);
   assert.deepEqual(parsePatch(`<<'EOF'\n${codexPatch([{ delete: 'a.txt' }])}EOF\n`), [{ op: 'delete', path: 'a.txt' }], 'a heredoc wrapper is read as Codex reads it');
   assert.deepEqual(parsePatch('*** Begin Patch\n*** End Patch'), []);
+  const spaced = '*** Begin Patch\n*** Add File:   a.txt\n+x\n*** Update File:  b.txt\n*** Move to:  c.txt\n@@\n-y\n+z\n*** End Patch';
+  assert.deepEqual(parsePatch(spaced).map(op => [op.path, op.moveTo]), [['  a.txt', undefined], [' b.txt', ' c.txt']],
+    'spaces between the marker and the path stay part of the path, as Codex reads it');
 });
 
 test('the patch parser refuses what Codex refuses', () => {
@@ -104,6 +107,8 @@ test("chunks apply in order, at their @@ line, matching exactly, then without tr
   assert.equal(applyChunks('z\nq\nz\n', end), 'z\nq\nw\n', 'an End of File chunk matches at the end');
   const add = parsePatch(codexPatch([{ update: 'f', chunks: [{ lines: ['+more'] }] }]))[0].chunks;
   assert.equal(applyChunks('one\n', add), 'one\nmore\n', 'a chunk with no old lines appends');
+  const twoAdds = parsePatch(codexPatch([{ update: 'f', chunks: [{ context: '', lines: ['+A'] }, { context: '', lines: ['+B'] }] }]))[0].chunks;
+  assert.equal(applyChunks('one\n', twoAdds), 'one\nA\nB\n', 'insertions at the same line keep the patch order');
   assert.equal(applyChunks('one\n', loose), null, "a chunk that isn't found gives null");
 });
 
@@ -127,6 +132,42 @@ test('a move is gated on both paths, and a malformed patch fails loudly', t => {
   assert.equal(r.code, 1);
   assert.equal(r.stdout, '');
   assert.match(r.stderr, /^vault edit failed: [^\n]*is empty[^\n]*; see \.state\/errors\.log\n$/);
+});
+
+test("a move deletes its source and gives the destination the source's new text, and hunks on one path apply in order", async t => {
+  const v = codexVault(t);
+  const { events } = await v.import('adapters/codex/adapter.mjs');
+  fs.mkdirSync(path.join(v.project, 'docs'));
+  fs.writeFileSync(path.join(v.project, 'docs', 'a.txt'), 'a\nkeep\n');
+  const edits = ops => events('edit', patchCall('s', v.project, ops)).map(e => ({ path: e.target.path, added: e.added, after: e.after }));
+  const [source, dest] = edits([{ update: 'docs/a.txt', moveTo: 'src/b.txt', chunks: [{ lines: ['-a', '+set x to 1'] }] }]);
+  assert.deepEqual([source.path, source.added, source.after('a\nkeep\n')], ['docs/a.txt', '', '']);
+  assert.deepEqual([dest.path, dest.added, dest.after('what was at the destination\n')], ['src/b.txt', 'set x to 1', 'set x to 1\nkeep\n']);
+  const [, gone] = edits([{ update: 'docs/missing.txt', moveTo: 'src/b.txt', chunks: [{ lines: ['-a', '+b'] }] }]);
+  assert.equal(gone.after(''), null, "a source that can't be read gives null");
+  const [added, updated] = edits([{ add: 'src/n.txt', lines: ['one'] }, { update: 'src/n.txt', chunks: [{ lines: [' one', '+two'] }] }]);
+  assert.deepEqual([added.after(''), updated.after('')], ['one\n', 'one\ntwo\n'], 'an update after an add applies to the added text');
+  const [, second] = edits([{ update: 'docs/a.txt', chunks: [{ lines: ['-a', '+A'] }] }, { update: 'docs/a.txt', chunks: [{ lines: ['-A', '+Z'] }] }]);
+  assert.equal(second.after('a\nkeep\n'), 'Z\nkeep\n', 'the second update applies to the first one\'s result');
+  const [, , , moved] = edits([{ update: 'docs/a.txt', chunks: [{ lines: ['-keep', '+kept'] }] }, { delete: 'src/b.txt' }, { update: 'docs/a.txt', moveTo: 'src/b.txt', chunks: [{ lines: ['-a', '+b'] }] }]);
+  assert.equal(moved.after(''), 'b\nkept\n', 'a move carries the earlier updates of its source');
+  const [, readded] = edits([{ delete: 'docs/a.txt' }, { add: 'docs/a.txt', lines: ['fresh'] }]);
+  assert.equal(readded.after('a\nkeep\n'), 'fresh\n');
+});
+
+test('a move onto a page and an add then update on a page are guarded as the text Codex writes', t => {
+  const v = codexVault(t);
+  const sid = sessionId();
+  const said = '- 2026-10-01 · session 1a2b3c4d · "the cards breathe"';
+  v.write('raw/refs/cards.md', 'Cards.\n');
+  v.write('wiki/glim/sources/source-cards.md', sourcePage({ source: 'raw/refs/cards.md', body: ['## You said', said, '', "## Agent's reading", 'Roomy cards.', '', '## Rules'] }));
+  v.write('wiki/glim/concepts/x.md', pageNote({ kind: 'concept', body: ['Something else entirely.'] }));
+  const edit = ops => hook(v, 'edit', patchCall(sid, v.root, ops));
+  const over = denied(edit([{ update: 'wiki/glim/concepts/x.md', moveTo: 'wiki/glim/sources/source-cards.md', chunks: [{ context: '', lines: ['+more'] }] }])) ?? '';
+  assert.match(over, /This edit removes the user's words or a rule's evidence from wiki\/glim\/sources\/source-cards\.md/);
+  const page = ['---', 'kind: concept', 'domain: glim', '---', 'Body.'];
+  const claimed = denied(edit([{ add: 'wiki/glim/concepts/n.md', lines: page }, { update: 'wiki/glim/concepts/n.md', chunks: [{ lines: [' domain: glim', '+author: user'] }] }])) ?? '';
+  assert.match(claimed, /wiki\/glim\/concepts\/n\.md would be marked author: user/);
 });
 
 test("after() on wiki notes: dropping the user's words is refused, notes under ## Agent notes pass, and an unfound chunk refuses a user's page", t => {
@@ -166,6 +207,8 @@ test('Stop continues the turn with decision block, and the continuation is neith
   assert.equal(turn(), stamped, "the continuation doesn't restamp the turn");
   const { typedMessages } = await v.import('adapters/codex/adapter.mjs');
   assert.deepEqual(typedMessages(codexRollout(v, sid, ['write it with a script', reason])), ['write it with a script']);
+  assert.deepEqual(typedMessages(codexRollout(v, sid, ['write it with a script', hookPrompt(reason), 'and keep it short'])), ['write it with a script', 'and keep it short'],
+    'the continuation as Codex records it is skipped');
 });
 
 test("the provider keeps user.text, drops injected kinds and the question reply, and refuses a format it doesn't know", async t => {
@@ -181,10 +224,43 @@ test("the provider keeps user.text, drops injected kinds and the question reply,
     'Keep the grid gap at eight.',
     { role: 'assistant', kinds: null, text: 'Done.' },
     'and the tabs roomy',
+    { kinds: ['user.text', 'user.image'], content: [{ type: 'input_text', text: 'match this shade' }, { type: 'input_image', image_url: 'data:image/png;base64,AA==' }] },
+    { kinds: ['user.text', 'user.text'], content: [{ type: 'input_text', text: '<skill>' }, { type: 'input_text', text: 'two typed items' }] },
+    hookPrompt('Taste rules apply', 'a second fragment with <tags> & "quotes"'),
   ]);
-  assert.deepEqual(typedMessages(file), ['Keep the grid gap at eight.', 'and the tabs roomy']);
+  assert.deepEqual(typedMessages(file), ['Keep the grid gap at eight.', 'and the tabs roomy', 'match this shade']);
+  const { transcriptCheck } = await v.import('adapters/codex/adapter.mjs');
+  assert.deepEqual(transcriptCheck(file).missing, [], "the live check doesn't count a hook prompt as a missing field");
   assert.equal(typedMessages(codexRollout(v, sid, ['typed', { kinds: null, text: 'a user message with no kinds' }])), null);
+  const { content } = hookPrompt('Taste rules apply');
+  assert.equal(typedMessages(codexRollout(v, sid, ['typed', { kinds: null, content: [...content, { type: 'input_text', text: 'not a hook prompt' }] }])), null,
+    'a kind-less message is skipped only when every item is a hook prompt');
   assert.equal(typedMessages(v.at('.transcripts', 'missing.jsonl')), null);
+});
+
+test('two Codex sessions whose ids share their first 8 characters keep their own short names, inbox files and quotes', async t => {
+  const v = codexVault(t);
+  const [a, b] = ['019a0fb1-aaaa-7000-8000-0000aaaa0001', '019a0fb1-bbbb-7000-8000-0000bbbb0002'];
+  const said = { [a]: 'keep the cards roomy', [b]: 'keep the tabs tight' };
+  for (const sid of [a, b]) hook(v, 'session-start', codexInput('SessionStart', { session_id: sid, cwd: v.project, transcript_path: codexRollout(v, sid, [said[sid]]) }));
+  const rule = (slug, quote, line, not) => ({ domain: 'glim', slug, topic: slug, basis: 'stated', do: `${line}.`, not: `${not}.`, because: '', applies_to: [`${slug}/**`], quote });
+  for (const [sid, r] of [[a, rule('roomy-cards', said[a], 'Give cards room', 'Pack cards in')], [b, rule('tight-tabs', said[b], 'Set tabs close', 'Spread tabs out')]]) {
+    const out = v.propose(sid, r);
+    assert.equal(out.code, 0, out.stderr);
+  }
+  assert.match(v.read('wiki/glim/rules/roomy-cards.md'), /· session aaaa0001 · "keep the cards roomy"/);
+  assert.match(v.read('wiki/glim/rules/tight-tabs.md'), /· session bbbb0002 · "keep the tabs tight"/);
+  assert.deepEqual(fs.readdirSync(v.at('raw', 'inbox')).map(f => f.slice(11)).filter(f => /^(aaaa|bbbb|019a)/.test(f)).sort(), ['aaaa0001.jsonl', 'bbbb0002.jsonl']);
+  const { transcriptFor } = await v.import('lib/sessions.mjs');
+  assert.deepEqual([transcriptFor('aaaa0001')?.session, transcriptFor('bbbb0002')?.session, transcriptFor('019a0fb1')], [a, b, null]);
+  v.write('raw/refs/cards.md', 'Cards.\n');
+  v.write('wiki/glim/sources/source-cards.md', sourcePage({ source: 'raw/refs/cards.md', body: ['## You said', `- 2026-10-01 · session aaaa0001 · "${said[a]}"`, `- 2026-10-01 · session bbbb0002 · "${said[a]}"`, '', "## Agent's reading", '', '## Rules'] }));
+  const quotes = async () => (await v.import('lib/lint.mjs')).lint().filter(f => /isn't in|can't be checked/.test(f.msg)).map(f => `${f.file}: ${f.msg}`);
+  assert.deepEqual(await quotes(), [`wiki/glim/sources/source-cards.md: "${said[a]}" isn't in what the user typed in session bbbb0002. Quote their exact words, with … where you leave some out`]);
+  const id = v.read('wiki/glim/rules/tight-tabs.md').match(/\((a-[0-9a-f]{8})\)/)[1];
+  v.write('wiki/glim/rules/borrowed.md', ruleNote({ keywords: ['borrow'], evidence: [`- 2026-10-02 · stated · session aaaa0001 · "${said[b]}" (${id})`] }));
+  for (const sid of [a, b]) fs.rmSync(v.at('.transcripts', `rollout-2026-11-01T00-00-00-${sid}.jsonl`));
+  assert.deepEqual((await quotes()).filter(q => q.startsWith('wiki/glim/rules/')), [`wiki/glim/rules/borrowed.md: "${said[b]}" isn't in what row ${id} recorded for session aaaa0001: it was recorded in session bbbb0002`]);
 });
 
 test('SessionStart source maps to the reason, an unknown one read as new', async t => {
@@ -222,6 +298,20 @@ test('node tools/agents.mjs codex prints the hooks.json snippet byte for byte, w
   const none = v.run('agents.mjs', ['nope']);
   assert.equal(none.code, 2);
   assert.match(none.stderr, /^Usage: node tools\/agents\.mjs <agent>/);
+});
+
+test('node tools/agents.mjs run from a worktree outside .claude/worktrees/ names the main checkout', t => {
+  const v = codexVault(t);
+  const env = cleanEnv({ GIT_CONFIG_NOSYSTEM: '1', GIT_CONFIG_GLOBAL: '/dev/null' });
+  const git = (...args) => execFileSync('git', ['-c', 'user.name=t', '-c', 'user.email=t@example.com', '-c', 'commit.gpgsign=false', ...args], { cwd: v.root, env, stdio: 'pipe' });
+  git('init', '-q');
+  git('add', '-A');
+  git('commit', '-q', '-m', 'vault');
+  const elsewhere = `${v.root}-ledger`;
+  t.after(() => fs.rmSync(elsewhere, { recursive: true, force: true }));
+  git('worktree', 'add', '-q', elsewhere);
+  const r = execFileSync(process.execPath, [path.join(elsewhere, 'tools', 'agents.mjs'), 'codex'], { cwd: elsewhere, env, encoding: 'utf8' });
+  assert.equal(r, `${snippet(v.root.replace(/\\/g, '/'))}\n\n${WHERE}\n`);
 });
 
 test('the launcher runs the hook it names, and fails loudly through runHook for a name that is no hook', t => {

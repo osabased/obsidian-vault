@@ -909,7 +909,7 @@ The phases build mechanism only. Adding real knowledge and taste is the user's c
      - **A mapped MCP tool.** A call `editTools` maps gets its name's rules from `nameScope` and its tool's rules here. They join in one list, keeping the first per key, so a rule both reach refuses once.
      - **Unmapped and unknown tools.** A call with no rule on its name returns null after the match step, as an edit outside every glob does. `tools` holds no pages, since `livePages` (`rules.mjs:357-363`) has no `tools`.
      - **Copy.** `refusal()` (`edit.mjs:220-241`) gains the noun. For a tool call the head is "Taste rules apply to AskUserQuestion:" and the foot "Revise this call to follow them, then retry. The retry is allowed." (open question; `CODING_STANDARDS.md:15`). A tool call writes no turn marker for the Stop hook.
-     - **Lint.** `listErrors` (`rules.mjs:190`) adds two errors: a name the matcher never sends, `tools names Bash, which the edit hook's matcher, ^(?:Edit|Write|…)$, never sends to the hook, so it would never bring the rule up`, and a name in `FILE_TOOLS`, `tools names Edit, which edits a file; give the rule applies_to instead`. A name the matcher sends but no tool has, such as a misspelt MCP tool, can't be caught: `/lint`'s rules no session was shown lists it. `hasChannel`'s comment loses "nothing delivers on it yet".
+     - **Lint.** Lint's `toolErrors` (`lint.mjs`), not `noteErrors`, adds these errors, so a rule's delivery never depends on `agents`: a name the matcher never sends, `tools names Bash, which the edit hook's matcher, ^(?:Edit|Write|…)$, never sends to the hook, so it would never bring the rule up`, and a name in `FILE_TOOLS`, `tools names Edit, which edits a file; give the rule applies_to instead`. When `agents` lists none it says so instead: `tools names TodoWrite, but agents in vault.config.json lists no agent, so lint can't tell whether an edit hook is sent it`, and the same for an `editTools` key. A name the matcher sends but no tool has, such as a misspelt MCP tool, can't be caught: `/lint`'s rules no session was shown lists it. `hasChannel`'s comment loses "nothing delivers on it yet".
      - **Latency.** A tool call with no rule on it costs what an edit outside every glob costs: the notes load from the cache (`cache.mjs`) and the scan is one pass over `liveRules`. The perf group gains `an AskUserQuestion call takes under 300 ms at 3,000 notes`, fastest of 3, with one `tools` rule among the generated notes. That is well inside the 10 s deadline (6.6b). An index of rules by tool is a scale item, left until the perf test says so.
    - **Rules that change.**
      - `.claude/skills/ingest/SKILL.md` step 2: after saving a binary source, run `node tools/extract.mjs <file>`, and stop and tell the user when it fails; then run `node tools/scan.mjs <file>` on every source and handle exit 1 as Privacy says, and on any other exit but 0 stop too. A file no extractor reads isn't a stop, whatever its type: scan skips it, the user hears its text wasn't scanned, and an image backs basis `reading` only while any other binary backs nothing; `/ingest batch` takes it in. A `failed` line for an extractor that threw, a bad result or a found secret still stops. Step 5 quotes a binary source from its derived text. `/ingest batch` does the same, and leaves a source that fails either for the user.
@@ -1007,7 +1007,7 @@ The phases build mechanism only. Adding real knowledge and taste is the user's c
        - the file-tool branches of `target` and `newText` (`edit.mjs:158-161`, `:172-175`).
 
        Lint's `editTools` checks (`lint.mjs:238-243`) ask the adapters instead.
-     - **The session id variable** goes through `currentSession()`. It is read in `ownEntry` (`sessions.mjs:13-17`), `lint.mjs:24` and `log.mjs:55`, and named in the refusal at `propose.mjs:85`.
+     - **The session id variable** goes through `currentSession()`, or `sessionIds()` in `ownEntry` (`sessions.mjs:13-17`). It is read in `ownEntry`, `lint.mjs:24` and `log.mjs:55`, and named in the refusal at `propose.mjs:85`.
      - **The transcript reader** (`quotes.mjs:5-28`) becomes `tools/adapters/claude-code/transcript.mjs`. Its callers are `propose.mjs:146` and lint's `typedIn` (`lint.mjs:48-51`).
      - **Registration** stays at the repo root, where the plugin layout needs it: `hooks/hooks.json`, `hooks/launch.mjs` and `.claude-plugin/`. Only the launcher's import path changes (`launch.mjs:33`).
      - **Copy that names Claude Code's tools:** the shell line in `proposeNote` (`session-start.mjs:19`) and `.claude/skills/ingest/SKILL.md:23`.
@@ -1050,7 +1050,7 @@ The phases build mechanism only. Adding real knowledge and taste is the user's c
      - `preTool { session, agent?, cwd, tool, args, target?, added?, after? }`:
        - `target` is `{ namespace: 'file', path }`, set only for the adapter's own file tools. The path is absolute or from `cwd`.
        - `added` is the text the call adds, which triggers are tested on.
-       - `after` is a function. The core calls it only for a wiki note, with the file's text (`''` for a new file). It returns the whole text after the call, or null when the adapter can't follow the call. `noteGuard` already handles null (`edit.mjs:119-120`).
+       - `after` is a function. The core calls it only for a wiki note, with the file's text (`''` for a new file). It returns the whole text after the call, or null when the adapter can't follow the call. `noteGuard` already handles null (`edit.mjs:119-120`). A call with no `after`, such as one `editTools` maps to the `file` namespace, is read as null: denied on a user's page, let through on any other.
        - The core reads the file itself (`edit.mjs:114-116`), so `before` isn't passed.
        - A call with no `target` is a tool call. The core maps it through `editTools` (`edit.mjs:143-167`) and checks phase 5's `tools` rules on `tool` and `args` (item 5, Tool triggers). `asText(args)` stands where phase 5 has `asText(tool_input)`.
      - `subagentStart { session, agent, cwd }` and `stop { session, agent?, cwd }`.
@@ -1065,6 +1065,7 @@ The phases build mechanism only. Adding real knowledge and taste is the user's c
      - `name`, the folder's name;
      - `capabilities` (6.7b): `{ start, prompt, deny, stopContext, subagentStart, typedText }`, each true or false. Both adapters declare every one. The 6.7b fallbacks, such as keyword rules moving into the start block, wait for an agent that lacks an event, so phase 6 doesn't build them;
      - `sessionVar`: the variable a script reads the session id from;
+     - `shortName(sid)`: the session's short name, which tells it from every other session in practice. Claude Code's is the first 8 characters of the id, so older Evidence lines and `raw/inbox/` and `raw/picks/` file names still resolve. Codex's is the last 8, the random tail of its UUIDv7 id, whose first 8 are a timestamp threads started in the same minute share;
      - `disabled(env)`;
      - `events(hook, input)` and `output(hook, results)`. A result list with no `context` and no `deny` gives no output, never an `allow` (6.7a);
      - `fileTools` and `sends(tool)`, which lint reads for `editTools` and for phase 5's `tools` names;
@@ -1073,13 +1074,14 @@ The phases build mechanism only. Adding real knowledge and taste is the user's c
      - `identifiers`: the names only this agent uses, for the neutral-core test;
      - `registration(vaultRoot)`: `{ where, text }`, which `tools/agents.mjs` prints.
    - **Registry** (`tools/lib/agents.mjs`).
-     - `agent(name)` loads `tools/adapters/<name>/adapter.mjs` through `createRequire`, as `extension()` loads extensions (`ext.mjs:15-20`). It throws on an unknown name.
-     - `config().agents` lists the adapters that lint checks tool names against. `config()` sets `agents` to `['claude-code']` when it is not a list; `DEFAULTS` doesn't hold it, since `DEFAULTS` merges objects. Lint errors on a name with no adapter folder.
+     - `agent(name)` loads `tools/adapters/<name>/adapter.mjs` through `byName` in `ext.mjs`, the one name check and `createRequire` loader that extensions and compile formats share too. Each caller keeps its own error text. It throws on an unknown name.
+     - `config().agents` lists the adapters that lint checks tool names against, and orders `currentSession()`. Neither delivery nor session ownership reads it. `config()` sets `agents` to `['claude-code']` when it is not a list; `DEFAULTS` doesn't hold it, since `DEFAULTS` merges objects. Lint errors on a name with no adapter folder.
      - `currentSession(env)` returns `{ agent, id }` for the first adapter, in the order of `agents`, whose `sessionVar` is set, or null.
      - `touchSession(event, hits, agentName)` writes `agent` into the registry entry. An entry with no `agent`, which is every entry today, reads as `claude-code`.
+     - `shortName(sid, agentName)` gives the adapter's short name, the first agent's when the agent isn't known. Everything that names or matches a session by short name goes through it: the Evidence and `## You said` citations, the `raw/inbox/` and `raw/picks/` file names, the `log.md` lines, `transcriptFor`, lint's row fallback and `review.mjs`'s count of sessions a rule missed. `sessionName(sid, agentName)` in `sessions.mjs` takes the agent from the registry entry when the caller has none. Inbox and pick rows record `agent`, so a row names its session the same way after the registry drops it. Matching compares short names for equality, or the full id; never a prefix.
      - `typedFor(entry)` calls that adapter's `typedMessages(entry.transcript)`. It replaces the call at `propose.mjs:146`. `transcriptFor` (`sessions.mjs:196-200`) returns the entry, so lint's `typedIn` (`lint.mjs:48-51`) calls `typedFor` too.
-     - `ownEntry` compares with `currentSession()`. `lint.mjs:24` and `log.mjs:55` take the id from it.
-     - `propose.mjs` and `pick.mjs` make the session id argument optional. With none, they use `currentSession()`, and with neither they refuse. `pick.mjs show` still takes the session id. The refusal at `propose.mjs:85` becomes: "Pass the session id from the taste vault's note at session start, or run this from the agent's own shell, which sets its session id." (open question).
+     - `ownEntry` compares with `sessionIds(env)`, the ids set in the `sessionVar` of every adapter in `tools/adapters/`, whatever `agents` lists. It refuses an id that none of them is, and accepts any id when none is set. `lint.mjs:24` and `log.mjs:55` take the id from `currentSession()`.
+     - `propose.mjs` and `pick.mjs` make the session id argument optional. With none, they use `currentSession()`, and with neither they refuse. They check the session before they read stdin, so a missing or unknown session is refused whatever the input. `pick.mjs show` still takes the session id. The refusal at `propose.mjs:85` becomes: "Pass the session id from the taste vault's note at session start, or run this from the agent's own shell, which sets its session id." (open question).
    - **The Claude Code adapter.** Code moves here, and none of it is rewritten.
      - `events`:
        - `session_id`, `agent_id`, `cwd` and `transcript_path` become `session`, `agent`, `cwd` and `transcript`. Events carry the raw `cwd`; handlers apply `cwdOf` as before;
@@ -1094,9 +1096,9 @@ The phases build mechanism only. Adding real knowledge and taste is the user's c
      - `transcript.mjs` is `quotes.mjs:5-28` as it stands.
      - `identifiers`: `CLAUDE_CODE_`, `CLAUDE_PLUGIN_`, `hookSpecificOutput`, `permissionDecision`, `additionalContext`, `AskUserQuestion`, `MultiEdit`, `NotebookEdit`, `toolUseResult`, `isCompactSummary`, `system-reminder`, `session_id`, `agent_id`, `tool_name`, `transcript_path` and `Claude Code`.
      - `registration` prints the two install commands in README.md:14-15.
-     - **Launcher.** `launch.mjs:33` imports `.live/tools/adapters/claude-code/hooks/<hook>.mjs`, and its messages are unchanged. An installed plugin whose launcher predates phase 6 still looks for `.live/tools/hooks/<hook>.mjs`. So `tools/hooks/<hook>.mjs` stays for one release as a one-line import of the new entry, and a later phase removes it (open question).
+     - **Launcher.** `launch.mjs:33` imports `.live/tools/adapters/claude-code/hooks/<hook>.mjs`, or `.live/tools/hooks/<hook>.mjs` when a `.live` copy from before phase 6 has only that, and its messages are unchanged. An installed plugin whose launcher predates phase 6 still looks for `.live/tools/hooks/<hook>.mjs`. So `tools/hooks/<hook>.mjs` stays for one release as a one-line import of the new entry, and a later phase removes it (open question).
    - **The Codex adapter.**
-     - **Registration.** `node tools/agents.mjs codex` prints the hooks for `~/.codex/hooks.json`, with the main checkout's path (`mainCheckout`, `vault.mjs:97`). Without the path's real value, it prints:
+     - **Registration.** `node tools/agents.mjs codex` prints the hooks for `~/.codex/hooks.json`, with the main checkout's path: git's common dir through `mainWorktree` (`git.mjs`), so a worktree anywhere names it, or `mainCheckout` (`vault.mjs:97`) when git can't say. Without the path's real value, it prints:
 
        ```json
        {
@@ -1128,12 +1130,13 @@ The phases build mechanism only. Adding real knowledge and taste is the user's c
        - It follows the grammar in `parser.rs:4-22`, with the markers at `parser.rs:37-45`.
        - It allows whitespace around the markers, as Codex does (`parser.rs:24-25`), and skips an `*** Environment ID:` line.
        - A patch wrapped in a `<<EOF` heredoc is read as Codex's lenient mode reads it.
-       - Paths are from `cwd`, or absolute (`parser.rs:85-90`).
+       - Paths are from `cwd`, or absolute (`parser.rs:85-90`). Spaces between a marker and its path stay part of the path, as Codex's `strip_prefix` leaves them.
 
        Each file becomes one event:
        - **Add File:** `added` is the content, the `+` lines without their `+`, and `after` returns the content.
-       - **Update File:** `added` is the `+` lines joined with LF. `after(before)` applies each chunk in order after the one before it, at its `@@` context line when it has one. It looks for the chunk's ` ` and `-` lines exactly, then ignoring trailing whitespace, then ignoring both ends, then with Unicode dashes, quotes and spaces read as ASCII, as `seek_sequence.rs` does. It returns null when a chunk isn't found.
-       - **Move to:** a second event on the new path, with the same `added` and `after`.
+       - **Update File:** `added` is the `+` lines joined with LF. `after(before)` applies each chunk in order after the one before it, at its `@@` context line when it has one. It looks for the chunk's ` ` and `-` lines exactly, then ignoring trailing whitespace, then ignoring both ends, then with Unicode dashes, quotes and spaces read as ASCII, as `seek_sequence.rs` does. It returns null when a chunk isn't found. Insertions at one line keep the patch's order, as `file_update.rs` applies them.
+       - **Move to:** the source path's event is a delete, `added` `''` and `after` returning `''`. A second event on the new path has the update's `added`, and its `after` applies the chunks to the source's text, read from disk, whatever the destination held; null when the source can't be read.
+       - Codex applies the hunks in order (`lib.rs:504`), so hunks on one path compose: each event's `after` runs the patch up to its own hunk, from the `before` it is given for its own file and from disk for any other. An Add ignores what was there, a Delete leaves `''`, and a null carries through.
        - **Delete File:** `added` is `''` and `after` returns `''`. So `vaultGuard` refuses deleting what it guards, `noteGuard` refuses a page cut to nothing once, and a user's page is refused (`edit.mjs:97`).
        - A patch that doesn't parse throws. That is a loud hook failure, and Codex's own parser refuses the same patch.
      - **`output`.**
@@ -1144,10 +1147,11 @@ The phases build mechanism only. Adding real knowledge and taste is the user's c
          - The prompt event and the transcript provider drop a text whose hash is marked. So the vault's own text never counts as the user's words.
          - The gate markers keep it to one continuation per file, as for Claude Code (6.3d).
      - **`transcript.mjs`.** `typedMessages(file)` reads the rollout JSONL.
-       - It keeps a line with `type: 'response_item'`, `payload.type: 'message'` and `payload.role: 'user'` whose `payload.internal_chat_message_metadata_passthrough.content_item_kinds` is exactly `['user.text']`. Its texts are the `text` of each `input_text` item in `payload.content`.
+       - It keeps a line with `type: 'response_item'`, `payload.type: 'message'` and `payload.role: 'user'` whose `payload.internal_chat_message_metadata_passthrough.content_item_kinds` holds one `user.text` and otherwise only `user.*` kinds, such as `user.image` for an image the user attached. Its texts are the `text` of each `input_text` item in `payload.content`. A message with several `user.text` items is a tag-wrapped injection and is dropped.
        - It drops a text that starts `<send_user_message_question_reply`, the reply to Codex's question tool. The answer's format isn't known, and the options in it are the agent's (§7).
        - It drops a text whose hash is marked `continued`.
-       - It returns null when the file can't be read, has no `session_meta`, or holds a user message with no `content_item_kinds`. So a format change refuses quotes, rather than letting injected text count as the user's.
+       - It skips a Stop continuation, which Codex records as a user message with no `content_item_kinds` whose every `input_text` is `<hook_prompt hook_run_id="…">…</hook_prompt>`.
+       - It returns null when the file can't be read, has no `session_meta`, or holds any other user message with no `content_item_kinds`. So a format change refuses quotes, rather than letting injected text count as the user's.
      - **Other exports.**
        - `fileTools` is `['apply_patch']`, and `sends` tests `^(?:apply_patch|mcp__.*)$`.
        - `sessionVar` is `CODEX_THREAD_ID`.
@@ -1216,7 +1220,7 @@ The phases build mechanism only. Adding real knowledge and taste is the user's c
      - **With Codex hooks.** A project whose domain opts in to `codex` gets its rules twice in a session whose Codex hooks are trusted. The README says to opt in only for a project where the hooks don't run, such as a machine without the vault's hooks, or a repo other people's agents read.
      - **What is lost** (6.7f): deny-then-retry, `triggers`, once-per-session delivery, proposing, pages and namespace globs. The copy is stale until compiled again.
    - **Neutral core.**
-     - `test/neutral-core.test.mjs` gains a second test. It loads every adapter's `identifiers` and fails on each one found in a file under `tools/` outside `tools/adapters/`, naming the file and line. It reads the names from the adapters, so the test itself names no agent.
+     - `test/neutral-core.test.mjs` gains a second test. It loads every adapter's `identifiers`, folder name and `sessionVar`, and fails on each one found in a file under `tools/` outside `tools/adapters/`, naming the file and line. Only three kinds of line are accepted: `FIRST_AGENT` in `tools/lib/agents.mjs`, the `agents` default in `config()` in `tools/lib/vault.mjs`, and the one-line `tools/hooks/<hook>.mjs` shims that import an adapter's hook. It reads the names from the adapters, so the test itself names no agent.
        - It scans `tools/` only. `test/` keeps Claude Code payloads, which the existing tests pin, and the skills and AGENTS.md are copy for every agent, which review checks.
        - The domain-key test keeps its four roots, and `tools/adapters/` falls inside them.
      - The inventory grep, run from the vault folder, prints what the identifier test would find:
@@ -1272,9 +1276,10 @@ The phases build mechanism only. Adding real knowledge and taste is the user's c
      - **`test/codex.test.mjs`.**
        - The parser handles Add, Update with and without `@@` context, Move to, Delete, an Environment ID line, whitespace around the markers, and `*** End of File`.
        - A patch over two covered files gives one deny naming both. The same patch again passes. A malformed patch is a loud failure.
+       - A move's source event leaves `''` and its destination gets the source's new text; an update after an add or another update on the same path applies to the earlier result. A move onto a page that drops its `## You said` line, and an add then update that marks a page `author: user`, are refused.
        - `after()` on a wiki note: a patch that removes a `## You said` line is refused; one that adds lines under `## Agent notes` on a user's page passes; a chunk that matches nothing refuses a user's page.
        - Stop's output is `{"decision":"block","reason":…}` byte for byte. A prompt with that text afterwards gives no output and doesn't restamp the turn, and the provider drops it.
-       - The provider keeps `user.text`, drops `agents_md.*`, `environments.*`, `additional_content.*` and the question reply, and returns null for a user message with no `content_item_kinds` and for a missing file.
+       - The provider keeps `user.text` and the text of a text-and-image message, drops `agents_md.*`, `environments.*`, `additional_content.*`, the question reply and a Stop continuation in Codex's `<hook_prompt>` shape, and returns null for any other user message with no `content_item_kinds` and for a missing file.
        - `source` mapping, including an unknown value read as `new`.
        - `node tools/agents.mjs codex` prints the snippet byte for byte, for a vault at a fixed POSIX path and at a fixed Windows path, and it parses as JSON with the five events.
        - Every `codexInput` payload fits the copied schemas.
@@ -1366,7 +1371,7 @@ The phase 6 check, run from the vault folder:
 out=$(node --test --test-reporter=tap test/*.test.mjs); echo "$out" | grep -E '^# (pass|fail|todo) |^not ok '; echo "$out" | grep -qx '# fail 0' && echo "$out" | grep -qx '# todo 0' && node tools/lint.mjs && ! git grep -nIiE 'luau|\.lua\b|roblox|--!strict|UIListLayout|task\.wait|local x = 1|\bdemo\b' -- test tools .claude/skills AGENTS.md && VAULT_PERF=1 node --test test/perf/*.perf.mjs && ! git grep -nE 'CLAUDE_|CODEX_|hookSpecificOutput|permissionDecision|additionalContext|AskUserQuestion|MultiEdit|NotebookEdit|apply_patch|content_item_kinds|toolUseResult|isCompactSummary|system-reminder|\b(session_id|agent_id|tool_name|transcript_path)\b|Claude Code|Codex' -- tools ':!tools/adapters'
 ```
 
-It prints what the phase 5 check prints, then every line outside `tools/adapters/` that names an agent. It exits 0 only when the phase 5 check passes and that grep prints nothing. The identifier test in the suite checks the same from the names each adapter exports; the grep also catches a name no adapter lists yet.
+It prints what the phase 5 check prints, then every line outside `tools/adapters/` that names an agent. It exits 0 only when the phase 5 check passes and that grep prints nothing. The identifier test in the suite checks the same from the names each adapter exports, its folder name and its `sessionVar`; the grep also catches a name no adapter lists yet. The test accepts three kinds of line: `FIRST_AGENT` in `tools/lib/agents.mjs`, the `agents` default in `config()` in `tools/lib/vault.mjs`, and the one-line `tools/hooks/<hook>.mjs` shims that import an adapter's hook.
 
 ## 10. AGENTS.md changes
 

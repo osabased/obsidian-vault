@@ -8,6 +8,9 @@ export const capabilities = { start: true, prompt: true, deny: true, stopContext
 
 export const sessionVar = 'CLAUDE_CODE_SESSION_ID';
 
+// Session ids are random UUIDs, so their start tells sessions apart.
+export const shortName = sid => sid.slice(0, 8);
+
 export const disabled = env => env.CLAUDE_CODE_SAFE_MODE === '1';
 
 export const fileTools = ['Edit', 'Write', 'MultiEdit', 'NotebookEdit'];
@@ -100,6 +103,6 @@ export const registration = root => ({
   where: 'Run these in a shell to install the plugin with this vault.',
   text: [
     'claude plugin marketplace add osabased/obsidian-vault',
-    `claude plugin install obsidian-vault@obsidian-vault --config vault=${root}`,
+    `claude plugin install obsidian-vault@obsidian-vault --config "vault=${root}"`,
   ].join('\n'),
 });
