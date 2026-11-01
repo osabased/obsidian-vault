@@ -115,7 +115,7 @@ export function makeVault(t, { config = {}, domain = 'glim', topics = ['layout',
   // it changes only the fields it gives.
   const marker = `${domain}.project`;
   fs.writeFileSync(path.join(project, marker), '');
-  const asOf = new Date(Date.now() - 30 * 86400e3).toISOString().slice(0, 10);
+  const asOf = localDay(new Date(Date.now() - 30 * 86400e3));
   const shapes = presets.map(name => PRESETS[name](v, { newProject, asOf }));
   v.write('vault.config.json', `${JSON.stringify({
     domains: merged([{ [domain]: { title: 'Glim', topics, markers: [marker] } }, ...shapes.map(s => s.domains ?? {}), domains]),
@@ -202,10 +202,14 @@ export function ruleNote({ domain = 'glim', topic = 'code', basis = 'stated', ki
   ].join('\n');
 }
 
-const sha256 = data => createHash('sha256').update(data).digest('hex');
+export const sha256 = data => createHash('sha256').update(data).digest('hex');
+// The tools date notes by the local day, so a fixture's dates are local too.
+const localDay = d => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+// The lines under a section's title in review.mjs output, or undefined when it has no such section.
+export const sectionOf = (out, title) => out.trimEnd().split('\n\n').find(b => b.startsWith(`${title}\n`))?.split('\n').slice(1);
 const link = rel => `[[${rel.replace(/\.md$/, '')}|${path.posix.basename(rel, '.md')}]]`;
 const topicPage = ({ domain, topic, summary, links }) => pageNote({ domain, topic, summary, body: ['What the vault holds on this topic.', '', '## Rules', ...links.map(l => `- ${link(l)}`)] });
-const withFields = (fields, body) => `---\n${Object.entries(fields).map(([k, x]) => `${k}: ${x}`).join('\n')}\n---\n${body}`;
+export const withFields = (fields, body) => `---\n${Object.entries(fields).map(([k, x]) => `${k}: ${x}`).join('\n')}\n---\n${body}`;
 
 // An alias that maps a name's first part to a folder through the project's tree.json, and the rest to a .zq file in it.
 const FIXTURE_ALIAS = [
@@ -259,7 +263,7 @@ export const PRESETS = {
     fs.writeFileSync(path.join(dir, 'almanac.lock'), 'pkg 2.4.0\n');
     const guide = '# Opening a ledger\n\nIn pkg 2, openLedger takes a path and returns the ledger.\nIn pkg 3, openLedger takes an options object with a path field.\n';
     v.write('raw/refs/ledger-guide.md', withFields({
-      url: 'https://example.com/pkg/ledger', fetched: asOf, etag: `'"ledger-1"'`, last_modified: 'Tue, 15 Sep 2026 08:12:31 GMT', sha256: sha256(guide),
+      url: 'https://pkg.invalid/ledger', fetched: asOf, etag: `'"ledger-1"'`, last_modified: 'Tue, 15 Sep 2026 08:12:31 GMT', sha256: sha256(guide),
     }, guide));
     v.write('raw/refs/ledger-repo.md', withFields({ repo: 'https://example.com/pkg.git', path: 'docs/ledger.md', commit: 'a1b2c3d4e5f6' }, 'openLedger returns the ledger it opened.\n'));
     const knowledge = (since, before, quote, doLine, notLine) => ruleNote({

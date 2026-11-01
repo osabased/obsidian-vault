@@ -241,9 +241,10 @@ test('pick --help describes project', t => {
 
 test('a pick in a domain reached by a path records that domain and the folder', t => {
   const v = makeVault(t, { presets: ['journal'] });
+  v.write('wiki/journal/rules/always-j.md', ruleNote({ domain: 'journal', topic: 'days', always: true, doLine: 'Date each entry.' }));
   const sid = sessionId();
   const cwd = v.projects.journal;
-  v.startSession(sid, { cwd });
+  assert.match(v.startSession(sid, { cwd })?.hookSpecificOutput?.additionalContext ?? '', /journal\/always-j: Do: Date each entry\./);
   const r = pick(v, sid, comment());
   assert.equal(r.code, 0, r.stderr);
   const [row] = rowsIn(v, 'picks');

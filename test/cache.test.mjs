@@ -20,6 +20,7 @@ function hookIn(root, name, input, env = {}) {
 test('6.6d: on a fresh clone with an empty .state/, every committed note applies at once', t => {
   const v = makeVault(t, { presets: ['glim'] });
   v.write('wiki/glim/concepts/quartz.md', pageNote({ kind: 'concept', keywords: ['quartz'] }));
+  v.write('wiki/glim/topics/layout.md', pageNote({ topic: 'layout', keywords: ['prism'] }));
   v.checkout();
   const clone = fs.mkdtempSync(path.join(os.tmpdir(), 'vault-clone-'));
   t.after(() => fs.rmSync(clone, { recursive: true, force: true }));
@@ -32,18 +33,21 @@ test('6.6d: on a fresh clone with an empty .state/, every committed note applies
   const gated = hookIn(clone, 'edit', { session_id: sid, cwd: v.project, hook_event_name: 'PreToolUse', tool_name: 'Edit', tool_input: { file_path: path.join(v.project, 'src', 'a.zq'), old_string: 'a', new_string: 'set x to 1' } });
   assert.match(denied(gated), /glim\/zq-trigger: Do: Set values through a named step\./);
   assert.match(denied(gated), /glim\/zq-files \(concept page\)/);
-  const said = context(hookIn(clone, 'prompt', { session_id: sid, cwd: v.project, hook_event_name: 'UserPromptSubmit', prompt: 'the shimmer and the quartz' }));
+  const said = context(hookIn(clone, 'prompt', { session_id: sid, cwd: v.project, hook_event_name: 'UserPromptSubmit', prompt: 'the shimmer, the quartz and the prism' }));
   assert.match(said, /glim\/keyword-rule: Do: Fade a shimmer in over two frames\./);
   assert.match(said, /glim\/quartz \(concept page\)/);
+  assert.match(said, /glim\/layout \(topic page\)/);
 });
 
 test('6.6d: a note dated in the future is delivered once its text has held for settleSeconds, and lint warns on it', async t => {
   const v = makeVault(t, { presets: ['glim'], config: { delivery: { settleSeconds: 1 } } });
   const rel = 'wiki/glim/rules/keyword-rule.md';
   v.write(rel, v.read(rel), { saved: new Date(Date.now() + 86400e3) });
-  assert.doesNotMatch(context(prompt(v, sessionId(), 'the shimmer')), /keyword-rule/, 'its text has only just been seen');
+  const sid = sessionId();
+  v.startSession(sid);
+  assert.equal(prompt(v, sid, 'the shimmer'), null, 'its text has only just been seen');
   await sleep(1500);
-  assert.match(context(prompt(v, sessionId(), 'the shimmer')), /glim\/keyword-rule: Do: Fade a shimmer in over two frames\./);
+  assert.match(context(prompt(v, sid, 'the shimmer')), /glim\/keyword-rule: Do: Fade a shimmer in over two frames\./);
   assert.equal((await lintFound(v, /in the future, so the hooks wait until its text has gone 1 second unchanged/)).length, 1);
 });
 

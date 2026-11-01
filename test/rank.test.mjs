@@ -1,8 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { makeVault, ruleNote, sessionId } from './fixture.mjs';
+import { makeVault, ruleNote, sessionId, sectionOf } from './fixture.mjs';
 
-const sectionOf = (out, title) => out.trimEnd().split('\n\n').find(b => b.startsWith(`${title}\n`))?.split('\n').slice(1);
 const fact = (topic, asOf) => ruleNote({ topic, kind: 'knowledge', basis: 'source', extra: [`as_of: ${asOf}`], applies_to: [`src/${topic}/**`] });
 
 test('review status ranks each pair of rules whose globs overlap', t => {
