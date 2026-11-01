@@ -1,6 +1,6 @@
 # All-rounder vault: design draft
 
-Status: draft, 2026-11-01. Phase 0 (checks), phase 1 (format) and phase 2 (delivery) are built and merged into main. Phase 3 (neutral fixtures) is built, reviewed and landed on `phase-3-delivery`, not yet merged into main.
+Status: draft, 2026-11-01. Phase 0 (checks), phase 1 (format) and phase 2 (delivery) are built and merged into main. Phase 3 (neutral fixtures) is built, reviewed and landed on `phase-3-delivery`, not yet merged into main. Phase 4 (knowledge mechanisms) is designed in §8 item 4, not built.
 
 Scope: structure, design and architecture only. This design adds no knowledge to the vault. It names no domain, platform, package ecosystem or site as built in. Where it needs an example, it uses a placeholder.
 
@@ -197,7 +197,7 @@ Phase-3 notes then need no migration, even where the tooling lands later.
 - *Design.*
   - A saved source in `raw/refs/` starts with `url`, `fetched`, `etag`, `last_modified` and `sha256` (of the body). A git source gives `repo`, `path` and `commit` instead.
   - Refresh (6.2a) uses these fields.
-  - A re-fetched file with the same URL but a new hash counts as a new version, not an already-named source. Today `review.mjs:123` matches by URL only.
+  - A re-fetched file with the same URL but a new hash counts as a new version, not an already-named source. `review.mjs:124-162` already matches a saved copy by URL and hash (`sources.mjs:153-165`).
 
 **e. Locators.**
 - *Problem.* Lint warns on footnotes such as `real.pdf#page=3` and `talk.mp4 @ 00:12:31` (`lint.mjs:208`).
@@ -233,7 +233,7 @@ Phase-3 notes then need no migration, even where the tooling lands later.
 
 **a. Freshness.**
 - *Problem.*
-  - Staleness is only an age warning in lint (`lint.mjs:86-88`), and the hook keeps delivering a 303-day-old rule.
+  - Staleness is only an age warning in lint (`lint.mjs:97-100`), and the hook keeps delivering a 303-day-old rule.
   - Nothing reads `fetched`.
 - *Design.* `node tools/refresh.mjs` checks every source by its kind:
   - **URL sources.**
@@ -242,7 +242,7 @@ Phase-3 notes then need no migration, even where the tooling lands later.
     - A new hash saves the new body as a new file in `raw/refs/`, so append-only holds.
   - **Git sources.**
     - A source repo is cloned to an untracked `.sources/<name>/`.
-    - A note cites a file in it by path and commit. Quotes are checked with `git show <commit>:<path>`.
+    - A note cites a file in it by path and commit. Refresh saves a changed file as a new copy with `git show <commit>:<path>`, and quotes are checked against the saved copy.
     - Refresh runs `git fetch` and `git log <cited>..FETCH_HEAD -- <path>` to find cited files that changed.
     - A commit is a version, so no ETag or feed logic is needed, and nothing in `raw/` is rewritten.
   - **Feeds.**
@@ -255,7 +255,7 @@ Phase-3 notes then need no migration, even where the tooling lands later.
     - Refresh and build write this derived state to `.state/derived.json`, and hooks read it rather than working it out.
     - Delivery labels an unverified rule "source changed on <date>". The shown-marker includes that state, so a rule shown earlier in the session is shown again once it turns unverified.
   - **Reporting.** `/lint` lists unverified notes and runs refresh. A session-start line counts sources not checked within the domain's `checkAfterDays`. `staleAfterDays` and `checkAfterDays` are set per domain.
-  - **Newer sources.** `newerSources` (`review.mjs:104`) compares a rule only with sources in its own domain and topic. It now checks every source the rule cites, in any domain.
+  - **Newer sources.** `newerSources` (`review.mjs:106-119`) compares a rule only with sources in its own domain and topic. It now checks every source the rule cites, in any domain.
 - *Check* (fixture sources served locally):
   - A cited URL source re-fetched with a changed body turns its rule unverified, in delivery and in `/lint`. An unchanged body (304) changes nothing.
   - A cited file in a fixture git repo changed upstream turns its rule unverified after refresh.
@@ -268,7 +268,7 @@ Phase-3 notes then need no migration, even where the tooling lands later.
   - about 700 ms per prompt and per edit.
 - *Design.*
   - **One source.** A doc set is one source: the site's saved manifest.
-    - The manifest is `llms.txt` (https://llmstxt.org) where the site has one, else `sitemap.xml`.
+    - The manifest is `llms.txt` (https://llmstxt.org) where the site has one. A `sitemap.xml` manifest waits for the XML seam (§8 item 4).
     - Refresh fetches it conditionally like any URL source.
   - **Cited pages only.** A page from the set is saved to `raw/refs/<set>/` only when a note cites it, which the quote check needs anyway. Refresh diffs the manifest and the cited pages.
   - **Live reads.** The agent reads uncited pages live, through the manifest's links or whatever fetch tool it has.
@@ -610,11 +610,153 @@ The phases build mechanism only. Adding real knowledge and taste is the user's c
    - **AGENTS.md.** Its examples move to a widely known stack (§10).
    - **Neutral core.** The neutral-core test loses its `todo` mark (`test/neutral-core.test.mjs:20`).
    - **Done** when the phase 3 check in §9 passes: the suite passes with 5 `todo` tests, each red for its reason, and the grep for platform words finds nothing.
-4. **Knowledge mechanisms.**
-   - refresh, git sources, feeds and doc sets (6.2a, 6.2b);
-   - the version reader interface (6.1c).
+4. **Knowledge mechanisms.** Designed, not built. Phase 4 builds refresh, git sources, doc sets and unverified state (6.1d, 6.2a, 6.2b), and the version reader interface with one fixture reader (6.1c). Feed parsing, `sitemap.xml` and every real reader stay build-or-reuse until a domain needs them. Two §6 lines are settled here: `review.mjs` already matches a saved copy by URL and hash (6.1d), and quotes are checked against the saved copy, not `git show` (6.2a).
+   - **Fixtures.** `test/fixture.mjs` gains two helpers, and the `almanac` preset gains a reader and source overrides. No phase 4 check needs a feed or a `sitemap.xml`, so there is no fixture for either.
+     - `serve(t, routes)`, async, starts a `node:http` server on `127.0.0.1`, port 0, and closes it in `t.after`. `routes` maps a path to `{ body, etag, lastModified, status, location }`. A GET whose `If-None-Match` equals the route's `etag`, or whose `If-Modified-Since` equals its `lastModified`, gets 304 and no body. It returns `{ url(path), set(path, route), hits(path) }`.
+     - `gitRepo(t, files)`, sync, runs `git init` in a temp folder, writes `files` (such as `{ 'docs/ledger.md': text }`) and commits them, with the env and `-c` flags `checkout()` uses (`fixture.mjs:99-104`). It removes the folder in `t.after`. It returns `{ dir, commit, change(files) }`: `dir` has forward slashes, and `change` commits and returns the new commit.
+     - `makeVault` takes `sources: { url, repo, commit }`. The `almanac` preset writes them into `raw/refs/ledger-guide.md` and `raw/refs/ledger-repo.md` in place of `https://pkg.invalid/ledger`, `https://example.com/pkg.git` and `a1b2c3d4e5f6` (`fixture.mjs:259-288`). Left out, the defaults stay, so no test reaches the network unless it serves one.
+     - The `almanac` preset writes `tools/ext/readers/fixture.mjs`, as `glim` writes its alias, and its domain entry gains `readers: ['fixture']`:
 
-   Feed parsing and any real reader go through build-or-reuse when a domain needs them.
+       ```js
+       import fs from 'node:fs';
+       import path from 'node:path';
+       export const ecosystem = 'fixture';
+       export const lockfiles = ['almanac.lock'];
+       export const scheme = 'SEMVER';
+       export function read(dir) {
+         const out = {};
+         for (const line of fs.readFileSync(path.join(dir, 'almanac.lock'), 'utf8').split(/\r?\n/)) {
+           const m = line.match(/^(\S+) (\S+)$/);
+           if (m) out[m[1]] = m[2];
+         }
+         return out;
+       }
+       ```
+
+     - A test that runs refresh against `serve` awaits `v.runAsync('refresh.mjs')`. `v.run` uses `spawnSync`, which blocks the test's own event loop, so the server never answers and the child times out.
+   - **`tools/refresh.mjs`.** `node tools/refresh.mjs`, with no arguments. It is a top-level tool, so it may call `fetch` (`CODING_STANDARDS.md:40`). Every git call goes through `lib/git.mjs`.
+     - **What it checks.** Each source in `raw/refs/` with a `url`, or a `repo` and `path`. A source's id is `normUrl(url)` (`rules.mjs:737`), `<repo> <path>`, or a doc set's folder. Refresh checks the latest copy in the source's chain (see New copies). A source with neither field can't be checked and isn't listed.
+     - **Output.** One line per source, in id order, then a tally:
+
+       ```
+       unchanged https://…/ledger (304)
+       changed https://…/ledger: raw/refs/ledger-guide.3f9c01ab.md
+       baseline https://…/notes: raw/refs/notes.77e0d2c1.md
+       failed <repo> docs/ledger.md: git fetch exited 128: fatal: …
+       4 sources: 1 unchanged, 1 changed, 1 baseline, 1 failed. 2 notes unverified.
+       ```
+
+     - **Exit code.** 0 when every source has a check on record, failed ones included. 1 when refresh can't run: another refresh holds the lock past its wait, a write fails, or a file in `raw/refs/` can't be read. The reason goes to stderr. 2 on any argument. Offline, every source is a failed check, which is what `/lint` reports.
+     - **URL sources.** Refresh calls `fetch` with `redirect: 'manual'`, `AbortSignal.timeout(refresh.timeoutSeconds * 1000)`, and `If-None-Match` and `If-Modified-Since` from the latest copy's `etag` and `last_modified`, or from the last 200 that `derived.json` stored. It reads the body as a stream and stops past `refresh.maxBytes`. It decodes the body with `TextDecoder('utf-8', { fatal: true })`, splits it on `\r?\n` as `frontmatter.mjs:337` does, and hashes it. A 304, or a 200 with the latest copy's `sha256`, is `unchanged`. The new `etag` and `Last-Modified` go to `derived.json`, never to `raw/`. A new hash writes a new copy.
+     - **Git sources.** The repo is cloned to `.sources/<name>/`. `<name>` is the repo's last path segment, without a trailing `/` or `.git`, then `-` and the first 8 hex digits of the repo string's sha256, so two repos named alike don't share a folder. `lib/git.mjs` gains these, each run with `execFileSync`, no shell, arguments as an array and a `refresh.timeoutSeconds` timeout:
+       - `clone(repo, dir)`: `git clone --quiet --no-checkout <repo> <dir>`, when `.sources/<name>/.git` is missing. With no work tree, no line-ending conversion or long path applies;
+       - `fetchOrigin(dir)`: `git fetch --quiet origin`;
+       - `hasCommit(dir, commit)`: `git cat-file -e <commit>^{commit}`, exit 0;
+       - `changedSince(dir, commit, path)`: `git log --format=%H%x09%cs <commit>..origin/HEAD -- <path>`, newest first;
+       - `showAt(dir, commit, path)`: `git show <commit>:<path>`, as bytes.
+
+       An empty `changedSince` is `unchanged`. Otherwise refresh writes a copy of the newest commit's file.
+     - **Failures.** Each one is a `failed` check with its reason in `derived.json`, and refresh writes nothing under `raw/`:
+       - no network or no such host: `fetch failed: <err.cause.code>`, such as `ENOTFOUND`;
+       - timeout: `no answer in 20 s`;
+       - a status other than 2xx and 304: `HTTP 404`;
+       - a 3xx: `redirected to <Location>`. Refresh doesn't follow it, so the user saves the source again under its new URL;
+       - a body over the cap: `body over 5000000 bytes`;
+       - a body that isn't UTF-8: `body isn't UTF-8 text`;
+       - git missing: `git not found`. A clone or fetch that exits non-zero gives its exit code and the first line of git's stderr;
+       - a commit the repo doesn't hold: `commit <c> isn't in <repo>`;
+       - a cited path gone upstream: `<path> is gone at <commit8>`.
+       - a clone whose `origin/HEAD` doesn't resolve: `remote has no default branch`.
+     - **New copies.** A changed source gets a new file next to its latest copy, and the old file stays:
+       - **Name.** The stem is the previous copy's name without its extension and any `.<8 hex>` suffix. A URL copy is `<stem>.<first 8 of sha256>.md`, a git copy `<stem>.<first 8 of commit>.md`, and a manifest copy `<stem>.<first 8 of sha256>.txt`. A name already taken, when a body comes back to an earlier version, takes `-2`, then `-3`.
+       - **Frontmatter.** A URL copy has `url`, `fetched` (today), `etag` and `last_modified` when the server sent them, and `sha256`. A git copy has `repo`, `path`, `commit` (all 40 hex digits) and `fetched`. Both have `replaces`, the previous copy's path from the vault root. The body is the decoded text, as fetched.
+       - **`replaces`.** It orders the chain, since `fetched` can't order two copies from one day and mtimes don't survive a clone. `sourceProblems` (`sources.mjs:118-137`) checks that it names a file in `raw/refs/` with the same source id, and that no two files replace one.
+       - **Baseline.** A URL source whose latest copy has no `sha256`, such as a page `/ingest` saved as text, can't be compared to a fetch. Refresh saves the first fetched body as a copy with `baseline: true`. That copy marks nothing unverified, and later checks compare against it. Lint checks that `baseline` is `true` when present.
+       - Refresh writes every file with `writeText` and `writeJson` (`vault.mjs:223`, `:238`).
+   - **Unverified notes (6.1d).**
+     - A note keeps citing the copy it cites. That copy stays its evidence, and its quotes are still checked against it, as in phase 1. Only refresh runs `git show`.
+     - A note is unverified while a source it cites has a copy, not a baseline, later in the chain than the latest copy the note cites. Citations are the Evidence lines (`evidenceSources`, `rules.mjs:609`) and the footnotes (`citedSources`, `rules.mjs:750`). `since` is the `fetched` day of the earliest such copy.
+     - A note clears once it cites the newer copy: propose again with `repeats` and a quote from the new copy, which adds the Evidence line and moves `as_of` up. A note that no longer holds is retired with `superseded_by`.
+     - `review.mjs sources` already lists a new copy no source page names, since it has a new hash (`review.mjs:124-162`, `sources.mjs:153-165`). So `/ingest` takes it in.
+     - `newerSources` (`review.mjs:106-119`) also takes the source pages, in any domain and on any topic, whose `source` is a later copy in a chain the rule cites.
+   - **`.state/derived.json`.**
+
+     ```json
+     { "version": 1,
+       "sources": { "<id>": { "chain": ["raw/refs/ledger-guide.md", "raw/refs/ledger-guide.3f9c01ab.md"],
+         "checked": "2026-11-01", "result": "changed", "why": null, "etag": "\"ledger-2\"", "lastModified": "…" } },
+       "unverified": { "almanac/ledger-v2": { "mtime": 1793000000000, "size": 812, "since": "2026-11-01", "sources": ["<id>"] } },
+       "domains": { "almanac": ["<id>"] } }
+     ```
+
+     - `checked` is the day of the last check that didn't fail. A failed check sets `result: "failed"` and `why`, and keeps `checked`.
+     - Build writes `chain`, `unverified` and `domains` from `raw/refs/` and the notes. `domains` holds, per domain, the ids its delivered notes cite. Build fills `checked` from the latest copy's `fetched` for a source never checked, and keeps what refresh wrote. Refresh writes the check fields, then runs build. Both write under `build.lock` (`withLock`, `vault.mjs:470`).
+     - The chain lives in `raw/`, so a fresh clone's first build labels its notes before any refresh.
+     - A hook reads the file once with `readJson(statePath('derived.json'), {})`. A missing file means nothing is unverified. A corrupt one throws, so the hook fails loudly (6.6a).
+     - An `unverified` entry applies only while the note file's mtime and size match what the cache holds (`cache.mjs`). A note edited to cite the new copy loses its label at once, before the next build.
+   - **Version readers (6.1c).**
+     - **Interface.** `tools/ext/readers/<name>.mjs` exports:
+       - `ecosystem`, the name a `requires` entry's `package.ecosystem` gives;
+       - `lockfiles`, the file names it reads;
+       - `scheme`, `'SEMVER'` or `'ECOSYSTEM'`;
+       - `read(dir)`, which returns `{ <package>: <version> }` for the folder holding the lockfile;
+       - with `ECOSYSTEM`, `compare(a, b)`, which returns a negative number, 0 or a positive number.
+
+       It is loaded with `extension('readers', name, ['read'])` (`ext.mjs:15-20`). Lint checks the rest as it checks aliases (`lint.mjs:223-232`): an unknown reader, a missing export, a `scheme` that is neither, `ECOSYSTEM` without `compare`, and two readers in one domain with one `ecosystem`. Lint warns on a `requires` ecosystem no reader of the note's domain answers to.
+     - **Config.** `domains.<d>.readers` lists reader names.
+     - **Lockfile.** For each reader, the nearest folder at or above the project root that holds one of its `lockfiles`. The search stops after a folder holding `.git`, or at the filesystem root. So one lockfile at a monorepo root serves its packages.
+     - **Cache.** `.state/versions.json` maps `<root>|<reader>` to `{ lockfile, mtimeMs, size, versions }`. A hook re-reads the lockfile when its stat differs, or when its mtime is within `RACY_MS` of the cached read (`cache.mjs:14`). It writes through `writeJson`.
+     - **Comparison.** `lib/versions.mjs` holds `compareSemver(a, b)`, SemVer 2.0.0 precedence, prereleases included and build metadata ignored, built on the `SEMVER` pattern `rules.mjs:198-224` already validates with. It also holds OSV range evaluation: events in order, `introduced` opens (`'0'` from the start), `fixed` and `limit` close before their version, and `last_affected` closes after it. No version comparison exists today.
+     - **Fit.** A note with `requires` is a match, a mismatch or unknown for a project:
+       - an entry matches when the lockfile's version of its package is in one of its ranges, and mismatches when it isn't, or when the lockfile doesn't list the package;
+       - an entry is unknown when the domain has no reader for its ecosystem, no lockfile is found, or the reader throws. A throw is logged once per lockfile stat to `.state/errors.log`;
+       - a note with several entries matches when any entry matches, mismatches when all mismatch, and is otherwise unknown.
+     - **Delivery.** `deliverable(items, { versions, derived })` in `rules.mjs` runs after each hook's match step, and in `pick.mjs show`, on rules and pages alike:
+       - it drops mismatches and sorts matches before unknowns within a rank;
+       - it adds the labels `version unknown` and `source changed on <since>`. `ruleLine` and `rulePointer` (`rules.mjs:402`, `:405`) put each after the clipped text with ` · ` before it: `… As of 2026-10-02. · version unknown · source changed on 2026-11-01`. The separator keeps a space before each label, which 6.2a's pattern needs;
+       - a labelled item's marker hash is `shortHash(text + '\0' + labels)`, and an unlabelled one keeps `hash` (`rules.mjs:334`). So existing markers stand, and a rule that turns unverified is shown again (marker ids, `sessions.mjs:127`, `:164`);
+       - `liveRules`, `renderActive`, `active.md` and `index.md` are unchanged, since they aren't per project.
+     - **Ranking.** `rankPair(a, b, { fit })` (`rules.mjs:629`) takes a first knowledge test before `as_of` (`rules.mjs:624`): a match over unknown over a mismatch, with a reason that names the loser's fit: `version match (pkg 2.4.0) over mismatch`, or `over version unknown`. Without `fit`, every note ties on it and `as_of` decides, as today. `review.mjs status` (`globPairs`, `review.mjs:88-98`) and `propose.mjs` pass the fit for `sessionReach(cwdOf({}))` (`vault.mjs:181`, `:402`), the project they run in.
+   - **Doc sets (6.2b).**
+     - A folder under `raw/refs/` that holds a file named in `docSets.manifests` (default `['llms.txt']`) and no `source.md` is one source, a doc set, and its id is the folder. `bundleOf` and `sourceItem` (`rules.mjs:707-725`) return the folder for any file in it, as for a bundle. `refSources` (`sources.mjs:140-148`) lists the folder once, and `sourceVersion` (`sources.mjs:153`) reads the latest manifest copy's `url` and `sha256`. So `review.mjs sources` lists `raw/refs/ledger-docs` once, which is what keeps 6.2b red today.
+     - A manifest is saved with frontmatter like any page: `url`, `fetched`, `etag`, `last_modified`, `sha256`. One without, as in 6.2b's test, is a set refresh can't check.
+     - A manifest that changes gets a copy, so the set stays append-only. A `source.md` listing its pages would need rewriting.
+     - Each cited page in the set has its own `url` and chain, so refresh checks it as a URL source. The set's line reports the manifest and its links: `changed raw/refs/ledger-docs: llms.1c2d3e4f.txt, 12 links added, 3 removed`, plus the cited pages no longer listed.
+     - Uncited pages are never saved (6.2b, live reads). The 6.2b test is unchanged.
+   - **The XML seam.** `tools/ext/feeds/<name>.mjs` exports `items(text)`, which returns `[{ url, title, updated }]`, and `locs(text)`, which returns a sitemap's `<loc>` URLs. Both throw on a `DOCTYPE`. A domain's `feeds: [{ url, parser }]`, and a `sitemap.xml` in `docSets.manifests` with its parser, are the only callers, both through refresh. Phase 4 ships neither: lint warns on a domain's `feeds` that they do nothing yet. The parser is a small hand-built extractor written when a domain adds a feed, through build-or-reuse.
+   - **Settings.**
+     - `DEFAULTS` (`vault.mjs:20-28`) gains `knowledge.checkAfterDays: 14`, to match `lint.remindAfterDays`, beside `staleAfterDays: 180`. It also gains `refresh: { timeoutSeconds: 20, maxBytes: 5000000 }` and `docSets: { manifests: ['llms.txt'] }`. `domains.<d>.knowledge` overrides either day count for its domain.
+     - Lint's age warning (`lint.mjs:97-100`) counts from the later of `as_of` and the last day every source the note cites was `checked`. A source re-checked unchanged keeps its notes fresh.
+     - **Start line.** A new or resumed session hears one line, after the lint reminder in rank order and skipped on compaction and `/clear` like it: "Taste vault: 3 sources the almanac notes cite haven't been checked in 14 days. Remind the user to run /lint in `<vault>`, which refreshes them." It counts the ids in `domains` for the session's domains whose `checked` is older than the domain's `checkAfterDays`. A failed check doesn't move `checked`, so a source that only fails stays counted. Several domains are named together.
+     - **`/lint`.** `.claude/skills/lint/SKILL.md` gains a first step, `node tools/refresh.mjs`, before `review.mjs status`. Offline, every source is a failed check: the step reports how many and `/lint` goes on. Refresh never runs on its own, and no hook runs it.
+     - **`review.mjs status`** gains two sections from `derived.json`: "Notes a changed source has left unverified", with each note's key, `since`, source and newer copy, and "Source checks that failed", with each id, day and reason.
+   - **Rules that change.**
+     - `CODING_STANDARDS.md:14` and `:40`, the message at `lint.mjs:637` and the comment at `git.mjs:16` say that only `lib/git.mjs` runs another program, git, and that hooks call only `changedFiles` from it. The standard check gains that last rule. The `fetch` rule stands: refresh is a top-level tool.
+     - Lint's standard check treats `tools/ext/` as it treats `lib/` (`lint.mjs:627`), since readers run inside hooks and must stay off the network.
+     - `.gitignore` gains `.sources/`. `VAULT_OWN` (`vault.mjs:74`) and `vaultGuard` (`edit.mjs:12`) gain it too.
+   - **Tests.**
+     - `later-phases.test.mjs`: 6.1c, 6.2a and 6.2b lose `todo`, and 6.3c and 6.4a keep it. 6.1c and 6.2b are otherwise unchanged.
+     - 6.2a becomes two async tests. The URL test serves the preset's guide body and `etag` and passes its URL in `sources`. A first refresh prints `unchanged`, writes nothing under `raw/` and labels nothing. Then the test changes the body and `etag`, and refreshes again. The ledger edit's refusal matches the existing pattern, and `review.mjs status` lists `almanac/ledger-v2` and `almanac/ledger-v3` as unverified. The git test makes a `gitRepo` holding the preset's repo body, passes its `dir` and `commit` in `sources`, and adds a knowledge rule whose Evidence cites `raw/refs/ledger-repo.md`. It changes `docs/ledger.md` upstream, refreshes, and expects that rule labelled `source changed on`.
+     - `test/refresh.test.mjs`:
+       - each failure mode records a failed check with its reason and leaves `raw/refs/`'s files and bytes unchanged: a closed port, a route that never answers with `timeoutSeconds: 1`, 404, 301, a body over a small `maxBytes`, a body that isn't UTF-8, a commit the repo lacks, a path removed upstream, and a `PATH` without git;
+       - the baseline copy;
+       - two same-day copies ordered by `replaces`;
+       - a body that comes back to an earlier version;
+       - a changed manifest;
+       - `newerSources` across domains;
+       - lint on a bad `replaces`.
+     - `test/versions.test.mjs`:
+       - `compareSemver`, including prereleases and build metadata;
+       - OSV events with `introduced: '0'`, `last_affected` and `limit`;
+       - with no lockfile, both rules delivered as `version unknown` (6.1c's second check);
+       - a lockfile changed to 3.1.0 delivers v3;
+       - a lockfile at a monorepo root;
+       - a reader that throws gives unknown and logs one error;
+       - lint on a bad reader;
+       - a label change shows a rule again.
+     - The `almanac` tests that exist hold: `format.test.mjs:80-87` gets the v2 rule, which matches 2.4.0, and `reach.test.mjs:48-68`'s package with no lockfile gets it labelled `version unknown`. The preset's sources were fetched 30 days before the run, past `checkAfterDays`, so `almanac` sessions hear the start line. A test that pins a whole start output adds it.
+   - **Windows.** Verified on this machine (§11): `git show` needs forward slashes in `<commit>:<path>`, so refresh joins paths with `/`. A clone from a `C:/…` path works. `git show` returns the committed bytes, CRLF kept, and refresh splits on `\r?\n` as frontmatter does. Removing a test vault that holds a clone works.
+   - **Done** when the phase 4 check in §9 passes: the suite passes with 2 `todo` tests (6.3c, 6.4a), each red for its reason, lint reports 0 errors, and the grep finds nothing. The perf group still passes.
 5. **Media and tool triggers.**
    - 6.4a–c and e, with the extractor interface; real extractors go through build-or-reuse;
    - 6.3c.
@@ -626,6 +768,7 @@ The phases build mechanism only. Adding real knowledge and taste is the user's c
 |---|---|---|
 | `node --test test/*.test.mjs` | All pass; each `todo` fails for the reason its design section names | 410 tests: 404 pass, 1 skipped (making a link needs Developer Mode on Windows), 5 `todo` (6.1c, 6.2a, 6.2b, 6.3c, 6.4a), about 32 s. Lint: 0 errors. |
 | Neutral-core test (§3) | No configured domain's key or title appears in `tools/`, `.claude/skills/`, `test/` or AGENTS.md | Passes on this vault's config, with its `todo` mark removed (phase 3). |
+| Phase 4 check: the suite through the TAP reporter, then lint and the grep, below the table | The suite has no failure and exactly 2 `todo` tests, 6.3c and 6.4a, both failing; lint reports 0 errors; the grep prints nothing. Then 6.1c, 6.2a and 6.2b pass, and only phase 5's checks are open. Run the perf group too, since phase 4 adds a read to every hook. | Not built (phase 4 is designed). |
 | Phase 3 check: the suite, then the grep below the table | With the neutral-core `todo` mark removed, the suite passes with 5 `todo` tests (6.1c, 6.2a, 6.2b, 6.3c, 6.4a), each red for its reason, and the grep prints nothing. Then no test, tool, skill or AGENTS.md example leans on one platform, and only the five later-phase checks are open. | Passes (phase 3): the five `todo` tests fail for their reasons, and the grep prints nothing. |
 | The probes as `todo` tests (phase 0) | Each passes with its `todo` mark removed: slow trigger, subagent gate, settle after an mtime change, negated glob, one refusal per file, frontmatter | All pass with their marks removed (phase 2): slow trigger, subagent gate (2), settle after an mtime change (2), one refusal per file, frontmatter, long-path prefix. Negated glob passes (phase 1). |
 | Perf group: `VAULT_PERF=1 node --test test/perf/*.perf.mjs` (about 10 s, outside the default run) | Fastest of 5 gated edits under 1,000 ms at 1,000 notes; fastest of 3 under 300 ms at 3,000; three parallel proposes of unrelated rules at 3,000 notes all succeed (6.6f) | About 135–166 ms; about 245–290 ms; all succeed in about 4.3–5.4 s, since builds run one at a time under `build.lock`. A warm session start at 3,000 notes takes about 340 ms, including the vault-wide stat for the lint reminder. The timings are noisy on this machine. |
@@ -643,6 +786,14 @@ node --test test/*.test.mjs && ! git grep -nIiE 'luau|\.lua\b|roblox|--!strict|U
 ```
 
 It exits 0 when both hold: the suite passes and the grep prints nothing. A failure prints the failing tests or the lines the grep found.
+
+The phase 4 check, run from the vault folder:
+
+```sh
+out=$(node --test --test-reporter=tap test/*.test.mjs); echo "$out" | grep -E '^# (pass|fail|todo) |^not ok '; echo "$out" | grep -qx '# fail 0' && echo "$out" | grep -qx '# todo 2' && [ "$(echo "$out" | grep -cE '^not ok .* # TODO 6\.(3c|4a), phase 5')" = 2 ] && node tools/lint.mjs && ! git grep -nIiE 'luau|\.lua\b|roblox|--!strict|UIListLayout|task\.wait|local x = 1|\bdemo\b' -- test tools .claude/skills AGENTS.md
+```
+
+It prints the tally and every top-level test that failed, `todo` ones included. It exits 0 only when the suite has no failure, its 2 `todo` tests are 6.3c and 6.4a and both fail, lint finds no error, and the grep prints nothing. A passing `todo` test still counts as `todo`, so the `not ok` count is what shows both are red.
 
 ## 10. AGENTS.md changes
 
@@ -665,6 +816,17 @@ The design changes these parts of AGENTS.md. Each change lands with the phase th
   - `vault.local.json`;
   - `derived/`, which extraction writes, not edits by hand;
   - `.sources/`.
+- **Phase 4.** The line numbers are AGENTS.md's at the end of phase 3.
+  - Line 10 (`raw/refs/`): `tools/refresh.mjs` writes `etag`, `last_modified` and `sha256`, and each new copy, `<stem>.<8 hex>.md` with `replaces`, or `baseline: true` for the first copy of a source saved without a hash. Leave all of them to it. To cite a file from a git repository, save it as `raw/refs/<name>.md` with `repo`, `path` and `commit` (the full hash) and the file's text at that commit below, and quote from that text.
+  - Line 15 (`.state/`): it also holds `derived.json`, which refresh and build write, and `versions.json`.
+  - Line 38 (shown again): a rule is also shown again when its label changes. "source changed on <date>" means a source the note cites has a newer copy, fetched that day, that the note doesn't cite yet: check the fact against the new copy, then propose again with `repeats` and a quote from it, or retire the note. "version unknown" means the note's `requires` couldn't be checked against the project's lockfile.
+  - Line 46 (start lines): the line counting the sources a session's domains cite that haven't been checked within `checkAfterDays`.
+  - Line 80 (`as_of`): `staleAfterDays` and `checkAfterDays` are set per domain under `domains.<d>.knowledge`, and the age warning counts from the last day the note's sources were checked.
+  - Line 81 (`requires`): "Nothing reads a project's versions yet" goes. A domain's `readers` read the project's lockfile, a note the lockfile rules out isn't delivered, and one it can't check is labelled "version unknown".
+  - Line 162 (bundles): a doc set is a folder holding `llms.txt`, one source. Save its manifest and the pages notes cite, not the rest.
+  - Line 207 (Lint): `/lint` runs refresh first. Offline, it reports the failed checks and goes on.
+  - Line 213 (conflicting evidence): between knowledge rules, prefer the one that matches the project's version, then the newer `as_of`.
+  - Line 222 (what the hooks refuse): add `.sources/`.
 
 ## 11. Unverified claims the design leans on
 
@@ -674,6 +836,13 @@ The design changes these parts of AGENTS.md. Each change lands with the phase th
 4. That a denied `AskUserQuestion` costs one agent retry and no user turn (6.3c).
 5. For the second adapter and compiled files: OpenCode v2 payloads, whether Claude Code reads `.agents/skills`, and whether the Copilot cloud agent can reach the vault.
 6. Whether Claude Code normalizes a `directory` option's path itself. The launcher doesn't rely on it: it reads a Git Bash `/c/...` path as `C:/...` and refuses a relative one (6.7d). What the phase 2 plugin trial settled: `CLAUDE_PLUGIN_OPTION_VAULT` from the parent env reaches the hooks under `--plugin-dir`, and `pluginConfigs` is read from user settings, `--settings` and managed settings, never project settings (Claude Code's debug log).
+7. For refresh (phase 4), with git 2.49.0.windows.1 on Node 22.14:
+   - Not verified: that git is on `PATH` on every machine that runs refresh. Without it, each git source is a failed check, `git not found`, and URL sources still run.
+   - Not verified: `origin/HEAD` when the remote has none or changes its default branch. A clone sets it and `git fetch` doesn't move it. Refresh treats an `origin/HEAD` that doesn't resolve as a failed check.
+   - Not verified: repo paths and cited paths with spaces. Refresh passes arguments as an array with no shell, so none is split, but no run tried one.
+   - Not verified: the cost of reading `derived.json` in each hook with thousands of sources. It is expected to be small; the perf group measures it.
+   - Not verified: servers that send weak ETags or ignore `If-None-Match`. They answer 200 with the same body, which refresh still records as `unchanged`, at the cost of the download.
+   - Settled by scratch scripts against an in-process `node:http` server and a `git init` repo, not kept: `fetch` with `If-None-Match` or `If-Modified-Since` gets a 304 with an empty body; `redirect: 'manual'` returns the 3xx with its `location`; `AbortSignal.timeout` throws a `TimeoutError`; a refused connection and an unknown host throw `fetch failed` with `err.cause.code` set to `ECONNRESET` or `ENOTFOUND`; a streamed body can be stopped at a byte cap. `git clone --no-checkout` from a `C:/…` path takes about 160 ms, `git fetch` about 215 ms. `git show <commit>:<path>` works with forward slashes and fails with a backslash, and returns CRLF as committed. `git log <commit>..origin/HEAD -- <path>` is empty when only another file changed. `git cat-file -e` on an unknown commit, and a clone from a missing path, exit 128. `spawnSync` blocks a test's own server, and `spawn` doesn't.
 
 ## 12. Not doing
 
