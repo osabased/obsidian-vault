@@ -77,13 +77,13 @@ test('a knowledge rule takes keywords and always, and every rule needs a channel
   assert.deepEqual(check(rules, ruleNote({})), [none]);
 });
 
-test("a knowledge rule's keyword reaches a prompt and its always loads at session start", t => {
-  const v = makeVault(t);
-  v.write('wiki/glim/rules/widget-api.md', knowledge({ keywords: ['widget'], doLine: 'Call mount first.', notLine: 'Call render first.' }));
-  v.write('wiki/glim/rules/kit-version.md', knowledge({ always: true, doLine: 'Use kit 3.', notLine: 'Use kit 2.' }));
+test("6.1b: a knowledge rule's keyword reaches a prompt and its always loads at session start", t => {
+  const v = makeVault(t, { presets: ['almanac'] });
+  v.write('wiki/almanac/rules/pkg-major.md', knowledge({ domain: 'almanac', topic: 'ledger', always: true, doLine: 'Check the pkg major version first.', notLine: 'Assume pkg 3.' }));
   const sid = sessionId();
-  assert.match(v.startSession(sid).hookSpecificOutput.additionalContext, /glim\/kit-version: Do: Use kit 3\./);
-  assert.match(prompt(v, sid, 'how do I add a widget?').hookSpecificOutput.additionalContext, /glim\/widget-api: Do: Call mount first\./);
+  const cwd = v.projects.almanac;
+  assert.match(v.startSession(sid, { cwd }).hookSpecificOutput.additionalContext, /almanac\/pkg-major: Do: Check the pkg major version first\./);
+  assert.match(prompt(v, sid, 'how do I call openLedger?', { cwd }).hookSpecificOutput.additionalContext, /almanac\/ledger-v2: Do: Call openLedger with the path\./);
 });
 
 test('rule length caps follow the kind', async t => {

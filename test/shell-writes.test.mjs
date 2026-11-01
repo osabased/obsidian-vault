@@ -46,7 +46,7 @@ test('6.3d: a rule-covered file a shell command wrote this turn gets that rule o
   // Stop shows rules only, so the page on the file still comes up on its first edit.
   const later = denied(editFile(v, sid, 'src/a.zq')) ?? '';
   assert.match(later, /glim\/zq-files \(concept page\)/);
-  assert.doesNotMatch(later, /zq-trigger/, 'a later edit of the file is not refused with the rule again');
+  assert.doesNotMatch(later, /^- glim\/[\w-]+:/m,'a later edit of the file is refused with a rule again');
 });
 
 test('files changed before the turn started are left to the user', t => {
