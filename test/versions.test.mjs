@@ -3,16 +3,17 @@ import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { makeVault, sessionId, editFile, denied, prompt, ruleNote } from './fixture.mjs';
-import { compareSemver, inRange } from '../tools/lib/versions.mjs';
+import { makeVault, sessionId, denied, ledgerEdit, prompt, ruleNote, withFields, LEDGER_GUIDE, sha256 } from './fixture.mjs';
+import { compareSemver, inRange, fitOf } from '../tools/lib/versions.mjs';
 
 const V2 = /almanac\/ledger-v2: Do: Call openLedger with the path\./;
 const V3 = /almanac\/ledger-v3: Do: Call openLedger with \{ path \}\./;
 const context = out => out?.hookSpecificOutput?.additionalContext ?? '';
-const ledgerEdit = (v, sid, dir = v.projects.almanac) => denied(editFile(v, sid, 'src/ledger.txt', { abs: path.join(dir, 'src', 'ledger.txt'), cwd: dir })) ?? '';
 const lockfile = v => path.join(v.projects.almanac, 'almanac.lock');
 // The line a rule is delivered on, so a label is read off the rule it belongs to.
 const lineOf = (text, key) => text.split('\n').find(l => l.includes(`${key}: `)) ?? '';
+// The hash loadNotes gives a note's text, which an unverified entry holds.
+const textHash = text => sha256(text).slice(0, 16);
 
 function folder(t, files) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'vault-versions-'));
@@ -149,13 +150,12 @@ test('lint reports a bad reader and a requires no reader answers', async t => {
   assert.equal(found.filter(f => f.file.startsWith('wiki/almanac/rules/ledger-v') && /no reader/.test(f.msg)).length, 0, 'the fixture reader answers for the preset rules');
 });
 
-test('a source changed since the note labels it while the note file is unchanged, and the label shows it again', t => {
+test('a source changed since the note labels it while the note text is unchanged, and the label shows it again', t => {
   const v = makeVault(t, { presets: ['almanac'] });
   const rel = 'wiki/almanac/rules/ledger-v2.md';
-  const hand = () => {
-    const st = fs.statSync(v.at(...rel.split('/')));
+  const hand = (text = v.read(rel)) => {
     v.write('.state/derived.json', JSON.stringify({
-      unverified: { 'almanac/ledger-v2': { mtime: st.mtimeMs, size: st.size, since: '2026-11-01', sources: ['https://pkg.invalid/ledger'] } },
+      unverified: { 'almanac/ledger-v2': { contentHash: textHash(text), since: '2026-11-01', sources: ['https://pkg.invalid/ledger'] } },
     }), { saved: null });
   };
   const cwd = v.projects.almanac;
@@ -169,21 +169,20 @@ test('a source changed since the note labels it while the note file is unchanged
   assert.match(after, /Call openLedger with the path\..* · source changed on 2026-11-01$/, 'the label shows the rule again in the same session');
   assert.equal(context(prompt(v, sid, 'openLedger once more', { cwd })), '', 'the labelled rule is marked like any other');
 
-  // A save that moves the note's mtime, or changes its size, drops the label before any build.
+  // A save that only moves the note's mtime, as a sync or a checkout does, keeps the label.
   const text = v.read(rel);
   v.write(rel, text, { saved: new Date(Date.now() - 2 * 3600e3) });
   const moved = sessionId();
   v.startSession(moved, { cwd });
   const retimed = lineOf(context(prompt(v, moved, 'openLedger?', { cwd })), 'almanac/ledger-v2');
-  assert.match(retimed, V2);
-  assert.doesNotMatch(retimed, /source changed on/);
+  assert.match(retimed, /Call openLedger with the path\..* · source changed on 2026-11-01$/, 'a save with the same text kept the label');
 
-  hand();
-  const st = fs.statSync(v.at(...rel.split('/')));
-  v.write(rel, `${text}\n`, { saved: new Date(st.mtimeMs) });
-  assert.equal(fs.statSync(v.at(...rel.split('/'))).mtimeMs, st.mtimeMs, 'only the size changed');
+  // An edit drops the label before any build. The session starts first, since a session start builds and the build
+  // rewrites derived.json, and the entry then holds the text from before the edit.
   const grown = sessionId();
   v.startSession(grown, { cwd });
+  v.write(rel, `${text}\n`);
+  hand(text);
   const resized = lineOf(context(prompt(v, grown, 'openLedger?', { cwd })), 'almanac/ledger-v2');
   assert.match(resized, V2);
   assert.doesNotMatch(resized, /source changed on/);
@@ -194,16 +193,126 @@ test('an edit refusal carries the source changed label after the clipped rule', 
   const sid = sessionId();
   v.startSession(sid, { cwd: v.projects.almanac });
   // Session start builds, and build rewrites derived.json from the sources, so the hand-written entry goes in after it.
-  const st = fs.statSync(v.at('wiki', 'almanac', 'rules', 'ledger-v2.md'));
-  v.write('.state/derived.json', JSON.stringify({ unverified: { 'almanac/ledger-v2': { mtime: st.mtimeMs, size: st.size, since: '2026-11-01', sources: [] } } }), { saved: null });
+  const contentHash = textHash(v.read('wiki/almanac/rules/ledger-v2.md'));
+  v.write('.state/derived.json', JSON.stringify({ unverified: { 'almanac/ledger-v2': { contentHash, since: '2026-11-01', sources: [] } } }), { saved: null });
   assert.match(ledgerEdit(v, sid), /- almanac\/ledger-v2: .* source changed on \d{4}-\d\d-\d\d/);
 });
 
-test('a corrupt derived.json fails the hook loudly', t => {
+test('a corrupt derived.json reads as empty in the hooks, is logged by name, and the next build rewrites it', t => {
   const v = makeVault(t, { presets: ['almanac'] });
   const sid = sessionId();
   v.startSession(sid, { cwd: v.projects.almanac });
   v.write('.state/derived.json', '{ "unverified": ', { saved: null });
-  assert.throws(() => ledgerEdit(v, sid), /the edit hook exited 1: .*Unexpected end of JSON input/);
-  assert.throws(() => v.startSession(sessionId(), { cwd: v.projects.almanac }), /the session-start hook exited 1/);
+  const cwd = v.projects.almanac;
+  // v.hook throws on any logged error, and this one is meant to be logged, so the hooks run bare.
+  const hook = (name, input) => v.run(`hooks/${name}.mjs`, [], { input: { session_id: sid, cwd, ...input }, cwd });
+  const edit = hook('edit', { hook_event_name: 'PreToolUse', tool_name: 'Edit', tool_input: { file_path: path.join(cwd, 'src', 'ledger.txt'), old_string: 'a', new_string: 'b' } });
+  assert.equal(edit.code, 0, edit.stderr);
+  assert.match(denied(JSON.parse(edit.stdout)), V2, 'the edit hook still gates the edit with its rules');
+  const start = hook('session-start', { session_id: sessionId(), hook_event_name: 'SessionStart', source: 'startup' });
+  assert.equal(start.code, 0, start.stderr);
+  const errors = v.read('.state/errors.log').trimEnd().split('\n').filter(l => /^\d{4}-/.test(l));
+  assert.equal(errors.length, 2, `each hook logs one error:\n${errors.join('\n')}`);
+  assert.ok(errors.every(l => l.includes('.state/derived.json is corrupt')), errors.join('\n'));
+  const r = v.run('build.mjs');
+  assert.equal(r.code, 0, r.stderr);
+  assert.deepEqual(Object.keys(JSON.parse(v.read('.state/derived.json'))).sort(), ['domains', 'sources', 'unverified', 'version']);
+});
+
+test('OSV range events apply sorted by version, and limit caps the range apart from them', () => {
+  const at = (v, events) => inRange(v, events, compareSemver);
+  assert.equal(at('2.5.0', [{ fixed: '2.0.0' }, { introduced: '1.0.0' }]), false, 'a fixed listed first still closes the range');
+  assert.equal(at('1.5.0', [{ fixed: '2.0.0' }, { introduced: '1.0.0' }]), true);
+  const shuffled = [{ introduced: '3.0.0' }, { fixed: '4.0.0' }, { introduced: '1.0.0' }, { fixed: '2.0.0' }];
+  assert.deepEqual(['1.5.0', '2.5.0', '3.5.0', '4.5.0'].map(v => at(v, shuffled)), [true, false, true, false]);
+  assert.equal(at('0.5.0', [{ fixed: '1.0.0' }, { introduced: '0' }]), true, "introduced '0' sorts first");
+  const capped = [{ introduced: '1.0.0' }, { limit: '2.0.0' }, { introduced: '3.0.0' }];
+  assert.deepEqual(['1.5.0', '2.0.0', '3.5.0'].map(v => at(v, capped)), [true, false, false], 'nothing at or past a limit is in range, though an introduced follows it');
+  assert.equal(at('1.5.0', [{ limit: '2.0.0' }, { introduced: '1.0.0' }, { limit: '1.2.0' }]), true, 'a version under any limit is in range');
+});
+
+test('a package named like an object property reads as missing from the lockfile', () => {
+  const versions = new Map([['almanac', [new Map([['fixture', { versions: { pkg: '2.4.0' }, compare: compareSemver }]])]]]);
+  const requires = name => [{ package: { ecosystem: 'fixture', name }, ranges: [{ type: 'SEMVER', events: [{ introduced: '0' }] }] }];
+  for (const name of ['constructor', 'toString', '__proto__']) assert.deepEqual(fitOf(requires(name), 'almanac', versions), { fit: 'mismatch', why: `no ${name}` });
+});
+
+// The hook helpers fail on any logged error, so these tests run the hooks themselves.
+const hookRun = (v, name, input) => {
+  const r = v.run(`hooks/${name}.mjs`, [], { input, cwd: input.cwd });
+  assert.equal(r.code, 0, r.stderr);
+  return r.stdout.trim() ? JSON.parse(r.stdout) : null;
+};
+const rawEdit = (v, sid, cwd = v.projects.almanac) => denied(hookRun(v, 'edit', {
+  session_id: sid, cwd, hook_event_name: 'PreToolUse', tool_name: 'Edit', tool_input: { file_path: path.join(cwd, 'src', 'ledger.txt'), old_string: '', new_string: 'x' },
+})) ?? '';
+
+test('a reader config names that is missing leaves its ecosystem unknown, logs once, and the hooks still gate', t => {
+  const v = makeVault(t, { presets: ['almanac'], domains: { almanac: { readers: ['fixture', 'gone'] } } });
+  const cwd = v.projects.almanac;
+  const log = () => (v.exists('.state/errors.log') ? v.read('.state/errors.log') : '');
+  for (let i = 0; i < 2; i++) {
+    const sid = sessionId();
+    hookRun(v, 'session-start', { session_id: sid, cwd, hook_event_name: 'SessionStart', source: 'startup' });
+    const refusal = rawEdit(v, sid);
+    assert.match(refusal, V2, 'the reader that loads still settles the fit');
+    assert.doesNotMatch(refusal, /almanac\/ledger-v3|version unknown/);
+  }
+  assert.equal(log().split('reader gone').length - 1, 1, log());
+  assert.match(log(), /tools\/ext\/readers\/gone\.mjs doesn't exist/);
+});
+
+test('propose writes a taste rule and builds though a reader is gone, since only a knowledge ranking reads versions', t => {
+  const v = makeVault(t, { presets: ['almanac'] });
+  const cwd = v.projects.almanac;
+  const sid = sessionId();
+  v.startSession(sid, { cwd });
+  fs.rmSync(v.at('tools', 'ext', 'readers', 'fixture.mjs'));
+  const propose = () => v.run('propose.mjs', [sid], {
+    cwd,
+    input: JSON.stringify({ domain: 'almanac', slug: 'zz-new', topic: 'ledger', basis: 'reading', reading: 'The user rewrote it.', do: 'Zebra quartz mango.', not: 'Plover lantern ember.', applies_to: ['src/**'] }),
+  });
+  // The first call lists the ledger rules it may repeat and refuses once; the second writes the note.
+  const first = propose();
+  assert.match(first.stderr, /may repeat/, JSON.stringify(first));
+  const r = propose();
+  assert.equal(r.code, 0, r.stderr);
+  assert.match(r.stdout, /almanac\/zz-new/);
+  assert.match(v.read('index.md'), /zz-new/, 'the build after the write ran');
+  assert.doesNotMatch(v.exists('.state/errors.log') ? v.read('.state/errors.log') : '', /reader fixture/, 'propose read no versions');
+});
+
+test('review status from the vault folder, which reaches no project, ranks knowledge rules by as_of', t => {
+  const v = makeVault(t, { presets: ['almanac'] });
+  v.write('wiki/almanac/rules/ledger-old.md', ruleNote({ domain: 'almanac', topic: 'ledger', kind: 'knowledge', basis: 'source', applies_to: ['src/**'], extra: ['as_of: 2020-01-01'], doLine: 'Old fact zz.', notLine: 'Old not zz.' }));
+  const pair = cwd => v.run('review.mjs', ['status'], { cwd }).stdout.split('\n').find(l => l.includes('ledger-old and almanac/ledger-v2')) ?? '';
+  assert.match(pair(v.root), /almanac\/ledger-v2 ranks first: as_of \d{4}-\d\d-\d\d over 2020-01-01/);
+  assert.match(pair(v.projects.almanac), /almanac\/ledger-v2 ranks first: as_of \d{4}-\d\d-\d\d over 2020-01-01/);
+});
+
+test("global's readers read the lockfile of each project a session reaches, so a global rule with requires gets a fit", t => {
+  const v = makeVault(t, { presets: ['almanac'], domains: { global: { readers: ['fixture'] } } });
+  const global = (slug, events, doLine) => v.write(`wiki/global/rules/${slug}.md`, ruleNote({
+    domain: 'global', topic: 'ledger', kind: 'knowledge', basis: 'source', applies_to: ['src/**'], doLine, notLine: 'Guess the ledger.',
+    extra: ['as_of: 2026-10-01', `requires: [{ package: { ecosystem: fixture, name: pkg }, ranges: [{ type: SEMVER, events: [${events}] }] }]`],
+    evidence: ['- 2026-10-01 · source · session 1a2b3c4d · raw/refs/ledger-guide.md · dated 2026-10-01 · "openLedger takes a path and returns the ledger" (a-00000002)'],
+  }));
+  global('ledger-two', "{ introduced: '2.0.0' }, { fixed: '3.0.0' }", 'Close a pkg 2 ledger.');
+  global('ledger-three', "{ introduced: '3.0.0' }", 'Close a pkg 3 ledger.');
+  const sid = sessionId();
+  v.startSession(sid, { cwd: v.projects.almanac });
+  const refusal = ledgerEdit(v, sid);
+  assert.match(lineOf(refusal, 'global/ledger-two'), /Close a pkg 2 ledger\./);
+  assert.doesNotMatch(lineOf(refusal, 'global/ledger-two'), /version unknown/);
+  assert.doesNotMatch(refusal, /global\/ledger-three/, 'the lockfile pins pkg 2.4.0');
+});
+
+test('a newer copy with no fetched day labels the rule source changed, as review lists it unverified', t => {
+  const v = makeVault(t, { presets: ['almanac'] });
+  v.write('raw/refs/ledger-guide.later.md', withFields({ url: 'https://pkg.invalid/ledger', replaces: 'raw/refs/ledger-guide.md' }, LEDGER_GUIDE.replace('takes a path and', 'takes a path or URL and')));
+  const cwd = v.projects.almanac;
+  const sid = sessionId();
+  v.startSession(sid, { cwd });
+  assert.match(lineOf(ledgerEdit(v, sid), 'almanac/ledger-v2'), / · source changed$/);
+  assert.match(v.run('review.mjs', ['status'], { cwd }).stdout, /^- almanac\/ledger-v2: since \(no date\)/m);
 });

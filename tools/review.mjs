@@ -1,13 +1,13 @@
-import { config, plural, toPosix, guarded, hookErrors, errorsLog, localDay, appendLog, isVaultOnly, sessionReach, cwdOf, readJson, statePath } from './lib/vault.mjs';
+import { config, plural, toPosix, guarded, hookErrors, errorsLog, localDay, appendLog, isVaultOnly, sessionReach, cwdOf } from './lib/vault.mjs';
 import {
   clip, normTopic, topicNotes, loadNotes, liveRules, evidenceSessions, validDay, byKey, cmp, sharedFiles, resolver, linkedKeys, evidenceSources, isSourcePage, joinList,
-  rankPair, sourceItem, fitIn,
+  rankPair, sourceItem, fitIn, readDerived, isDocSet, folderNames, unverifiedNow,
 } from './lib/rules.mjs';
 import { lint, tally } from './lib/lint.mjs';
 import { lintRan, lintDone, tidy, trackedSessions, sessionDomains } from './lib/sessions.mjs';
 import { subjectRows, liveRows, newestFirst, projectName } from './lib/picks.mjs';
 import { UsageError } from './lib/input.mjs';
-import { refSources, sourceVersion, sourceChains, noteCitations, newerCopies, unverifiedNow } from './lib/sources.mjs';
+import { refSources, sourceVersion, sourceChains, noteCitations, newerCopies } from './lib/sources.mjs';
 
 // Each section reads these once a run; a read that fails is tried again by the next section, which reports it too.
 const once = f => {
@@ -19,7 +19,7 @@ const notes = once(loadNotes);
 
 const linted = once(() => {
   try {
-    const found = lint(notes());
+    const found = lint(notes(), chains());
     return { counts: tally(found), found };
   } catch (e) {
     return { failed: e.message };
@@ -103,12 +103,17 @@ function globPairs() {
 const sourcePages = once(() => notes().filter(isSourcePage));
 const resolve = once(() => resolver(notes()));
 
-// A file in a bundle is cited as part of the bundle, the one source a source page names.
-const sourceKey = x => sourceItem(x).rel ?? x;
-
 const chains = once(sourceChains);
+const listed = once(folderNames);
+
+// A file in a bundle is cited as part of the bundle, the one source a source page names. A page of a doc set is a source
+// of its own, with its own copies.
+const sourceKey = x => {
+  const { file, bundle } = sourceItem(x);
+  return (bundle && !isDocSet(bundle, listed()) ? bundle : file) ?? x;
+};
 const citations = once(() => noteCitations(notes(), chains()));
-const derived = once(() => readJson(statePath('derived.json'), {}));
+const derived = once(() => readDerived() ?? {});
 
 // The copies of each source a note cites that are later in its chain than the latest one it cites, as [id, copies].
 const laterCopies = n => [...citations()(n).latest].flatMap(([id, i]) => {
@@ -125,7 +130,7 @@ function newerSources() {
     if (!validDay(n.as_of)) return [];
     const after = dated.filter(s => s.domain === r.domain && s.topic === r.topic && s.data.source_date > n.as_of);
     const copies = new Set(laterCopies(n).flatMap(([, rels]) => rels));
-    const later = copies.size ? sourcePages().filter(s => copies.has(sourceItem(s.data.source).rel)) : [];
+    const later = copies.size ? sourcePages().filter(s => copies.has(sourceItem(s.data.source).file)) : [];
     const linked = new Set(linkedKeys(n, resolve()));
     const cited = new Set(evidenceSources(n).map(sourceKey));
     const newer = [...new Set([...after, ...later])].filter(s => !linked.has(s.key) && !cited.has(sourceKey(s.data.source))).sort((a, b) => cmp(a.key, b.key));
@@ -134,12 +139,13 @@ function newerSources() {
   });
 }
 
-// A note stays listed until it cites the newer copy or its file changes, as the hooks label it.
+// A note stays listed until its text changes, as the hooks label it, with the sources build found changed.
 function unverifiedNotes() {
   return notes().filter(n => unverifiedNow(derived(), n)).sort((a, b) => cmp(a.key, b.key)).map(n => {
-    const { since } = unverifiedNow(derived(), n);
-    const changed = laterCopies(n).map(([id, rels]) => `${id}, newer copy ${rels.at(-1)}`);
-    return `- ${n.key}: since ${since ?? '(no date)'} · ${changed.join('; ') || '(the source is no longer in raw/refs/)'}`;
+    const { since, sources } = unverifiedNow(derived(), n);
+    const ids = Array.isArray(sources) ? sources.filter(id => chains().chains.has(id)) : [];
+    const changed = ids.map(id => `${id}, newer copy ${chains().chains.get(id).at(-1)}`);
+    return `- ${n.key}: since ${validDay(since) ? since : '(no date)'} · ${changed.join('; ') || '(the source is no longer in raw/refs/)'}`;
   });
 }
 

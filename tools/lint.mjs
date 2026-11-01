@@ -1,6 +1,7 @@
 import { appendLog } from './lib/vault.mjs';
 import { keyOf } from './lib/rules.mjs';
 import { lint, tally, fix } from './lib/lint.mjs';
+import { sourceChains } from './lib/sources.mjs';
 
 const args = process.argv.slice(2);
 const LEVELS = ['error', 'warn'];
@@ -15,16 +16,18 @@ if (rest.length && !(rest.length === 2 && rest[0] === '--fail-on' && LEVELS.incl
 const failOn = rest[1] ?? 'error';
 
 try {
-  let found = lint();
+  // --fix rewrites notes only, so the second lint and the rebuild read raw/refs/ as the first did.
+  const chains = sourceChains();
+  let found = lint(undefined, chains);
   if (fixAt >= 0) {
-    const { fixed, written, rebuilt } = fix(found);
+    const { fixed, written, rebuilt } = fix(found, chains);
     for (const f of fixed) console.log(`fixed ${f.file}: ${f.msg}`);
     for (const name of rebuilt) console.log(`rebuilt ${name}`);
     if (written.length) {
       const sid = process.env.CLAUDE_CODE_SESSION_ID;
       appendLog([`fixed paths · notes ${written.map(keyOf).sort().join(', ')}${sid ? ` · session ${sid.slice(0, 8)}` : ''}`]);
     }
-    found = lint();
+    found = lint(undefined, chains);
   }
   for (const f of found) console.log(`${f.level} ${f.file}: ${f.msg}`);
   console.log(tally(found));

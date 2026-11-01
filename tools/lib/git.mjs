@@ -46,40 +46,54 @@ export function changedFiles(cwd, pathspec = [], { ignored = false, timeout = 20
 }
 
 // The git calls refresh makes on its clones in .sources/. Each throws an Error whose message is the reason refresh
-// records: git not found, no answer in time, or the command, its exit code and the first line git printed to stderr.
-// A repo that asks for a password fails at once rather than waiting out the timeout on a prompt no one sees.
-function run(args, { cwd, timeout, quietFail = false }) {
+// records: git not found, no answer in time, output past the cap, or the command, its exit code and the first line git
+// printed to stderr. A repo that asks for a password fails at once rather than waiting out the timeout on a prompt no
+// one sees. The operands come from files in raw/refs/, so they go after --end-of-options (-- for clone), where git
+// never reads one as an option. GIT_DIR keeps git in the clone's own repository: a broken .git would otherwise send it
+// up to the vault's, and the ext:: transport, which runs a command a repo string names, stays off whatever the user's
+// git config allows.
+function run(args, operands, { dir, timeout, quietFail = false, maxBuffer = 256 << 20 }) {
+  const argv = ['-c', 'protocol.ext.allow=never', ...args, args[0] === 'clone' ? '--' : '--end-of-options', ...operands];
+  const env = { ...gitEnv(), GIT_TERMINAL_PROMPT: '0', ...(dir ? { GIT_DIR: path.join(dir, '.git') } : {}) };
   try {
-    return execFileSync('git', args, { cwd, env: { ...gitEnv(), GIT_TERMINAL_PROMPT: '0' }, timeout, stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true, maxBuffer: 256 << 20 });
+    return execFileSync('git', argv, { cwd: dir, env, timeout, stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true, maxBuffer });
   } catch (e) {
     if (e.code === 'ENOENT') throw new Error('git not found');
+    // An overrun buffer kills git too, so it comes with a signal like a timeout does.
+    if (e.code === 'ENOBUFS') throw new Error(`git ${args[0]} printed over ${maxBuffer} bytes`);
     if (e.code === 'ETIMEDOUT' || e.signal) throw new Error(`no answer in ${Math.round(timeout / 1000)} s`);
     if (quietFail) return null;
     const line = String(e.stderr ?? '').split(/\r?\n/).find(l => l.trim()) ?? '';
-    throw new Error(`git ${args[0] === '-c' ? args[2] : args[0]} exited ${e.status}${line ? `: ${line.trim()}` : ''}`);
+    throw new Error(`git ${args[0]} exited ${e.status}${line ? `: ${line.trim()}` : ''}`);
   }
 }
 
 // With no work tree, no line-ending conversion or long path applies.
-export const clone = (repo, dir, { timeout }) => { run(['clone', '--quiet', '--no-checkout', repo, dir], { timeout }); };
-export const fetchOrigin = (dir, { timeout }) => { run(['fetch', '--quiet', 'origin'], { cwd: dir, timeout }); };
-export const hasCommit = (dir, commit, { timeout }) => run(['cat-file', '-e', `${commit}^{commit}`], { cwd: dir, timeout, quietFail: true }) !== null;
+export const clone = (repo, dir, { timeout }) => { run(['clone', '--quiet', '--no-checkout'], [repo, dir], { timeout }); };
+// A clone killed partway may have no origin, and is cloned again.
+export const hasOrigin = (dir, { timeout }) => fs.existsSync(path.join(dir, '.git')) && run(['remote', 'get-url'], ['origin'], { dir, timeout, quietFail: true }) !== null;
+// fetch never moves origin/HEAD, so after upstream renames its default branch it would point at the old one for good.
+export function fetchOrigin(dir, { timeout }) {
+  run(['fetch', '--quiet', '--prune'], ['origin'], { dir, timeout });
+  run(['remote', 'set-head', '--auto'], ['origin'], { dir, timeout });
+}
+export const hasCommit = (dir, commit, { timeout }) => run(['cat-file', '-e'], [`${commit}^{commit}`], { dir, timeout, quietFail: true }) !== null;
 // The commit the remote's default branch is at, or null when origin/HEAD doesn't resolve.
 export function remoteHead(dir, { timeout }) {
-  const out = run(['rev-parse', '--verify', '--quiet', 'origin/HEAD^{commit}'], { cwd: dir, timeout, quietFail: true });
+  const out = run(['rev-parse', '--verify', '--quiet'], ['origin/HEAD^{commit}'], { dir, timeout, quietFail: true });
   return out ? out.toString('utf8').trim() : null;
 }
-// The commits after commit on the default branch that change path, newest first, as { commit, day }.
-export function changedSince(dir, commit, file, { timeout }) {
-  const out = run(['log', '--format=%H%x09%cs', `${commit}..origin/HEAD`, '--', file], { cwd: dir, timeout }).toString('utf8');
-  return out.split(/\r?\n/).filter(Boolean).map(l => {
-    const [c, day] = l.split('\t');
-    return { commit: c, day };
-  });
+// The newest commit after commit on the default branch that changes path, as { commit, day }, or null when none does.
+export function lastChange(dir, commit, file, { timeout }) {
+  const line = run(['log', '-n', '1', '--format=%H%x09%cs'], [`${commit}..origin/HEAD`, '--', file], { dir, timeout }).toString('utf8').trim();
+  if (!line) return null;
+  const [c, day] = line.split('\t');
+  return { commit: c, day };
 }
-// The file's bytes at commit, or null when the commit has no such file. git reads <commit>:<path> with forward slashes only.
-export function showAt(dir, commit, file, { timeout }) {
-  const spec = `${commit}:${file.replace(/\\/g, '/')}`;
-  if (run(['cat-file', '-e', spec], { cwd: dir, timeout, quietFail: true }) === null) return null;
-  return run(['show', spec], { cwd: dir, timeout });
+// The size in bytes of the file at commit, or null when the commit has no such file. git reads <commit>:<path> with
+// forward slashes only.
+export function sizeAt(dir, commit, file, { timeout }) {
+  const out = run(['cat-file', '-s'], [`${commit}:${file}`], { dir, timeout, quietFail: true });
+  return out === null ? null : Number(out.toString('utf8').trim());
 }
+export const showAt = (dir, commit, file, { timeout }) => run(['show'], [`${commit}:${file}`], { dir, timeout });
