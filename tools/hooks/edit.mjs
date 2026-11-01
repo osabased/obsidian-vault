@@ -1,5 +1,5 @@
 import fs from 'node:fs';
-import { runHook, config, domainsFor, everywhereDomains, vaultRel, vaultOwn, toPosix, cwdOf, FILE_TOOLS, toolFile, shortHash, lf, plainText } from '../lib/vault.mjs';
+import { runHook, config, domainsFor, everywhereDomains, vaultRel, vaultOwn, toPosix, cwdOf, FILE_TOOLS, toolFile, shortHash, lf, plainText, readableDomains, inVaultFolder } from '../lib/vault.mjs';
 import {
   loadNotes, settledNotes, liveRules, livePages, deliverable, deliveryFor, byFit, ruleLine, rulePointer, pageLine, fitContext, cmp, clip, parseNote, QUOTED, agentNotesSpan, authoredByUser, AGENT_NOTES, TOP_HEADING, isMap,
 } from '../lib/rules.mjs';
@@ -215,16 +215,43 @@ function nameScope(input, t, cwd) {
   };
 }
 
+// A call to a tool with rules on its name, in the domains a prompt's keywords reach. Each rule tests its triggers
+// against the call's whole input, and is no more specific than `**`.
+function toolScope(input, tool, cwd) {
+  const hits = sessionHits(input.session_id, cwd);
+  const domains = readableDomains(hits.map(h => h.domain), inVaultFolder(cwd));
+  const text = plainText(asText(input.tool_input));
+  const place = `tool:${tool}`;
+  return {
+    domains, hits,
+    matching: notes => Object.entries(notes).flatMap(([key, note]) => (domains.includes(note.domain) && note.tools?.includes(tool)
+      ? [{ key, note, rel: tool, place, spec: [0, 0], text }] : [])),
+  };
+}
+
+// A mapped call is reached by its target's rules and its name's; a rule both reach comes once, as its target's.
+function scopeOf(input, t, cwd) {
+  const tool = FILE_TOOLS.includes(input.tool_name) ? null : toolScope(input, input.tool_name, cwd);
+  const own = !t ? null : t.namespace === 'file' ? fileScope(t.path, cwd) : nameScope(input, t, cwd);
+  if (!own || !tool) return own ?? tool;
+  return {
+    domains: [...new Set([...own.domains, ...tool.domains])],
+    hits: own.hits,
+    matching: (notes, pages = false) => [...own.matching(notes, pages), ...(pages ? [] : tool.matching(notes))]
+      .filter((m, i, all) => all.findIndex(x => x.key === m.key) === i),
+  };
+}
+
 // One refusal carries everything due on the file, so the retry goes through. The top rules come in full, up to
 // maxRulesPerEdit and maxBlockChars; the other rules and the pages past maxPages come as one line each, and whatever
 // the output budget has no room for is named in its overflow line. Every rule and page due is gated on the file, so the
 // retry passes, but only what the refusal shows counts as shown, so a page left out still comes up on another file.
-function refusal(input, hits, pages, written) {
+function refusal(input, hits, pages, written, noun) {
   const { maxRulesPerEdit, maxBlockChars, maxPages } = config().delivery;
   const sid = input.session_id;
   const rel = (hits[0] ?? pages[0]).rel;
   const head = `Taste rules apply to ${rel}:`;
-  const foot = `Revise this edit to follow ${!pages.length ? 'them' : hits.length ? 'them and the pages' : 'the pages'}, then retry. The retry is allowed.`;
+  const foot = `Revise this ${noun} to follow ${!pages.length ? 'them' : hits.length ? 'them and the pages' : 'the pages'}, then retry. The retry is allowed.`;
   const full = [];
   for (const hit of hits.slice(0, maxRulesPerEdit)) {
     const line = ruleLine(hit.key, hit.note);
@@ -233,7 +260,7 @@ function refusal(input, hits, pages, written) {
   }
   const { text, kept } = fitContext([
     { noun: 'rule', head, items: full.map(s => s.line) },
-    { noun: 'rule pointer', head: 'Also due, in brief. Open the ones that bear on this edit:', items: hits.slice(full.length).map(h => rulePointer(h.key, h.note)) },
+    { noun: 'rule pointer', head: `Also due, in brief. Open the ones that bear on this ${noun}:`, items: hits.slice(full.length).map(h => rulePointer(h.key, h.note)) },
     { noun: 'page', head: `Vault pages on ${rel}. Read the ones that bear on this work:`, items: pages.map((h, i) => pageLine(h.key, h.note, i >= maxPages)) },
   ], { tail: foot, gap: '\n' });
   markMany('gate', sid, [...hits.map(h => h.id), ...pages.map(p => p.id), ...written]);
@@ -246,14 +273,14 @@ const deny = why => ({ hookSpecificOutput: { hookEventName: 'PreToolUse', permis
 
 runHook('edit', input => {
   const t = target(input);
-  if (!t) return null;
+  if (!t && FILE_TOOLS.includes(input.tool_name)) return null;
   const cwd = cwdOf(input);
-  if (t.namespace === 'file') {
+  if (t?.namespace === 'file') {
     const why = vaultGuard(t.path, cwd) ?? noteGuard(input, t.path, cwd);
     if (why) return deny(why);
     if (vaultOwn(vaultRel(t.path, cwd))) return null;
   }
-  const { domains, hits: reach, matching } = t.namespace === 'file' ? fileScope(t.path, cwd) : nameScope(input, t, cwd);
+  const { domains, hits: reach, matching } = scopeOf(input, t, cwd);
   const notes = settledNotes(loadNotes(domains));
   const text = plainText(newText(input.tool_name, input.tool_input ?? {}));
   const ctx = deliveryFor(reach);
@@ -267,9 +294,9 @@ runHook('edit', input => {
     .filter(m => !marked('gate', input.session_id, m.id));
   // Only a file some rule covers can matter to the Stop hook, which checks a turn only once the prompt hook has stamped
   // it, so the others cost no write.
-  const turn = t.namespace === 'file' && matched.length ? turnStart(input.session_id) : null;
+  const turn = t?.namespace === 'file' && matched.length ? turnStart(input.session_id) : null;
   const written = turn === null ? [] : [gatedFile(turn, t.path, cwd)];
-  if (hits.length || pages.length) return deny(refusal(input, hits, pages, written));
+  if (hits.length || pages.length) return deny(refusal(input, hits, pages, written, t ? 'edit' : 'call'));
   markMany('gate', input.session_id, written);
   return null;
 });
