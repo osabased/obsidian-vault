@@ -7,7 +7,7 @@ import { pathToFileURL } from 'node:url';
 const TOOLS = path.resolve(import.meta.dirname, '..', 'tools');
 
 // The tools find the vault from their own location, so each test runs a copy of tools/ inside a vault of its own.
-export function makeVault(t, { config = {}, domain = 'demo', topics = ['layout', 'code'], domains = {} } = {}) {
+export function makeVault(t, { config = {}, domain = 'demo', topics = ['layout', 'code'], domains = {}, local = {} } = {}) {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'vault-test-'));
   const project = fs.mkdtempSync(path.join(os.tmpdir(), 'vault-project-'));
   t.after(() => {
@@ -101,9 +101,11 @@ export function makeVault(t, { config = {}, domain = 'demo', topics = ['layout',
   };
 
   v.write('vault.config.json', `${JSON.stringify({
-    domains: { [domain]: { title: 'Demo', projects: [project.replace(/\\/g, '/')], topics }, ...domains },
+    domains: { [domain]: { title: 'Demo', topics }, ...domains },
     ...config,
   }, null, 2)}\n`);
+  // The project folder is the default domain's path on this machine; local adds or replaces other domains' entries.
+  v.write('vault.local.json', `${JSON.stringify({ domains: { [domain]: { paths: [project.replace(/\\/g, '/')] }, ...local } }, null, 2)}\n`);
   return v;
 }
 

@@ -58,7 +58,7 @@ test('words match across case, accents and plurals, and stopwords match nothing'
 });
 
 test('--domain, --kind and --topic narrow the results', t => {
-  const v = makeVault(t, { domains: { other: { title: 'Other', projects: [], topics: [] } } });
+  const v = makeVault(t, { domains: { other: { title: 'Other', vaultOnly: true, topics: [] } } });
   v.write('wiki/demo/rules/pad.md', ruleNote({ keywords: ['padding'], topic: 'layout' }));
   v.write('wiki/demo/rules/pad-fact.md', ruleNote({ kind: 'knowledge', basis: 'stated', applies_to: ['src/**'], extra: ['as_of: 2026-10-01'], topic: 'layout', doLine: 'Padding is in pixels.' }));
   v.write('wiki/demo/concepts/padding.md', page({ kind: 'concept', topic: 'code' }));

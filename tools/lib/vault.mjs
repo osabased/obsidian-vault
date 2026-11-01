@@ -21,13 +21,20 @@ const DEFAULTS = {
   knowledge: { staleAfterDays: 180 },
   lint: { remindAfterDays: 14, remindAfterNotes: 10 },
   picks: { maxSheetBytes: 3_000_000 },
+  reach: { markerDepth: 3 },
 };
 
+const strings = xs => (Array.isArray(xs) ? xs.filter(x => typeof x === 'string' && x.trim()) : []);
+const local = () => readJsonSafe(vaultPath('vault.local.json'))?.domains ?? {};
+
+// Paths differ per machine, so they come from the untracked vault.local.json; a file lint finds broken gives none.
 let loaded;
 export function config() {
   if (!loaded) {
     const c = readJson(vaultPath('vault.config.json'), {});
-    loaded = { domains: c.domains ?? {}, ...Object.fromEntries(Object.entries(DEFAULTS).map(([k, d]) => [k, { ...d, ...c[k] }])) };
+    const mine = local();
+    const domains = Object.fromEntries(Object.entries(c.domains ?? {}).map(([d, x]) => [d, { ...x, paths: strings(mine?.[d]?.paths) }]));
+    loaded = { domains, ...Object.fromEntries(Object.entries(DEFAULTS).map(([k, d]) => [k, { ...d, ...c[k] }])) };
   }
   return loaded;
 }
@@ -45,31 +52,130 @@ export function inside(root, p, base) {
   const r = toPosix(root).toLowerCase();
   const lower = target.toLowerCase();
   if (lower === r) return '';
-  return lower.startsWith(`${r}/`) ? target.slice(r.length + 1) : null;
+  const prefix = r.endsWith('/') ? r : `${r}/`;
+  return lower.startsWith(prefix) ? target.slice(prefix.length) : null;
 }
 
 export const stripWorktree = rel => rel.replace(/^\.claude\/worktrees\/[^/]+(?:\/|$)/i, '');
 export const vaultRel = (p, base) => inside(ROOT, p, base);
 
+const caseFolds = process.platform === 'win32' || process.platform === 'darwin';
+const fold = name => (caseFolds ? name.toLowerCase() : name);
+
+// A marker is a file name, so one with a folder in it never matches.
+const markersOf = d => strings(config().domains[d]?.markers).filter(m => !/[\\/]/.test(m));
+
+// Each marker file name with the domains it puts a folder in.
+function markerDomains() {
+  const by = new Map();
+  for (const d of Object.keys(config().domains)) {
+    for (const m of markersOf(d)) by.set(fold(m), [...(by.get(fold(m)) ?? []), d]);
+  }
+  return by;
+}
+
+const hasDir = dir => fs.statSync(dir, { throwIfNoEntry: false })?.isDirectory() ?? false;
+
+// The nearest folder at or above p that holds a marker, with every domain whose marker it holds. p may be a file the
+// edit is about to create, and a file path never holds a marker, so the walk can start at p itself.
+function markedAbove(p, by) {
+  if (!by.size) return [];
+  for (let dir = p; ; dir = path.dirname(dir)) {
+    const doms = [...by].filter(([m]) => fs.existsSync(path.join(dir, m))).flatMap(([, ds]) => ds);
+    if (doms.length) return [...new Set(doms)].map(domain => ({ domain, root: dir }));
+    if (path.dirname(dir) === dir) return [];
+  }
+}
+
+// A folder's domains, each with its project root: the nearest marker folder at or above it, and every domain with a
+// path that holds it. Global applies everywhere, so callers add it.
 export function domainsFor(p, base) {
   if (!p) return [];
-  const hits = [];
+  const target = toPosix(p, base);
+  const hits = markedAbove(target, markerDomains());
   for (const [domain, d] of Object.entries(config().domains)) {
-    for (const project of d.projects ?? []) {
-      const rel = inside(project, p, base);
-      if (rel !== null) hits.push({ domain, root: toPosix(project), rel: stripWorktree(rel) });
-    }
+    for (const project of d.paths) if (inside(project, target) !== null) hits.push({ domain, root: toPosix(project) });
   }
-  hits.sort((a, b) => b.root.length - a.root.length);
+  const withRel = hits.map(h => ({ ...h, rel: stripWorktree(inside(h.root, target)) }));
+  withRel.sort((a, b) => b.root.length - a.root.length);
+  return withRel.filter((h, i) => withRel.findIndex(x => x.domain === h.domain) === i);
+}
+
+// Plain folder entries only: a dependency folder a project ignores is listed as one, and a pattern needs a matcher.
+function ignoredFolders(dir) {
+  let text = '';
+  try { text = fs.readFileSync(path.join(dir, '.gitignore'), 'utf8'); } catch {}
+  const names = new Set();
+  const paths = new Set();
+  for (const raw of text.split(/\r?\n/)) {
+    const line = raw.trim();
+    if (!line || /^[#!]/.test(line) || /[*?[\\]/.test(line)) continue;
+    const entry = line.replace(/\/+$/, '');
+    if (!entry) continue;
+    if (entry.replace(/^\//, '').includes('/') || entry.startsWith('/')) paths.add(fold(entry.replace(/^\//, '')));
+    else names.add(fold(entry));
+  }
+  return { names, paths };
+}
+
+const SCAN_FOLDERS = 2000;
+
+// Markers in the folders below cwd, down to reach.markerDepth, so a session at a monorepo root hears each package's
+// domains. Dot-folders and the folders cwd's .gitignore lists are skipped, and the scan stops after SCAN_FOLDERS
+// folders, so a huge tree can't slow session start.
+function markedBelow(cwd) {
+  const by = markerDomains();
+  const depth = Number(config().reach.markerDepth) || 0;
+  if (!cwd || !by.size || depth < 1) return [];
+  const root = toPosix(cwd);
+  const ignored = ignoredFolders(root);
+  const hits = [];
+  let queue = [{ dir: root, rel: '', level: 0 }];
+  let seen = 0;
+  while (queue.length && seen < SCAN_FOLDERS) {
+    const next = [];
+    for (const { dir, rel, level } of queue) {
+      if (seen++ >= SCAN_FOLDERS) break;
+      let entries = [];
+      try { entries = fs.readdirSync(dir, { withFileTypes: true }); } catch {}
+      if (level > 0) {
+        const doms = entries.filter(e => e.isFile()).flatMap(e => by.get(fold(e.name)) ?? []);
+        for (const domain of new Set(doms)) hits.push({ domain, root: dir });
+      }
+      if (level >= depth) continue;
+      for (const e of entries) {
+        const r = rel ? `${rel}/${e.name}` : e.name;
+        if (!e.isDirectory() || e.name.startsWith('.') || ignored.names.has(fold(e.name)) || ignored.paths.has(fold(r))) continue;
+        next.push({ dir: `${dir}/${e.name}`, rel: r, level: level + 1 });
+      }
+    }
+    queue = next;
+  }
+  return hits;
+}
+
+// A session's domains: its folder's, and those of the markers below it.
+export function sessionReach(cwd) {
+  const hits = [...domainsFor(cwd), ...markedBelow(cwd)];
   return hits.filter((h, i) => hits.findIndex(x => x.domain === h.domain) === i);
 }
 
 export const inVaultFolder = cwd => Boolean(cwd) && vaultRel(cwd) !== null;
 
-// /ingest runs in the vault folder and can feed any domain.
-export const proposeDomains = cwd => (inVaultFolder(cwd) ? Object.keys(config().domains) : domainsFor(cwd).map(d => d.domain));
-// The vault folder is where every domain's pages are read, a research domain's among them.
-export const readableDomains = (doms, vaultFolder) => [...(vaultFolder ? Object.keys(config().domains) : doms), 'global'];
+// A vault-only domain holds pages only, which sessions read from the vault folder.
+const isVaultOnly = d => d !== 'global' && config().domains[d]?.vaultOnly === true;
+export const everywhereDomains = () => Object.keys(config().domains).filter(d => config().domains[d].everywhere === true && !isVaultOnly(d));
+
+// /ingest runs in the vault folder and can feed any domain. A session takes the domains session start found for it,
+// with those of its folder.
+export function proposeDomains(entry) {
+  if (inVaultFolder(entry?.cwd)) return Object.keys(config().domains);
+  const found = Array.isArray(entry?.reach?.domains) ? entry.reach.domains : [];
+  return [...new Set([...found, ...domainsFor(entry?.cwd).map(d => d.domain)])].filter(d => Object.hasOwn(config().domains, d));
+}
+// The vault folder is where every domain's pages are read, a vault-only domain's among them; an everywhere domain's
+// pages reach every session.
+export const readableDomains = (doms, vaultFolder) => [...new Set([...(vaultFolder ? Object.keys(config().domains) : [...doms, ...everywhereDomains()]), 'global'])];
 
 export function readJson(file, fallback) {
   try {

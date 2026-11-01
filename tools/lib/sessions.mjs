@@ -1,6 +1,6 @@
 import fs from 'node:fs';
 import path from 'node:path';
-import { config, vaultPath, statePath, stateDir, readJsonSafe, writeJson, safeId, shortHash, logError, guarded, hookErrors, errorsLog } from './vault.mjs';
+import { config, vaultPath, statePath, stateDir, readJsonSafe, writeJson, safeId, shortHash, logError, guarded, hookErrors, errorsLog, domainsFor, toPosix } from './vault.mjs';
 
 const DAY = 86400e3;
 
@@ -14,7 +14,9 @@ export function ownEntry(sid) {
 }
 
 // `cwd` stays where the session registered, so a move into the vault folder doesn't let it propose for every domain.
-export function touchSession(input) {
+// Session start passes the domains it found for its folder, markers below it among them, so prompts and propose.mjs
+// read them here rather than scan the tree again.
+export function touchSession(input, reach) {
   const id = safeId(input.session_id);
   const file = registry(id);
   const prev = readJsonSafe(file) ?? {};
@@ -23,8 +25,18 @@ export function touchSession(input) {
     transcript: input.transcript_path ?? prev.transcript ?? null,
     cwd: prev.cwd ?? input.cwd ?? null,
     last_seen: new Date().toISOString(),
+    ...(reach ? { reach: { cwd: input.cwd ?? null, domains: reach } } : prev.reach ? { reach: prev.reach } : {}),
   };
   writeJson(file, entry);
+}
+
+const samePath = (a, b) => Boolean(a && b) && toPosix(a).toLowerCase() === toPosix(b).toLowerCase();
+
+// The domains session start found for this session's folder, or, in a folder it didn't scan, that folder's own.
+export function sessionDomains(sid, cwd) {
+  const reach = sid ? readJsonSafe(registry(safeId(sid)))?.reach : null;
+  if (reach && samePath(reach.cwd, cwd) && Array.isArray(reach.domains)) return reach.domains;
+  return domainsFor(cwd).map(d => d.domain);
 }
 
 const marker = (kind, sid, key) => vaultPath('.state', kind, safeId(sid), shortHash(key));
