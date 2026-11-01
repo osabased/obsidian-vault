@@ -1,6 +1,6 @@
 # All-rounder vault: design draft
 
-Status: draft, 2026-11-01. Phase 0 (checks) and phase 1 (format) are built and merged into main. Phase 2 (delivery) is built on `phase-2-integration` and reviewed at max effort, with the findings fixed. It waits for the user's OK to land. Phase 3 is next.
+Status: draft, 2026-11-01. Phase 0 (checks) and phase 1 (format) are built and merged into main. Phase 2 (delivery) is built and landed on `phase-2-delivery`, not yet merged into main. Phase 3's design (neutral fixtures) is ready on `phase-3-delivery`.
 
 Scope: structure, design and architecture only. This design adds no knowledge to the vault. It names no domain, platform, package ecosystem or site as built in. Where it needs an example, it uses a placeholder.
 
@@ -68,8 +68,8 @@ Today `tools/hooks/` is the Claude Code adapter, with core logic mixed in. Phase
 Two rules keep the layers apart:
 - **Neutral core.** A domain-specific fact anywhere outside config or notes is a bug.
   - A test fails when a configured domain's key appears in `tools/`, `.claude/skills/`, `test/` or AGENTS.md, or its title does as a whole phrase of two or more words. It reads both from config, so the test itself names none.
-  - A platform named without the domain's key or title passes the test: the ingest skill's line, and the fixtures' file types. Review catches those, and phase 3 replaces the fixtures.
-- **Neutral fixtures.** The tests use invented domains of different shapes (§7, phase 3). No single real domain shapes the defaults.
+  - A platform named without the domain's key or title passes the test, as the fixtures' file types and AGENTS.md's examples do until phase 3. Review catches those.
+- **Neutral fixtures.** The tests use invented domains of different shapes (§8, phase 3). No single real domain shapes the defaults.
 
 ## 4. Native to the vault, native to Claude Code
 
@@ -296,7 +296,7 @@ Phase-3 notes then need no migration, even where the tooling lands later.
   - **scale:**
     - `index.md` lists domains and their topics, and each domain's notes go in `index/<domain>.md`.
     - Session start names a set number of topics per domain, ranked by note count, then "and N more in index/<domain>.md".
-- *Check.* `latency.mjs`: the fastest of 5 gated edits stays under 1,000 ms at 1,000 notes (781 ms today). The target with the cache is under 300 ms at 3,000 notes.
+- *Check.* `latency.mjs`: the fastest of 5 gated edits stays under 1,000 ms at 1,000 notes (781 ms before the cache). The target with the cache is under 300 ms at 3,000 notes.
 
 ### 6.3 Reach: subagents, edit surfaces, tools, shell writes
 
@@ -372,7 +372,7 @@ Phase-3 notes then need no migration, even where the tooling lands later.
 
 **a. Media.**
 - *Problem.*
-  - `sourceTexts` returns null for a file that isn't UTF-8 (`quotes.mjs:94`), so a fabricated quote against a PDF or mp4 was written as a rule.
+  - `sourceTexts` returns null for a file that isn't UTF-8 (`quotes.mjs:91`), so a fabricated quote against a PDF or mp4 was written as a rule.
   - Pick sheets must be png, jpg or webp (`pick.mjs:78`).
 - *Design.*
   - **Where derived text lives.** A binary source's extracted text goes in `derived/<sha256>.md` at the vault root, keyed by the binary's hash.
@@ -395,10 +395,7 @@ Phase-3 notes then need no migration, even where the tooling lands later.
 - When a transcript has been pruned, lint checks the quote against the `raw/inbox` or `raw/picks` row that recorded it, which was verified when written.
 - `pick.mjs` checks `notes` and comment `text` against what the user typed. Today it imports no quote check, yet `propose.mjs:139-145` cites a row's `notes` as the user's words.
 
-**d. Unicode.**
-- *Problem.* `search.mjs:31` splits on runs of letters, so a query in a language written without spaces finds nothing. The word boundaries at `quotes.mjs:44` refuse a mid-sentence quote in such a language.
-- *Design.* `Intl.Segmenter` (built in; ICU 76.1 on Node 22.14) splits words for every locale ICU covers. Search tokens and quote boundaries use it.
-- *Check.* `設定ファイルの保存方法について` segments as `設定|ファイル|の|保存|方法|について`. Searching `保存` finds a page holding it, and a mid-sentence quote of it that the user typed passes.
+**d. Unicode.** No change. Search tokens (`search.mjs:31`) and quote boundaries (`quotes.mjs:44`) split on runs of Unicode letters and digits, and search folds diacritics, so every language written with spaces works today. Word segmentation for languages written without spaces is not done (§12).
 
 **e. Privacy (small, optional).** `/ingest` refuses to save a source holding something shaped like a key or token, and lists the matches for the user to remove.
 
@@ -576,7 +573,7 @@ The phases build mechanism only. Adding real knowledge and taste is the user's c
    - Every field in 6.1, plus the derived-text and bundle formats (6.4a, 6.4b), target namespaces (6.3b) and `tools` (6.3c).
    - Free while the wiki is empty.
    - Update AGENTS.md with it (§10).
-2. **Delivery that can be trusted.** Built on `phase-2-integration`, reviewed at max effort with the findings fixed, and waiting for the user's OK to land.
+2. **Delivery that can be trusted.** Built, reviewed at max effort with the findings fixed, and landed on `phase-2-delivery`, not yet merged into main.
    - loud failure, deadline and linear regex (6.6a–c);
    - the cache and content settling (6.2c, 6.6d), with the one git module and the standard and lint check changed to allow it:
      - the cache here is the one cache, the scoped walk and build on change;
@@ -587,21 +584,39 @@ The phases build mechanism only. Adding real knowledge and taste is the user's c
    - subagents and edit surfaces (6.3a, 6.3b);
    - the shell-write Stop hook (6.3d);
    - plugin hooks (6.7d).
-3. **Neutral fixtures.** Replace the test fixtures with invented domains, one of each shape:
-   - a code-taste domain reached by markers, with globs, triggers and picks;
-   - a knowledge domain with a fixture version reader, a locally served URL source, a fixture git source and a feed;
-   - a research domain, vault-only, with media sources and derived text;
-   - a personal domain with `author: user` notes;
-   - an `everywhere` domain.
+3. **Neutral fixtures.** The tests use invented domains and invented names, not a real ecosystem, so no real domain's file types or words shape what the tests pin. `propose.mjs` and the ingest skill already use `example-ui`; the platform words left are in `test/` and AGENTS.md's examples.
+   - **Presets.** The five shapes become fixture presets in `test/fixture.mjs`, five and no more. `makeVault(t, { presets: [...] })` adds each named preset's config, project folder and notes. A marker- or path-reached preset gets its own project folder, `v.projects.<key>`, and `glim`'s is `v.project`. The preset writes its `derived/` and `raw/` files directly, and dates `as_of` 30 days before the run, so lint's 180-day warning never fires.
+     - **`glim`, code taste.** Reached by its marker, `glim.project`. Files are `src/**/*.zq`, and `.zq` with `.zqx` is the prefix-extension pair the glob tests need. It holds an always rule, a rule on `src/**/*.zq` with a trigger, a keyword rule, a page with `applies_to`, a rule with `tools: [AskUserQuestion]`, and one live pick row in `raw/picks/`. It declares the namespace `glim-tree`, maps the tool `mcp__fixture__set_property` to it in `editTools`, and writes the alias `tools/ext/aliases/fixture.mjs`, which the domain names in `aliases`.
+     - **`almanac`, knowledge.** Reached by its marker, `almanac.project`. Its project holds `almanac.lock`, naming `pkg` at 2.4.0, which nothing reads until phase 4's fixture reader does. It holds two knowledge rules on `src/**`, one `requires` `{ ecosystem: fixture, name: pkg }` from 2.0.0 before 3.0.0 and one from 3.0.0, both with `as_of` and the keyword `openLedger`. It also holds a source in `raw/refs/` with `url`, `fetched`, `etag`, `last_modified` and the body's real `sha256`, one with `repo`, `path` and `commit`, and a source page for each.
+     - **`archive`, research.** `vaultOnly: true`. It holds `raw/refs/paper.pdf`, a few bytes that start `%PDF-` and aren't UTF-8, with `derived/<its sha256>.md` written by hand: kind `pdf`, extractor `fixture`, an `extractor_version`, `source: raw/refs/paper.pdf`, and anchors `[p. 1]` and `[p. 2]`. It also holds `raw/refs/talk.mp4` with no derived text, and a source page whose footnote cites `raw/refs/paper.pdf#page=2`.
+     - **`journal`, personal.** Reached by `paths` in `vault.local.json`, so one preset keeps the path reach in use. It holds an `author: user` page with an `## Agent notes` section.
+     - **`commons`, everywhere.** `everywhere: true`, with no markers or paths. It holds a keyword page and a keyword rule.
+   - **The default.** `makeVault(t)` with no presets is `glim`'s domain entry and its project folder, holding `glim.project`, with no notes, no namespace and no alias, so the 300-odd tests that write their own notes keep an empty wiki. It is reached by the marker and no path, so every test exercises markers, and `reach.test.mjs` and `rows.test.mjs` cover paths alongside `journal`. A folder reached both ways would be harmless, since `domainsFor` keeps one hit per domain (`vault.mjs:121`). `ruleNote` and `pageNote` default to `glim`, and `editFile`'s default text becomes `set x to 1`.
+   - **The checks.** Of the 17 *Check*s in §6, 12 run on what is built, each against the preset of its shape:
+     - `glim`: 6.3a, 6.3b, 6.3d, 6.5 (the test adds its 20 rules and 2 pages), 6.6c and 6.6d. 6.3d's test still makes the project a git repo.
+     - `glim` and `almanac` together: 6.1a's monorepo, with their markers in `packages/a/` and `packages/b/`, and its unlisted folder; `commons` for its `everywhere` page; and a `local` path that doesn't exist for its lint error.
+     - `almanac`: 6.1b. `journal`: 6.1f.
+     - All five presets plus five vault-only domains of the test's own: 6.6e, which needs ten.
+     - The perf group's generated vault (`test/perf/notes.mjs`): 6.2c and 6.6f. It needs thousands of notes, so it keeps its own generator, whose domains (`ui`, `backend`, `infra`, `data`) and file types name no platform.
+   - **The `todo` checks.** The other five need phase 4 or 5 code. Phase 3 seeds what the format already expresses and writes each as a `todo` test that fails for the reason its section names:
+     - 6.1c on `almanac`: only the v2 rule is delivered, and `review status` ranks it first. It fails because nothing reads versions, so both are.
+     - 6.2a on `almanac`: it runs `node tools/refresh.mjs` and expects the rule labelled unverified. It fails because there is no refresh. Phase 4 adds the locally served URL source and the fixture git repo to this test.
+     - 6.2b on `almanac`: the test generates a manifest of 2,000 links and 50 cited pages under `raw/refs/<set>/`, then expects session start under 500 ms and `review.mjs sources` to list the set as one source. The second part fails until doc sets are built. The builder confirms it is red for that reason before marking it.
+     - 6.3c on `glim`: the first `AskUserQuestion` is denied with the `tools` rule. It fails because the edit hook doesn't match on `tools`.
+     - 6.4a on `archive`: a fabricated quote against `paper.pdf` is refused, and a real one passes. It fails because quotes never read `derived/`. `quotes.test.mjs:178`, which asserts that a binary source is not checked, stays until phase 5 inverts it.
 
-   Every *Check* in §6 runs against these. Remove the domain's name from the examples in AGENTS.md, `propose.mjs` and the ingest skill (§2), so the neutral-core test goes green.
+     The locally served URL source, the fixture git source, the feed and the fixture version reader come with phase 4, since building them now would fix interfaces phase 4 hasn't designed. The extractor fixtures come with phase 5.
+   - **The other tests** keep their own setup but lose `demo` and every platform word: about 56 test blocks in 13 files name a file type, page name or code of one platform, and `demo` appears about 900 times. They take `glim`'s words: `.zq` files, invented page names, and invented code in trigger payloads and quotes. `glob.test.mjs`'s `.lua`/`.luau` cases become `.zq`/`.zqx`, which keeps the prefix pair.
+   - **AGENTS.md.** Its examples move to a widely known stack (§10).
+   - **Neutral core.** The neutral-core test loses its `todo` mark (`test/neutral-core.test.mjs:20`).
+   - **Done** when the phase 3 check in §9 passes: the suite passes with 5 `todo` tests, each red for its reason, and the grep for platform words finds nothing.
 4. **Knowledge mechanisms.**
    - refresh, git sources, feeds and doc sets (6.2a, 6.2b);
    - the version reader interface (6.1c).
 
    Feed parsing and any real reader go through build-or-reuse when a domain needs them.
-5. **Media, Unicode and tool triggers.**
-   - 6.4, with the extractor interface; real extractors go through build-or-reuse;
+5. **Media and tool triggers.**
+   - 6.4a–c and e, with the extractor interface; real extractors go through build-or-reuse;
    - 6.3c.
 6. **Second adapter.** The core and adapter split (6.7a–c), the Codex adapter (6.7e) and compiled files (6.7f), built together so a real second agent shapes the split.
 
@@ -610,21 +625,31 @@ The phases build mechanism only. Adding real knowledge and taste is the user's c
 | Check | Passing means | Today |
 |---|---|---|
 | `node --test test/*.test.mjs` | All pass; each `todo` fails for the reason its design section names | 381 tests: 379 pass, 1 skipped (making a link needs Developer Mode on Windows), 1 `todo` (neutral core, §3), 28 s. Lint: 0 errors. |
-| Neutral-core test (§3) | No configured domain's key or title appears in `tools/`, `.claude/skills/`, `test/` or AGENTS.md | Passes on this vault's config. Its `todo` mark stays until phase 3 replaces the fixtures, which name one platform without its domain's key. |
+| Neutral-core test (§3) | No configured domain's key or title appears in `tools/`, `.claude/skills/`, `test/` or AGENTS.md | Passes on this vault's config. Its `todo` mark comes off in phase 3, once the fixtures name no platform. |
+| Phase 3 check: the suite, then the grep below the table | With the neutral-core `todo` mark removed, the suite passes with 5 `todo` tests (6.1c, 6.2a, 6.2b, 6.3c, 6.4a), each red for its reason, and the grep prints nothing. Then no test, tool, skill or AGENTS.md example leans on one platform, and only the five later-phase checks are open. | Red: the grep prints 849 lines. |
 | The probes as `todo` tests (phase 0) | Each passes with its `todo` mark removed: slow trigger, subagent gate, settle after an mtime change, negated glob, one refusal per file, frontmatter | All pass with their marks removed (phase 2): slow trigger, subagent gate (2), settle after an mtime change (2), one refusal per file, frontmatter, long-path prefix. Negated glob passes (phase 1). |
 | Perf group: `VAULT_PERF=1 node --test test/perf/*.perf.mjs` (about 10 s, outside the default run) | Fastest of 5 gated edits under 1,000 ms at 1,000 notes; fastest of 3 under 300 ms at 3,000; three parallel proposes of unrelated rules at 3,000 notes all succeed (6.6f) | About 135–156 ms; about 250–272 ms; all succeed in about 4.3–5.0 s, since builds run one at a time under `build.lock`. A warm session start at 3,000 notes takes about 340 ms, including the vault-wide stat for the lint reminder. The timings are noisy on this machine. |
-| Each *Check* in §6 | As stated there, against the phase-3 fixtures | Not built |
+| Each *Check* in §6 | As stated there, against the phase-3 presets. 12 of the 17 pass in phase 3; 6.1c, 6.2a, 6.2b, 6.3c and 6.4a are `todo` until phases 4 and 5 | Not yet against the presets. Most already run as tests on the `demo` fixture (6.2c and 6.6f in the perf group) |
 | Transcript provider test (6.7c) | The fields the provider reads still exist in a current transcript | Not built |
 | Linear regex test (6.6c) | `new RegExp(p, 'l')` works after `v8.setFlagsFromString` on the installed Node | Works on Node 22.14 |
 | Vault server trial (6.7g) | A PreToolUse `mcp_tool` hook's JSON deny stops an Edit, and a gated edit is faster than the cached command hook | Run once in a scratch folder, not kept. Deny honored, but it fails open. |
 | Hook trials (6.2c, 6.3d, 6.6a) | In headless runs of the installed Claude Code: Stop `additionalContext` and `decision: "block"` continue the turn in bypass mode; a failing hook is recorded on each event; exec form is faster than Git Bash | Run once in a scratch folder on 2.1.296, not kept. All three hold. Exec form saves about 50 ms a call, less than measured outside Claude Code. |
 | Plugin trial (6.7d) | In headless runs with the plugin loaded by `--plugin-dir`, the hooks deliver from the vault the option names | Run once in the scratchpad (phase 2), not kept. 7 of 7 behaviors held: `CLAUDE_PLUGIN_OPTION_VAULT` from the parent env reached the hooks; the SessionStart always rule; one refusal, then the retry; Stop context for a shell write; SubagentStart context and the per-agent gate; 107–209 ms per hook; a loud failure on every hook for a bad vault path. |
 
+The phase 3 check, run from the vault folder:
+
+```sh
+node --test test/*.test.mjs && ! git grep -nIiE 'luau|\.lua\b|roblox|--!strict|UIListLayout|task\.wait|local x = 1|\bdemo\b' -- test tools .claude/skills AGENTS.md
+```
+
+It exits 0 when both hold: the suite passes and the grep prints nothing. A failure prints the failing tests or the lines the grep found.
+
 ## 10. AGENTS.md changes
 
 The design changes these parts of AGENTS.md. Each change lands with the phase that builds it.
 
 - **Examples throughout.** Use placeholder domains, such as `example-ui`, instead of a real one (§3).
+- **Lines 50–76 and 154–159 (the rule and footnote examples), phase 3.** They move from one platform's script files and docs to a widely known stack: TypeScript files for the rule's globs, and a CSS layout sentence with an MDN link for the footnote example. The rule example moves as one unit, its globs, keyword, Do, Not and Evidence quote together, so no line keeps the old platform's words.
 - **Line 11 (research domains).** `projects: []` becomes `markers`, `paths` and `everywhere`, and vault-only becomes an explicit `vaultOnly: true`.
 - **Lines 22–27 (how rules and pages reach the agent).**
   - Line 22: one refusal per file carries every due rule and page (decision 6, 6.5).
@@ -654,6 +679,7 @@ The design changes these parts of AGENTS.md. Each change lands with the phase th
 
 - **Session-end capture.** Tried and removed in 03ce4d9, because it produced agent-written briefs, not the user's words.
 - **0–1 confidence scores with decay.** Taste ranks by basis, evidence count and recency. Knowledge ranks by version match and `as_of`, and freshness comes from re-checking sources.
+- **Word segmentation for languages written without spaces.** The user doesn't need Japanese text supported. `Intl.Segmenter` would also cover Chinese and Thai, which nothing has asked for either. Search and quotes split on Unicode letter runs (6.4d).
 - **Vector search.** Field-weighted BM25 holds at this size. Revisit once a domain passes a few hundred pages.
 - **Auto-ingest on a new source.** The user stays in the loop, as Karpathy has it. `/ingest batch` covers bulk.
 - **`.claude/rules` as the main delivery.** See §4.
