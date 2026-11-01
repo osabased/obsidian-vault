@@ -3,58 +3,58 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { makeVault, ruleNote, pageNote, denied, sessionId, editFile as edit, prompt } from './fixture.mjs';
+import { makeVault, PRESETS, ruleNote, pageNote, denied, sessionId, editFile as edit, prompt } from './fixture.mjs';
 
 const withTriggers = (text, ...res) => text.replace('triggers: []', `triggers:\n${res.map(r => `  - '${r}'`).join('\n')}`);
 
 test('edit hook refuses the first matching edit and lets the retry through', t => {
   const v = makeVault(t);
   const sid = sessionId();
-  v.write('wiki/glim/ui-rule.md', ruleNote({ applies_to: ['src/**/*.luau'], doLine: 'Start with strict.', notLine: 'Leave nonstrict.' }));
-  const first = denied(edit(v, sid, 'src/ui/main.luau'));
-  assert.match(first, /^Taste rules apply to src\/ui\/main\.luau:\n- glim\/ui-rule: Do: Start with strict\. Not: Leave nonstrict\.\nRevise this edit to follow them, then retry\. The retry is allowed\.$/);
-  assert.equal(edit(v, sid, 'src/ui/main.luau'), null);
+  v.write('wiki/glim/ui-rule.md', ruleNote({ applies_to: ['src/**/*.zq'], doLine: 'Name each step.', notLine: 'Leave steps unnamed.' }));
+  const first = denied(edit(v, sid, 'src/ui/main.zq'));
+  assert.match(first, /^Taste rules apply to src\/ui\/main\.zq:\n- glim\/ui-rule: Do: Name each step\. Not: Leave steps unnamed\.\nRevise this edit to follow them, then retry\. The retry is allowed\.$/);
+  assert.equal(edit(v, sid, 'src/ui/main.zq'), null);
 });
 
 test('the marker is per rule, file and session', t => {
   const v = makeVault(t);
   const [s1, s2] = [sessionId(), sessionId()];
-  v.write('wiki/glim/ui-rule.md', ruleNote({ applies_to: ['src/**/*.luau'] }));
-  assert.ok(denied(edit(v, s1, 'src/a.luau')));
-  assert.equal(edit(v, s1, 'src/a.luau'), null);
-  assert.ok(denied(edit(v, s1, 'src/b.luau')), 'another file is gated again');
-  assert.ok(denied(edit(v, s2, 'src/a.luau')), 'another session is gated again');
+  v.write('wiki/glim/ui-rule.md', ruleNote({ applies_to: ['src/**/*.zq'] }));
+  assert.ok(denied(edit(v, s1, 'src/a.zq')));
+  assert.equal(edit(v, s1, 'src/a.zq'), null);
+  assert.ok(denied(edit(v, s1, 'src/b.zq')), 'another file is gated again');
+  assert.ok(denied(edit(v, s2, 'src/a.zq')), 'another session is gated again');
   assert.equal(edit(v, s1, 'src/other.md'), null, 'a non-matching file is not gated');
 });
 
 test('Write is gated too, other tools are not', t => {
   const v = makeVault(t);
   v.write('wiki/glim/ui-rule.md', ruleNote({ applies_to: ['src/**'] }));
-  assert.ok(denied(edit(v, sessionId(), 'src/a.lua', { tool: 'Write' })));
-  assert.equal(edit(v, sessionId(), 'src/a.lua', { tool: 'Read' }), null);
+  assert.ok(denied(edit(v, sessionId(), 'src/a.zq', { tool: 'Write' })));
+  assert.equal(edit(v, sessionId(), 'src/a.zq', { tool: 'Read' }), null);
 });
 
 test('a note saved within the settle window does not gate', t => {
   const v = makeVault(t);
   v.write('wiki/glim/ui-rule.md', ruleNote({ applies_to: ['src/**'] }), { settled: false });
-  assert.equal(edit(v, sessionId(), 'src/a.lua'), null);
+  assert.equal(edit(v, sessionId(), 'src/a.zq'), null);
 });
 
 test('triggers narrow the rule to edits whose new text matches', t => {
   const v = makeVault(t);
   const sid = sessionId();
-  v.write('wiki/glim/ui-rule.md', withTriggers(ruleNote({ applies_to: ['src/**'] }), 'wait\\(', 'delay\\('));
-  assert.equal(edit(v, sid, 'src/a.lua', { text: 'local x = 1' }), null);
-  assert.ok(denied(edit(v, sid, 'src/a.lua', { text: 'task.wait(1)' })));
-  assert.equal(edit(v, sid, 'src/a.lua', { text: 'task.wait(1)' }), null);
-  assert.ok(denied(edit(v, sid, 'src/b.lua', { text: 'delay(1)' })));
+  v.write('wiki/glim/ui-rule.md', withTriggers(ruleNote({ applies_to: ['src/**'] }), 'pause\\(', 'hold\\('));
+  assert.equal(edit(v, sid, 'src/a.zq', { text: 'set x to 1' }), null);
+  assert.ok(denied(edit(v, sid, 'src/a.zq', { text: 'step.pause(1)' })));
+  assert.equal(edit(v, sid, 'src/a.zq', { text: 'step.pause(1)' }), null);
+  assert.ok(denied(edit(v, sid, 'src/b.zq', { text: 'hold(1)' })));
 });
 
 test('a more specific rule is listed first and the list is capped', t => {
   const v = makeVault(t);
-  v.write('wiki/glim/broad.md', ruleNote({ applies_to: ['**/*.lua'], doLine: 'Broad.' }));
-  v.write('wiki/glim/narrow.md', ruleNote({ applies_to: ['src/ui/*.lua'], doLine: 'Narrow.' }));
-  const why = denied(edit(v, sessionId(), 'src/ui/a.lua'));
+  v.write('wiki/glim/broad.md', ruleNote({ applies_to: ['**/*.zq'], doLine: 'Broad.' }));
+  v.write('wiki/glim/narrow.md', ruleNote({ applies_to: ['src/ui/*.zq'], doLine: 'Narrow.' }));
+  const why = denied(edit(v, sessionId(), 'src/ui/a.zq'));
   assert.ok(why.indexOf('glim/narrow') < why.indexOf('glim/broad'));
 });
 
@@ -64,7 +64,7 @@ test('edits inside the vault wiki/ and raw/ are not gated by rules', t => {
   const sid = sessionId();
   assert.equal(edit(v, sid, '', { abs: v.at('wiki', 'glim', 'other.md') }), null);
   assert.equal(edit(v, sid, '', { abs: v.at('raw', 'refs', 'new.md') }), null);
-  assert.ok(denied(edit(v, sid, 'src/a.lua')), 'project files still are');
+  assert.ok(denied(edit(v, sid, 'src/a.zq')), 'project files still are');
 });
 
 test('the vault guard refuses edits to generated files, .state and existing raw files', t => {
@@ -148,17 +148,17 @@ test('a compact or clear start clears the markers so the edit gate and prompt re
   for (const source of ['compact', 'clear']) {
     const sid = sessionId();
     v.startSession(sid);
-    assert.ok(denied(edit(v, sid, 'src/a.lua')), source);
-    assert.equal(edit(v, sid, 'src/a.lua'), null, source);
+    assert.ok(denied(edit(v, sid, 'src/a.zq')), source);
+    assert.equal(edit(v, sid, 'src/a.zq'), null, source);
     assert.ok(prompt(v, sid, 'strict'), source);
     assert.equal(prompt(v, sid, 'strict'), null, source);
 
     v.startSession(sid, { source: 'resume' });
-    assert.equal(edit(v, sid, 'src/a.lua'), null, `${source}: resume keeps the markers`);
+    assert.equal(edit(v, sid, 'src/a.zq'), null, `${source}: resume keeps the markers`);
 
     v.startSession(sid, { source });
-    assert.ok(denied(edit(v, sid, 'src/a.lua')), source);
-    assert.equal(edit(v, sid, 'src/a.lua'), null, source);
+    assert.ok(denied(edit(v, sid, 'src/a.zq')), source);
+    assert.equal(edit(v, sid, 'src/a.zq'), null, source);
     assert.ok(prompt(v, sid, 'strict'), source);
   }
 });
@@ -185,45 +185,41 @@ test('a rule with a lint error or superseded_by is never delivered', t => {
   const v = makeVault(t);
   v.write('wiki/glim/bad.md', ruleNote({ applies_to: ['src/**'], basis: 'bogus' }));
   v.write('wiki/glim/old.md', ruleNote({ applies_to: ['src/**'], extra: ['superseded_by: glim/new'] }));
-  assert.equal(edit(v, sessionId(), 'src/a.lua'), null);
+  assert.equal(edit(v, sessionId(), 'src/a.zq'), null);
 });
 
-const gatedOnTxt = t => {
-  const v = makeVault(t);
-  v.write('wiki/glim/ui-rule.md', ruleNote({ applies_to: ['src/**/*.txt'] }));
-  return v;
-};
+// glim's src/**/*.zq rule fires on editFile's default text, so each refusal names it.
+const zqRule = /glim\/zq-trigger: Do: Set values through a named step\./;
 
-test('a subagent editing a file its parent was gated on is refused once more', t => {
-  const v = gatedOnTxt(t);
+test('6.3a: a subagent editing a file its parent was gated on is refused once more', t => {
+  const v = makeVault(t, { presets: ['glim'] });
   const sid = sessionId();
-  assert.ok(denied(edit(v, sid, 'src/a.txt')), 'the parent is gated');
-  assert.equal(edit(v, sid, 'src/a.txt'), null, 'the parent retry goes through');
-  assert.ok(denied(edit(v, sid, 'src/a.txt', { agent: 'agent-1' })), 'the subagent is gated on the same file');
-  assert.equal(edit(v, sid, 'src/a.txt', { agent: 'agent-1' }), null, 'the subagent retry goes through');
+  assert.match(denied(edit(v, sid, 'src/a.zq')) ?? '', zqRule, 'the parent is gated');
+  assert.equal(edit(v, sid, 'src/a.zq'), null, 'the parent retry goes through');
+  assert.match(denied(edit(v, sid, 'src/a.zq', { agent: 'agent-1' })) ?? '', zqRule, 'the subagent is gated on the same file');
+  assert.equal(edit(v, sid, 'src/a.zq', { agent: 'agent-1' }), null, 'the subagent retry goes through');
 });
 
-test('each agent is gated on a file once, whichever agent edited it first', t => {
-  const v = gatedOnTxt(t);
+test('6.3a: each agent is gated on a file once, whichever agent edited it first', t => {
+  const v = makeVault(t, { presets: ['glim'] });
   const sid = sessionId();
-  assert.ok(denied(edit(v, sid, 'src/b.txt', { agent: 'agent-2' })), 'the first subagent is gated');
-  assert.equal(edit(v, sid, 'src/b.txt', { agent: 'agent-2' }), null, 'the first subagent retry goes through');
-  assert.ok(denied(edit(v, sid, 'src/b.txt', { agent: 'agent-3' })), 'a second subagent is gated');
-  assert.equal(edit(v, sid, 'src/b.txt', { agent: 'agent-3' }), null, 'the second subagent retry goes through');
-  assert.ok(denied(edit(v, sid, 'src/b.txt')), 'the parent is gated');
-  assert.equal(edit(v, sid, 'src/b.txt'), null, 'the parent retry goes through');
+  assert.match(denied(edit(v, sid, 'src/b.zq', { agent: 'agent-2' })) ?? '', zqRule, 'the first subagent is gated');
+  assert.equal(edit(v, sid, 'src/b.zq', { agent: 'agent-2' }), null, 'the first subagent retry goes through');
+  assert.match(denied(edit(v, sid, 'src/b.zq', { agent: 'agent-3' })) ?? '', zqRule, 'a second subagent is gated');
+  assert.equal(edit(v, sid, 'src/b.zq', { agent: 'agent-3' }), null, 'the second subagent retry goes through');
+  assert.match(denied(edit(v, sid, 'src/b.zq')) ?? '', zqRule, 'the parent is gated');
+  assert.equal(edit(v, sid, 'src/b.zq'), null, 'the parent retry goes through');
 });
 
-test("a subagent's first context holds the session's always rules and topics", t => {
-  const v = makeVault(t);
+test("6.3a: a subagent's first context holds the session's always rules and topics", t => {
+  const v = makeVault(t, { presets: ['glim'] });
   const sid = sessionId();
-  v.write('wiki/glim/always-rule.md', ruleNote({ always: true, doLine: 'Be brief.', notLine: 'Ramble.' }));
   v.startSession(sid);
   const start = { session_id: sid, cwd: v.project, hook_event_name: 'SubagentStart', agent_type: 'general-purpose' };
   for (const agent_id of ['agent-1', 'agent-2']) {
     const out = v.hook('subagent-start', { ...start, agent_id }).hookSpecificOutput;
     assert.equal(out.hookEventName, 'SubagentStart');
-    assert.match(out.additionalContext, /^# Taste rules\n[\s\S]*## glim\n- glim\/always-rule: Do: Be brief\. Not: Ramble\./, agent_id);
+    assert.match(out.additionalContext, /^# Taste rules\n[\s\S]*## glim\n- glim\/always-rule: Do: Open each glim file with a purpose line\. Not: Start a file straight with code\./, agent_id);
     assert.match(out.additionalContext, /Taste vault: when the task touches .*, read `[^`]*index\.md`/, agent_id);
     assert.ok(!out.additionalContext.includes('propose a rule'), agent_id);
   }
@@ -232,39 +228,38 @@ test("a subagent's first context holds the session's always rules and topics", t
   assert.match(prompt(v, sid, 'hello').hookSpecificOutput.additionalContext, /glim\/late-rule/, "the parent still gets a rule a subagent was shown");
 });
 
-const checkedOut = (t, name, rule) => {
-  const v = makeVault(t);
-  v.write(`wiki/glim/rules/${name}.md`, rule);
+const checkedOut = t => {
+  const v = makeVault(t, { presets: ['glim'] });
   v.checkout();
   return v;
 };
 
-test('session start still delivers always rules after a checkout touches every note', t => {
-  const v = checkedOut(t, 'always-rule', ruleNote({ always: true, doLine: 'Be brief.', notLine: 'Ramble.' }));
+test('6.6d: session start still delivers always rules after a checkout touches every note', t => {
+  const v = checkedOut(t);
   const ctx = v.startSession(sessionId())?.hookSpecificOutput.additionalContext ?? '';
-  assert.match(ctx, /glim\/always-rule: Do: Be brief\./);
+  assert.match(ctx, /glim\/always-rule: Do: Open each glim file with a purpose line\./);
 });
 
-test('the gate still refuses after a checkout touches every note', t => {
-  const v = checkedOut(t, 'ui-rule', ruleNote({ applies_to: ['src/**/*.txt'] }));
-  assert.ok(denied(edit(v, sessionId(), 'src/a.txt')));
+test('6.6d: the gate still refuses after a checkout touches every note', t => {
+  const v = checkedOut(t);
+  assert.match(denied(edit(v, sessionId(), 'src/a.zq')) ?? '', zqRule);
 });
 
-test('20 rules and 2 pages on one glob refuse the first edit of a file once, and the retry passes', t => {
-  const v = makeVault(t);
+test('6.5: 20 rules and 2 pages on one glob refuse the first edit of a file once, and the retry passes', t => {
+  const v = makeVault(t, { presets: ['glim'] });
   const sid = sessionId();
   const keys = [];
   for (let i = 0; i < 20; i++) {
-    v.write(`wiki/glim/rules/rule-${i}.md`, ruleNote({ applies_to: ['**/*.txt'], doLine: `Rule ${i}.` }));
+    v.write(`wiki/glim/rules/rule-${i}.md`, ruleNote({ applies_to: ['**/*.zq'], doLine: `Rule ${i}.` }));
     keys.push(`glim/rule-${i}`);
   }
   for (const slug of ['page-a', 'page-b']) {
-    v.write(`wiki/glim/concepts/${slug}.md`, pageNote({ kind: 'concept', applies_to: ['**/*.txt'], summary: `'About ${slug}.'` }));
+    v.write(`wiki/glim/concepts/${slug}.md`, pageNote({ kind: 'concept', applies_to: ['**/*.zq'], summary: `'About ${slug}.'` }));
     keys.push(`glim/${slug}`);
   }
-  const first = denied(edit(v, sid, 'src/x.txt')) ?? '';
+  const first = denied(edit(v, sid, 'src/x.zq')) ?? '';
   for (const key of keys) assert.match(first, new RegExp(`${key}(?![\\w-])`), `the first refusal names ${key}`);
-  assert.equal(edit(v, sid, 'src/x.txt'), null, 'the retry passes');
+  assert.equal(edit(v, sid, 'src/x.zq'), null, 'the retry passes');
 });
 
 test('a refusal writes its markers in one file per kind however many rules are due, and markers older tools wrote still count', async t => {
@@ -284,11 +279,11 @@ test('a refusal writes its markers in one file per kind however many rules are d
   assert.equal(edit(v, old, 'src/x.txt'), null, 'one-file markers from before still mark the file gated');
 });
 
-test('a trigger with nested wildcards does not hold the edit hook up on a long line', async t => {
-  const v = makeVault(t);
+test('6.6c: a trigger with nested wildcards does not hold the edit hook up on a long line', async t => {
+  const v = makeVault(t, { presets: ['glim'] });
   const trigger = 'make\\(.*,.*,.*,.*\\)';
-  v.write('wiki/glim/rules/slow.md', withTriggers(ruleNote({ applies_to: ['src/**/*.txt'] }), trigger));
-  assert.ok(denied(edit(v, sessionId(), 'src/a.txt', { text: 'make(1,1,1,1)' })), 'the trigger matches a short call');
+  v.write('wiki/glim/rules/slow.md', withTriggers(ruleNote({ applies_to: ['src/**/*.zq'] }), trigger));
+  assert.match(denied(edit(v, sessionId(), 'src/a.zq', { text: 'make(1,1,1,1)' })) ?? '', /glim\/slow:/, 'the trigger matches a short call');
   // Only the match is timed, in this process, so process start and a loaded machine don't count. A backtracking engine
   // takes seconds on this 820-character line, and the match runs synchronously, so nothing could stop it from outside.
   // The best of three keeps one pause from failing the test.
@@ -315,22 +310,23 @@ test('a file path with the long-path prefix is gated by the rules of its project
 test('a negated glob in applies_to excludes the files it names from the gate', t => {
   const v = makeVault(t);
   const sid = sessionId();
-  v.write('wiki/glim/rules/no-tests.md', ruleNote({ applies_to: ['src/**/*.ts', '!src/**/*.test.ts'] }));
-  assert.ok(denied(edit(v, sid, 'src/a.ts')), 'a source file is gated');
-  assert.equal(edit(v, sid, 'src/a.test.ts'), null, 'a test file is not');
+  v.write('wiki/glim/rules/no-tests.md', ruleNote({ applies_to: ['src/**/*.zq', '!src/**/*.test.zq'] }));
+  assert.ok(denied(edit(v, sid, 'src/a.zq')), 'a source file is gated');
+  assert.equal(edit(v, sid, 'src/a.test.zq'), null, 'a test file is not');
 });
 
 const LIMIT = 8000;
 
-test('session start in the vault folder with 10 domains stays under the output budget and names what it left out', t => {
-  const domains = Object.fromEntries(Array.from({ length: 10 }, (_, d) => [`area-${d}`, {
-    title: `Area ${d}`, vaultOnly: true, topics: Array.from({ length: 60 }, (_, i) => `topic-${d}-${i}-padding`),
+test('6.6e: session start in the vault folder with 10 domains stays under the output budget and names what it left out', t => {
+  const domains = Object.fromEntries(Array.from({ length: 5 }, (_, d) => [`area-${d}`, {
+    title: `Area ${d}`, vaultOnly: true, topics: Array.from({ length: 120 }, (_, i) => `topic-${d}-${i}-padding`),
   }]));
-  const v = makeVault(t, { domains });
+  const v = makeVault(t, { presets: Object.keys(PRESETS), domains });
   const ctx = v.startSession(sessionId(), { cwd: v.root }).hookSpecificOutput.additionalContext;
   assert.ok(ctx.length <= LIMIT, `${ctx.length} characters`);
-  assert.match(ctx, /^Taste vault: when the task touches layout, code, topic-0-0-padding, /);
-  assert.match(ctx, /\(Left out to stay within 8000 characters: \d+ topics\. `[^`]*index\.md` lists the rest\.\)$/);
+  assert.match(ctx, /^Taste vault: when the task touches layout, code, ledger, papers, days, words, topic-0-0-padding, /);
+  // The presets' notes bring the lint reminder, which ranks below the topics.
+  assert.match(ctx, /\(Left out to stay within 8000 characters: \d+ topics and 1 note\. `[^`]*index\.md` lists the rest\.\)$/);
 });
 
 test('the output budget is delivery.maxContextChars, and the topics are the first to go', t => {
@@ -412,12 +408,11 @@ test('an edit that goes through carries no page pointer', t => {
   assert.equal(edit(v, sid, 'src/b.txt'), null);
 });
 
-// A fixture namespace and an MCP tool that sets a property on a name in it.
-const TREE = { namespaces: { 'glim-tree': { separator: '.', escape: '\\' } }, editTools: { mcp__fixture__set_property: { namespace: 'glim-tree', path: 'tool_input.path', after: 'tool_input.value' } } };
+// The glim preset's namespace glim-tree, its MCP tool that sets a property on a name in it, and its alias.
 const setProperty = (v, sid, name, value = 'x', opts) => v.edit(sid, 'mcp__fixture__set_property', { path: name, value }, opts);
 
-test('a mapped call on a name is refused once by a rule on its namespace, then goes through', t => {
-  const v = makeVault(t, { config: TREE });
+test('6.3b: a mapped call on a name is refused once by a rule on its namespace, then goes through', t => {
+  const v = makeVault(t, { presets: ['glim'] });
   const sid = sessionId();
   v.startSession(sid);
   v.write('wiki/glim/tree-rule.md', ruleNote({ applies_to: ['glim-tree:A.**'], doLine: 'Name nodes plainly.' }));
@@ -429,43 +424,31 @@ test('a mapped call on a name is refused once by a rule on its namespace, then g
 });
 
 test("a mapped call's triggers test the new text the map names", t => {
-  const v = makeVault(t, { config: TREE });
+  const v = makeVault(t, { presets: ['glim'] });
   const sid = sessionId();
   v.write('wiki/glim/tree-rule.md', withTriggers(ruleNote({ applies_to: ['glim-tree:A.**'] }), 'Color'));
   assert.equal(setProperty(v, sid, 'A.B', 'Size'), null);
   assert.ok(denied(setProperty(v, sid, 'A.B', { Color: 1 })), 'a value that is not text is matched as JSON');
 });
 
-test('through a fixture alias a mapped call is also refused by a rule on the file the name maps to', t => {
-  const domains = { glim: { title: 'Glim', topics: ['code'], aliases: { 'glim-tree': 'fixture' } } };
-  const v = makeVault(t, { config: TREE, domains });
-  v.write('tools/ext/aliases/fixture.mjs', [
-    "import fs from 'node:fs';",
-    "import path from 'node:path';",
-    'export function toFile(names, root) {',
-    "  const map = path.join(root, 'tree.json');",
-    '  if (!fs.existsSync(map)) return null;',
-    "  const folder = JSON.parse(fs.readFileSync(map, 'utf8'))[names[0]];",
-    "  return folder ? `${path.join(root, folder, ...names.slice(1))}.txt` : null;",
-    '}',
-    '',
-  ].join('\n'));
+test('6.3b: through the fixture alias a mapped call is also refused by a rule on the file the name maps to', t => {
+  const v = makeVault(t, { presets: ['glim'] });
   const sid = sessionId();
   v.startSession(sid);
-  v.write('wiki/glim/file-rule.md', ruleNote({ applies_to: ['src/**/*.txt'], doLine: 'Keep files short.' }));
   v.write('wiki/glim/both-rule.md', ruleNote({ applies_to: ['glim-tree:A.**', 'src/**'], doLine: 'Both ways.' }));
-  const before = denied(setProperty(v, sid, 'A.B.C'));
-  assert.doesNotMatch(before, /file-rule/, 'the alias maps nothing where the project lacks what it reads');
+  const before = denied(setProperty(v, sid, 'A.B.C', 'set x to 1'));
+  assert.doesNotMatch(before, /zq-trigger/, 'the alias maps nothing where the project lacks what it reads');
   assert.match(before, /glim\/both-rule/);
   fs.writeFileSync(path.join(v.project, 'tree.json'), JSON.stringify({ A: 'src' }));
-  const why = denied(setProperty(v, sid, 'A.B.D'));
-  assert.match(why, /glim\/file-rule: Do: Keep files short\./);
+  const why = denied(setProperty(v, sid, 'A.B.D', 'set x to 1'));
+  assert.match(why, zqRule, "the name's file src/B/D.zq fires glim's rule on src/**/*.zq");
+  assert.match(why, /glim\/zq-files \(concept page\)/, 'and brings up its page');
   assert.equal(why.match(/glim\/both-rule/g)?.length, 1, 'a rule both namespaces match refuses once');
-  assert.equal(setProperty(v, sid, 'A.B.D'), null, 'the retry goes through');
+  assert.equal(setProperty(v, sid, 'A.B.D', 'set x to 1'), null, 'the retry goes through');
 });
 
 test('an unmapped MCP call returns at once without reading notes, and a mapped call without its path fails loudly', t => {
-  const v = makeVault(t, { config: TREE });
+  const v = makeVault(t, { presets: ['glim'] });
   const sid = sessionId();
   v.write('wiki/glim/tree-rule.md', ruleNote({ applies_to: ['glim-tree:**', '**'] }));
   assert.equal(v.edit(sid, 'mcp__other__set_property', { path: 'A.B', value: 'x' }), null);

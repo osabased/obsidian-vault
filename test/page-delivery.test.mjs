@@ -11,32 +11,32 @@ const pathOf = (v, key) => v.at('wiki', ...key.split('/')).replace(/\\/g, '/') +
 test('a prompt that names a page\'s keyword points the session to the page, once, and again after compaction', t => {
   const v = makeVault(t);
   const sid = sessionId();
-  v.write('wiki/glim/luau-types.md', pushed({ keywords: ['strict mode'], summary: "'How the checker treats strict mode'" }));
+  v.write('wiki/glim/zq-types.md', pushed({ keywords: ['strict mode'], summary: "'How the checker treats strict mode'" }));
   assert.equal(context(prompt(v, sid, 'turn on strict mode here')), [
     'Vault pages on this request. Read the ones that bear on it:',
-    `- glim/luau-types (concept page): How the checker treats strict mode. ${pathOf(v, 'glim/luau-types')}`,
+    `- glim/zq-types (concept page): How the checker treats strict mode. ${pathOf(v, 'glim/zq-types')}`,
   ].join('\n'));
   assert.equal(prompt(v, sid, 'strict mode again'), null);
   assert.equal(prompt(v, sid, 'nothing it names'), null);
   v.startSession(sid, { source: 'compact' });
-  assert.match(context(prompt(v, sid, 'strict mode')), /glim\/luau-types/);
+  assert.match(context(prompt(v, sid, 'strict mode')), /glim\/zq-types/);
 });
 
 test('the first edit to a file a page applies to is refused with a pointer to it, once per session', t => {
   const v = makeVault(t);
   const sid = sessionId();
   v.write('wiki/glim/shop-layout.md', pushed({ applies_to: ['src/ui/**'], keywords: ['shop'] }));
-  const out = edit(v, sid, 'src/ui/shop.luau');
+  const out = edit(v, sid, 'src/ui/shop.zq');
   assert.equal(denied(out), [
-    'Vault pages on src/ui/shop.luau. Read the ones that bear on this work:',
+    'Vault pages on src/ui/shop.zq. Read the ones that bear on this work:',
     `- glim/shop-layout (concept page): What we know. ${pathOf(v, 'glim/shop-layout')}`,
     'Revise this edit to follow the pages, then retry. The retry is allowed.',
   ].join('\n'));
   assert.equal(context(out), null, 'an allowed edit carries no pointer');
-  assert.equal(edit(v, sid, 'src/ui/shop.luau'), null, 'the retry goes through');
-  assert.equal(edit(v, sid, 'src/ui/bag.luau'), null, 'once per session, not per file');
+  assert.equal(edit(v, sid, 'src/ui/shop.zq'), null, 'the retry goes through');
+  assert.equal(edit(v, sid, 'src/ui/bag.zq'), null, 'once per session, not per file');
   assert.equal(prompt(v, sid, 'the shop'), null, 'a prompt does not bring it up again');
-  assert.equal(edit(v, sessionId(), 'src/net/remote.luau'), null, 'a file outside its globs');
+  assert.equal(edit(v, sessionId(), 'src/net/remote.zq'), null, 'a file outside its globs');
 });
 
 test('a subagent hears of a page apart from the agent that started it', t => {
@@ -44,17 +44,17 @@ test('a subagent hears of a page apart from the agent that started it', t => {
   const sid = sessionId();
   v.write('wiki/glim/shop-layout.md', pushed({ applies_to: ['src/ui/**'], keywords: ['shop'] }));
   assert.deepEqual(pointed(prompt(v, sid, 'build the shop')), ['glim/shop-layout']);
-  assert.deepEqual(pointed(edit(v, sid, 'src/ui/shop.luau', { agent: 'agent-1' })), ['glim/shop-layout']);
-  assert.equal(edit(v, sid, 'src/ui/bag.luau', { agent: 'agent-1' }), null);
-  assert.deepEqual(pointed(edit(v, sid, 'src/ui/bag.luau', { agent: 'agent-2' })), ['glim/shop-layout']);
-  assert.equal(edit(v, sid, 'src/ui/bag.luau'), null, 'the main agent already heard of it');
+  assert.deepEqual(pointed(edit(v, sid, 'src/ui/shop.zq', { agent: 'agent-1' })), ['glim/shop-layout']);
+  assert.equal(edit(v, sid, 'src/ui/bag.zq', { agent: 'agent-1' }), null);
+  assert.deepEqual(pointed(edit(v, sid, 'src/ui/bag.zq', { agent: 'agent-2' })), ['glim/shop-layout']);
+  assert.equal(edit(v, sid, 'src/ui/bag.zq'), null, 'the main agent already heard of it');
 });
 
 test('a global page\'s globs are read from the project folder of the file edited', t => {
   const v = makeVault(t);
   v.write('wiki/global/ui-notes.md', pushed({ domain: 'global', applies_to: ['src/ui/**'] }));
-  const out = edit(v, sessionId(), 'src/ui/shop.luau');
-  assert.match(denied(out), /^Vault pages on src\/ui\/shop\.luau\./);
+  const out = edit(v, sessionId(), 'src/ui/shop.zq');
+  assert.match(denied(out), /^Vault pages on src\/ui\/shop\.zq\./);
   assert.deepEqual(pointed(out), ['global/ui-notes']);
 });
 
@@ -73,11 +73,11 @@ test('a rule that refuses an edit carries the pages in the same refusal, and the
   const sid = sessionId();
   v.write('wiki/glim/ui-rule.md', ruleNote({ applies_to: ['src/**'] }));
   v.write('wiki/glim/shop-layout.md', pushed({ applies_to: ['src/**'] }));
-  const first = denied(edit(v, sid, 'src/a.luau'));
+  const first = denied(edit(v, sid, 'src/a.zq'));
   assert.match(first, /glim\/ui-rule/);
   assert.match(first, /glim\/shop-layout/);
   assert.match(first, /Revise this edit to follow them and the pages, then retry\./);
-  assert.equal(edit(v, sid, 'src/a.luau'), null);
+  assert.equal(edit(v, sid, 'src/a.zq'), null);
 });
 
 test('pages reach the sessions their domain\'s rules reach, and every page reaches a session in the vault folder', t => {
@@ -95,7 +95,7 @@ test('a page saved within the settle window, or with an error, does not come up'
   v.write('wiki/glim/a-fresh-grid.md', pushed({ keywords: ['grid'], applies_to: ['src/**'] }), { settled: false });
   v.write('wiki/glim/a-broken-grid.md', pushed({ applies_to: ['src/**'], extra: ['keywords: grid'] }));
   assert.deepEqual(pointed(prompt(v, sessionId(), 'a grid')), ['glim/a-grid', 'glim/b-grid']);
-  assert.deepEqual(pointed(edit(v, sessionId(), 'src/a.luau')), ['glim/a-grid', 'glim/b-grid']);
+  assert.deepEqual(pointed(edit(v, sessionId(), 'src/a.zq')), ['glim/a-grid', 'glim/b-grid']);
 });
 
 test('at most delivery.maxPages come up at a time on a prompt, and the rest on the next match', t => {
@@ -110,12 +110,12 @@ test('a refusal lists every page due, the ones past delivery.maxPages without th
   const v = makeVault(t);
   for (const slug of ['a-grid', 'b-grid', 'c-grid', 'd-grid']) v.write(`wiki/glim/${slug}.md`, pushed({ applies_to: ['src/**'] }));
   const sid = sessionId();
-  const first = edit(v, sid, 'src/a.luau');
+  const first = edit(v, sid, 'src/a.zq');
   assert.deepEqual(pointed(first), ['glim/a-grid', 'glim/b-grid', 'glim/c-grid', 'glim/d-grid']);
   assert.ok(denied(first).includes(`- glim/c-grid (concept page): What we know. ${pathOf(v, 'glim/c-grid')}`));
   assert.ok(denied(first).includes(`- glim/d-grid (concept page): ${pathOf(v, 'glim/d-grid')}`));
-  assert.equal(edit(v, sid, 'src/a.luau'), null, 'the retry goes through');
-  assert.equal(edit(v, sid, 'src/b.luau'), null, 'every page was told of');
+  assert.equal(edit(v, sid, 'src/a.zq'), null, 'the retry goes through');
+  assert.equal(edit(v, sid, 'src/b.zq'), null, 'every page was told of');
 });
 
 test('lint checks a page\'s scope fields as it does a rule\'s, always and triggers included', async t => {
@@ -149,7 +149,7 @@ test('a rule\'s errors keep their order, and a note of another type gets only th
 test('a page\'s triggers narrow it to edits whose new text matches, as a rule\'s do', t => {
   const v = makeVault(t);
   const sid = sessionId();
-  v.write('wiki/glim/waits.md', pushed({ applies_to: ['src/**'], extra: ['triggers:', "  - 'wait\\('"] }));
-  assert.equal(edit(v, sid, 'src/a.luau', { text: 'local x = 1' }), null);
-  assert.deepEqual(pointed(edit(v, sid, 'src/a.luau', { text: 'task.wait(1)' })), ['glim/waits']);
+  v.write('wiki/glim/pauses.md', pushed({ applies_to: ['src/**'], extra: ['triggers:', "  - 'pause\\('"] }));
+  assert.equal(edit(v, sid, 'src/a.zq', { text: 'set x to 1' }), null);
+  assert.deepEqual(pointed(edit(v, sid, 'src/a.zq', { text: 'step.pause(1)' })), ['glim/pauses']);
 });
