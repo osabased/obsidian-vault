@@ -147,7 +147,7 @@ export function lint(notes = loadNotes(), chains = sourceChains()) {
 
 // Applies the fixes lint gives whole, then rebuilds the generated files, which a fixed note can change too. The fixes
 // read a note with \n line ends, as parseNote does, and a file saved with \r\n gets them back.
-export function fix(found, chains) {
+export function fix(found, chains, refs) {
   const fixable = found.filter(f => f.fix);
   const written = [];
   for (const rel of new Set(fixable.map(f => f.file))) {
@@ -161,7 +161,7 @@ export function fix(found, chains) {
     rewriteText(file, text.includes('\r\n') ? out.replace(/\n/g, '\r\n') : out);
     written.push(rel);
   }
-  return { fixed: fixable.filter(f => written.includes(f.file)), written, rebuilt: build({ chains }) };
+  return { fixed: fixable.filter(f => written.includes(f.file)), written, rebuilt: build({ chains, refs }) };
 }
 
 // Each fix parses the text it's given afresh, so the fixes to one file apply one after another, and a fix for a link

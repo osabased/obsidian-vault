@@ -1,5 +1,5 @@
 import { runHook, sessionReach, inVaultFolder, readableDomains, vaultPath, toolsPath, toPosix, guarded, config, plural, clock, daysBetween } from '../lib/vault.mjs';
-import { alwaysContext, alwaysIn, fitContext, indexNote, scopeTopics, loadNotes, settledNotes, liveRules, deliverable, deliveryFor, clip, undelivered, knownDomain, joinList } from '../lib/rules.mjs';
+import { alwaysContext, alwaysIn, fitContext, indexNote, scopeTopics, loadNotes, settledNotes, liveRules, deliverable, deliveryFor, readDerived, clip, undelivered, knownDomain, joinList } from '../lib/rules.mjs';
 import { build } from '../lib/build.mjs';
 import { remaining } from '../lib/deadline.mjs';
 import { changedSinceBuild, noteTimes, refStats } from '../lib/cache.mjs';
@@ -100,13 +100,18 @@ runHook('session-start', input => {
   const notes = loadNotes(walked);
   // Notes edited in Obsidian go live without a build, and the always rules that don't fit point to active.md.
   // A build another tool is running already writes what changed, and one that waits longer would spend the hook's time.
+  // A derived.json that is missing or corrupt counts as changed, so it is rebuilt once instead of failing every start. When
+  // nothing needs building, the delivery below takes the copy read here rather than parse the file again.
+  let derived;
   guarded('build', () => {
     const refs = refStats();
-    if (!changedSinceBuild(notes, walked, refs)) return;
+    derived = readDerived();
+    if (derived && !changedSinceBuild(notes, walked, refs)) return;
+    derived = undefined;
     try { build({ waitMs: Math.min(2000, remaining()), refs }); } catch (e) { if (e?.code !== 'ELOCKED') throw e; }
   });
   const ready = settledNotes(notes);
-  const ctx = deliveryFor(hits);
+  const ctx = deliveryFor(hits, derived && { derived });
   const rules = deliverable(liveRules(ready), ctx);
   const always = alwaysContext(scope, rules);
   const topics = guarded('index note', () => scopeTopics(readable, ready), []);
