@@ -833,7 +833,7 @@ The phases build mechanism only. Adding real knowledge and taste is the user's c
        - another binary with derived text gives that text's body with its anchor lines dropped, so a quote may run across a page break;
        - one with none gives `{ why: 'no derived text' }`.
 
-       A file is text when its first 8 KiB hold no NUL byte and decode as UTF-8, and it can be read whole; anything else, a file too large to read included, is a binary. `quoteTexts`, `lineCount`, `extract.mjs` and `scan.mjs` share that test (`fileText` in `sources.mjs`).
+       A file is text when its first 8 KiB hold no NUL byte and the whole file decodes as UTF-8; anything else is a binary, a file too large to read whole included. A file another program holds open is an error, not a binary. `quoteTexts`, `lineCount`, `extract.mjs` and `scan.mjs` share that test (`fileText` in `sources.mjs`).
      - **Anchors.** `anchorsIn` (`sources.mjs:87-99`) reads an anchor only on a line of its own, as the rendering writes it. A line that starts like one and isn't one is still a bad anchor. So a `[p. 3]` inside a sentence the source quotes is text, not an anchor. `extract.mjs` fails a part with such a line, naming it, after turning `\r\n` and `\r` into `\n`, and takes only safe integers for page and t.
      - **Locators.** A quote is checked against the whole derived text, and footnote locators keep their phase 1 check. Evidence lines take no locator, so `evidenceSources` (`rules.mjs:609`) and phase 4's chains don't change (open question).
      - **Refusals in `propose.mjs`.** `checkQuote` refuses in place of passing a binary:
