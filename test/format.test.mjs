@@ -278,7 +278,7 @@ test("lintConfig refuses an editTools entry the edit hook never sees or reads it
   const entry = { namespace: 'glim-tree', path: 'tool_input.path' };
   assert.deepEqual(await lintOf({ editTools: { Write: entry, set_property: entry } }), [
     'error vault.config.json editTools.Write: Write edits a file, which the edit hook reads from the call itself; take it out of editTools',
-    "error vault.config.json editTools.set_property: the edit hook's matcher, Edit|Write|MultiEdit|NotebookEdit|AskUserQuestion|mcp__.*, never sends set_property to the hook, so it would never be gated",
+    "error vault.config.json editTools.set_property: the edit hook's matcher, ^(?:Edit|Write|MultiEdit|NotebookEdit|AskUserQuestion|mcp__.*)$, never sends set_property to the hook, so it would never be gated",
   ]);
   const glim = aliases => ({ glim: { title: 'Glim', topics: ['code'], aliases } });
   assert.deepEqual(await lintOf({}, glim({ 'glim-tree': 'fixture' })), []);

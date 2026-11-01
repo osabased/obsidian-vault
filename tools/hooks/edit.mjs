@@ -194,9 +194,8 @@ function aliasedFiles(t, hits, namespaces) {
 
 // A name has no folder to take domains from, so it takes the session's. Through an alias it also matches the globs of
 // the file it maps to, and a rule both match refuses once.
-function nameScope(input, t, cwd) {
+function nameScope(t, cwd, hits) {
   const { namespaces } = config();
-  const hits = sessionHits(input.session_id, cwd);
   const doms = [...new Set(hits.map(h => h.domain))];
   const files = aliasedFiles(t, hits, namespaces);
   const everywhere = everywhereDomains();
@@ -217,8 +216,7 @@ function nameScope(input, t, cwd) {
 
 // A call to a tool with rules on its name, in the domains a prompt's keywords reach. Each rule tests its triggers
 // against the call's whole input, and is no more specific than `**`.
-function toolScope(input, tool, cwd) {
-  const hits = sessionHits(input.session_id, cwd);
+function toolScope(input, tool, cwd, hits) {
   const domains = readableDomains(hits.map(h => h.domain), inVaultFolder(cwd));
   const text = plainText(asText(input.tool_input));
   const place = `tool:${tool}`;
@@ -229,16 +227,23 @@ function toolScope(input, tool, cwd) {
   };
 }
 
-// A mapped call is reached by its target's rules and its name's; a rule both reach comes once, as its target's.
+// A mapped call is reached by its target's rules and its name's. A rule both reach comes once, as its target's, and its
+// triggers test the call's whole input too, as they would had only its name reached it.
 function scopeOf(input, t, cwd) {
-  const tool = FILE_TOOLS.includes(input.tool_name) ? null : toolScope(input, input.tool_name, cwd);
-  const own = !t ? null : t.namespace === 'file' ? fileScope(t.path, cwd) : nameScope(input, t, cwd);
-  if (!own || !tool) return own ?? tool;
+  if (FILE_TOOLS.includes(input.tool_name)) return fileScope(t.path, cwd);
+  const hits = sessionHits(input.session_id, cwd);
+  const tool = toolScope(input, input.tool_name, cwd, hits);
+  const own = !t ? null : t.namespace === 'file' ? fileScope(t.path, cwd) : nameScope(t, cwd, hits);
+  if (!own) return tool;
   return {
     domains: [...new Set([...own.domains, ...tool.domains])],
     hits: own.hits,
-    matching: (notes, pages = false) => [...own.matching(notes, pages), ...(pages ? [] : tool.matching(notes))]
-      .filter((m, i, all) => all.findIndex(x => x.key === m.key) === i),
+    matching: (notes, pages = false) => {
+      const mine = own.matching(notes, pages);
+      if (pages) return mine;
+      const named = new Map(tool.matching(notes).map(m => [m.key, m]));
+      return [...mine.map(m => (named.has(m.key) ? { ...m, alt: named.get(m.key).text } : m)), ...[...named.values()].filter(m => !mine.some(x => x.key === m.key))];
+    },
   };
 }
 
@@ -246,11 +251,12 @@ function scopeOf(input, t, cwd) {
 // maxRulesPerEdit and maxBlockChars; the other rules and the pages past maxPages come as one line each, and whatever
 // the output budget has no room for is named in its overflow line. Every rule and page due is gated on the file, so the
 // retry passes, but only what the refusal shows counts as shown, so a page left out still comes up on another file.
-function refusal(input, hits, pages, written, noun) {
+function refusal(input, hits, pages, written) {
   const { maxRulesPerEdit, maxBlockChars, maxPages } = config().delivery;
   const sid = input.session_id;
-  const rel = (hits[0] ?? pages[0]).rel;
-  const head = `Taste rules apply to ${rel}:`;
+  const first = hits[0] ?? pages[0];
+  const noun = first.place.startsWith('tool:') ? 'call' : 'edit';
+  const head = `Taste rules apply to ${first.rel}:`;
   const foot = `Revise this ${noun} to follow ${!pages.length ? 'them' : hits.length ? 'them and the pages' : 'the pages'}, then retry. The retry is allowed.`;
   const full = [];
   for (const hit of hits.slice(0, maxRulesPerEdit)) {
@@ -261,7 +267,7 @@ function refusal(input, hits, pages, written, noun) {
   const { text, kept } = fitContext([
     { noun: 'rule', head, items: full.map(s => s.line) },
     { noun: 'rule pointer', head: `Also due, in brief. Open the ones that bear on this ${noun}:`, items: hits.slice(full.length).map(h => rulePointer(h.key, h.note)) },
-    { noun: 'page', head: `Vault pages on ${rel}. Read the ones that bear on this work:`, items: pages.map((h, i) => pageLine(h.key, h.note, i >= maxPages)) },
+    { noun: 'page', head: `Vault pages on ${pages[0]?.rel}. Read the ones that bear on this work:`, items: pages.map((h, i) => pageLine(h.key, h.note, i >= maxPages)) },
   ], { tail: foot, gap: '\n' });
   markMany('gate', sid, [...hits.map(h => h.id), ...pages.map(p => p.id), ...written]);
   markShown(sid, hits.slice(0, kept[0] + kept[1]).map(h => h.key));
@@ -296,7 +302,7 @@ runHook('edit', input => {
   // it, so the others cost no write.
   const turn = t?.namespace === 'file' && matched.length ? turnStart(input.session_id) : null;
   const written = turn === null ? [] : [gatedFile(turn, t.path, cwd)];
-  if (hits.length || pages.length) return deny(refusal(input, hits, pages, written, t ? 'edit' : 'call'));
+  if (hits.length || pages.length) return deny(refusal(input, hits, pages, written));
   markMany('gate', input.session_id, written);
   return null;
 });

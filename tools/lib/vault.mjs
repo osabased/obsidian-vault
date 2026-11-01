@@ -412,8 +412,11 @@ export function hookErrors(file = errorsLog(), from = 0) {
 export const cwdOf = input => input.cwd || process.cwd();
 
 export const FILE_TOOLS = ['Edit', 'Write', 'MultiEdit', 'NotebookEdit'];
-// The PreToolUse matcher the edit hook ships with. It names no user's tools: a tool in editTools is an MCP tool.
-export const EDIT_HOOK_MATCHER = 'Edit|Write|MultiEdit|NotebookEdit|AskUserQuestion|mcp__.*';
+// The PreToolUse matcher the edit hook ships with. It names no user's tools: a tool in editTools is an MCP tool. Claude
+// Code tests a matcher with characters other than letters, digits, _ and | as an unanchored regex, so it anchors itself.
+export const EDIT_HOOK_MATCHER = '^(?:Edit|Write|MultiEdit|NotebookEdit|AskUserQuestion|mcp__.*)$';
+const HOOKED = new RegExp(EDIT_HOOK_MATCHER);
+export const hookedTool = name => HOOKED.test(name);
 export const toolFile = (name, input) => (name === 'NotebookEdit' ? input.notebook_path : input.file_path);
 
 // A failed hook exits 1 with one line, so the user sees a hook error and the call goes ahead; exit 2 would block it.
