@@ -1128,11 +1128,11 @@ The phases build mechanism only. Adding real knowledge and taste is the user's c
        - It follows the grammar in `parser.rs:4-22`, with the markers at `parser.rs:37-45`.
        - It allows whitespace around the markers, as Codex does (`parser.rs:24-25`), and skips an `*** Environment ID:` line.
        - A patch wrapped in a `<<EOF` heredoc is read as Codex's lenient mode reads it.
-       - Paths are from `cwd`, or absolute (`parser.rs:85-90`).
+       - Paths are from `cwd`, or absolute (`parser.rs:85-90`). Spaces between a marker and its path stay part of the path, as Codex's `strip_prefix` leaves them.
 
        Each file becomes one event:
        - **Add File:** `added` is the content, the `+` lines without their `+`, and `after` returns the content.
-       - **Update File:** `added` is the `+` lines joined with LF. `after(before)` applies each chunk in order after the one before it, at its `@@` context line when it has one. It looks for the chunk's ` ` and `-` lines exactly, then ignoring trailing whitespace, then ignoring both ends, then with Unicode dashes, quotes and spaces read as ASCII, as `seek_sequence.rs` does. It returns null when a chunk isn't found.
+       - **Update File:** `added` is the `+` lines joined with LF. `after(before)` applies each chunk in order after the one before it, at its `@@` context line when it has one. It looks for the chunk's ` ` and `-` lines exactly, then ignoring trailing whitespace, then ignoring both ends, then with Unicode dashes, quotes and spaces read as ASCII, as `seek_sequence.rs` does. It returns null when a chunk isn't found. Insertions at one line keep the patch's order, as `file_update.rs` applies them.
        - **Move to:** a second event on the new path, with the same `added` and `after`.
        - **Delete File:** `added` is `''` and `after` returns `''`. So `vaultGuard` refuses deleting what it guards, `noteGuard` refuses a page cut to nothing once, and a user's page is refused (`edit.mjs:97`).
        - A patch that doesn't parse throws. That is a loud hook failure, and Codex's own parser refuses the same patch.
@@ -1144,10 +1144,11 @@ The phases build mechanism only. Adding real knowledge and taste is the user's c
          - The prompt event and the transcript provider drop a text whose hash is marked. So the vault's own text never counts as the user's words.
          - The gate markers keep it to one continuation per file, as for Claude Code (6.3d).
      - **`transcript.mjs`.** `typedMessages(file)` reads the rollout JSONL.
-       - It keeps a line with `type: 'response_item'`, `payload.type: 'message'` and `payload.role: 'user'` whose `payload.internal_chat_message_metadata_passthrough.content_item_kinds` is exactly `['user.text']`. Its texts are the `text` of each `input_text` item in `payload.content`.
+       - It keeps a line with `type: 'response_item'`, `payload.type: 'message'` and `payload.role: 'user'` whose `payload.internal_chat_message_metadata_passthrough.content_item_kinds` holds one `user.text` and otherwise only `user.*` kinds, such as `user.image` for an image the user attached. Its texts are the `text` of each `input_text` item in `payload.content`. A message with several `user.text` items is a tag-wrapped injection and is dropped.
        - It drops a text that starts `<send_user_message_question_reply`, the reply to Codex's question tool. The answer's format isn't known, and the options in it are the agent's (§7).
        - It drops a text whose hash is marked `continued`.
-       - It returns null when the file can't be read, has no `session_meta`, or holds a user message with no `content_item_kinds`. So a format change refuses quotes, rather than letting injected text count as the user's.
+       - It skips a Stop continuation, which Codex records as a user message with no `content_item_kinds` whose every `input_text` is `<hook_prompt hook_run_id="…">…</hook_prompt>`.
+       - It returns null when the file can't be read, has no `session_meta`, or holds any other user message with no `content_item_kinds`. So a format change refuses quotes, rather than letting injected text count as the user's.
      - **Other exports.**
        - `fileTools` is `['apply_patch']`, and `sends` tests `^(?:apply_patch|mcp__.*)$`.
        - `sessionVar` is `CODEX_THREAD_ID`.
@@ -1274,7 +1275,7 @@ The phases build mechanism only. Adding real knowledge and taste is the user's c
        - A patch over two covered files gives one deny naming both. The same patch again passes. A malformed patch is a loud failure.
        - `after()` on a wiki note: a patch that removes a `## You said` line is refused; one that adds lines under `## Agent notes` on a user's page passes; a chunk that matches nothing refuses a user's page.
        - Stop's output is `{"decision":"block","reason":…}` byte for byte. A prompt with that text afterwards gives no output and doesn't restamp the turn, and the provider drops it.
-       - The provider keeps `user.text`, drops `agents_md.*`, `environments.*`, `additional_content.*` and the question reply, and returns null for a user message with no `content_item_kinds` and for a missing file.
+       - The provider keeps `user.text` and the text of a text-and-image message, drops `agents_md.*`, `environments.*`, `additional_content.*`, the question reply and a Stop continuation in Codex's `<hook_prompt>` shape, and returns null for any other user message with no `content_item_kinds` and for a missing file.
        - `source` mapping, including an unknown value read as `new`.
        - `node tools/agents.mjs codex` prints the snippet byte for byte, for a vault at a fixed POSIX path and at a fixed Windows path, and it parses as JSON with the five events.
        - Every `codexInput` payload fits the copied schemas.

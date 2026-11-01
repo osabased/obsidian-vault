@@ -4,7 +4,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { execFileSync } from 'node:child_process';
 import { makeVault, ruleNote, pageNote, sourcePage, sessionId, cleanEnv } from './fixture.mjs';
-import { codexInput, codexPatch, codexRollout } from './codex.mjs';
+import { codexInput, codexPatch, codexRollout, hookPrompt } from './codex.mjs';
 import { parsePatch, applyChunks } from '../tools/adapters/codex/patch.mjs';
 
 const SCHEMAS = path.join(import.meta.dirname, 'fixtures', 'codex', 'schema');
@@ -78,6 +78,9 @@ test('the patch parser skips an Environment ID line, allows whitespace around th
   ]);
   assert.deepEqual(parsePatch(`<<'EOF'\n${codexPatch([{ delete: 'a.txt' }])}EOF\n`), [{ op: 'delete', path: 'a.txt' }], 'a heredoc wrapper is read as Codex reads it');
   assert.deepEqual(parsePatch('*** Begin Patch\n*** End Patch'), []);
+  const spaced = '*** Begin Patch\n*** Add File:   a.txt\n+x\n*** Update File:  b.txt\n*** Move to:  c.txt\n@@\n-y\n+z\n*** End Patch';
+  assert.deepEqual(parsePatch(spaced).map(op => [op.path, op.moveTo]), [['  a.txt', undefined], [' b.txt', ' c.txt']],
+    'spaces between the marker and the path stay part of the path, as Codex reads it');
 });
 
 test('the patch parser refuses what Codex refuses', () => {
@@ -104,6 +107,8 @@ test("chunks apply in order, at their @@ line, matching exactly, then without tr
   assert.equal(applyChunks('z\nq\nz\n', end), 'z\nq\nw\n', 'an End of File chunk matches at the end');
   const add = parsePatch(codexPatch([{ update: 'f', chunks: [{ lines: ['+more'] }] }]))[0].chunks;
   assert.equal(applyChunks('one\n', add), 'one\nmore\n', 'a chunk with no old lines appends');
+  const twoAdds = parsePatch(codexPatch([{ update: 'f', chunks: [{ context: '', lines: ['+A'] }, { context: '', lines: ['+B'] }] }]))[0].chunks;
+  assert.equal(applyChunks('one\n', twoAdds), 'one\nA\nB\n', 'insertions at the same line keep the patch order');
   assert.equal(applyChunks('one\n', loose), null, "a chunk that isn't found gives null");
 });
 
@@ -166,6 +171,8 @@ test('Stop continues the turn with decision block, and the continuation is neith
   assert.equal(turn(), stamped, "the continuation doesn't restamp the turn");
   const { typedMessages } = await v.import('adapters/codex/adapter.mjs');
   assert.deepEqual(typedMessages(codexRollout(v, sid, ['write it with a script', reason])), ['write it with a script']);
+  assert.deepEqual(typedMessages(codexRollout(v, sid, ['write it with a script', hookPrompt(reason), 'and keep it short'])), ['write it with a script', 'and keep it short'],
+    'the continuation as Codex records it is skipped');
 });
 
 test("the provider keeps user.text, drops injected kinds and the question reply, and refuses a format it doesn't know", async t => {
@@ -181,9 +188,17 @@ test("the provider keeps user.text, drops injected kinds and the question reply,
     'Keep the grid gap at eight.',
     { role: 'assistant', kinds: null, text: 'Done.' },
     'and the tabs roomy',
+    { kinds: ['user.text', 'user.image'], content: [{ type: 'input_text', text: 'match this shade' }, { type: 'input_image', image_url: 'data:image/png;base64,AA==' }] },
+    { kinds: ['user.text', 'user.text'], content: [{ type: 'input_text', text: '<skill>' }, { type: 'input_text', text: 'two typed items' }] },
+    hookPrompt('Taste rules apply', 'a second fragment with <tags> & "quotes"'),
   ]);
-  assert.deepEqual(typedMessages(file), ['Keep the grid gap at eight.', 'and the tabs roomy']);
+  assert.deepEqual(typedMessages(file), ['Keep the grid gap at eight.', 'and the tabs roomy', 'match this shade']);
+  const { transcriptCheck } = await v.import('adapters/codex/adapter.mjs');
+  assert.deepEqual(transcriptCheck(file).missing, [], "the live check doesn't count a hook prompt as a missing field");
   assert.equal(typedMessages(codexRollout(v, sid, ['typed', { kinds: null, text: 'a user message with no kinds' }])), null);
+  const { content } = hookPrompt('Taste rules apply');
+  assert.equal(typedMessages(codexRollout(v, sid, ['typed', { kinds: null, content: [...content, { type: 'input_text', text: 'not a hook prompt' }] }])), null,
+    'a kind-less message is skipped only when every item is a hook prompt');
   assert.equal(typedMessages(v.at('.transcripts', 'missing.jsonl')), null);
 });
 
