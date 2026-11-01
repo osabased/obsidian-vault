@@ -1,9 +1,17 @@
 {
   "name": "obsidian-vault",
-  "description": "Skills for the taste vault: /ingest turns a source and the user's words about it into pages and rules, and with batch takes in every new file in raw/refs/; /lint checks the whole wiki. Run them from a vault checkout.",
+  "description": "The taste vault's skills and hooks: /ingest turns a source and the user's words about it into pages and rules, and with batch takes in every new file in raw/refs/; /lint checks the whole wiki; the hooks deliver the rules and pages to sessions. Set the vault option to a vault checkout.",
   "author": {
     "name": "osabased"
   },
   "repository": "https://github.com/osabased/obsidian-vault",
-  "skills": "./.claude/skills/"
+  "skills": "./.claude/skills/",
+  "userConfig": {
+    "vault": {
+      "type": "directory",
+      "title": "Vault folder",
+      "description": "The vault checkout whose .live/tools/ the hooks run, with .githooks/post-commit having made it.",
+      "required": true
+    }
+  }
 }

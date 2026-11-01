@@ -267,16 +267,24 @@ test('20 rules and 2 pages on one glob refuse the first edit of a file once, and
   assert.equal(edit(v, sid, 'src/x.txt'), null, 'the retry passes');
 });
 
-test('a trigger with nested wildcards does not hold the edit hook up on a long line', t => {
+test('a trigger with nested wildcards does not hold the edit hook up on a long line', async t => {
   const v = makeVault(t);
-  const sid = sessionId();
-  v.write('wiki/demo/rules/slow.md', withTriggers(ruleNote({ applies_to: ['src/**/*.txt'] }), 'make\\(.*,.*,.*,.*\\)'));
-  const start = performance.now();
-  assert.ok(denied(edit(v, sid, 'src/a.txt', { text: 'make(1,1,1,1)' })), 'the trigger matches a short call');
-  // The hook's own run sets the scale, so a slow machine doesn't fail the test. Backtracking takes seconds here; the
-  // match runs synchronously inside the hook, so a deadline on its process is the only way to stop it.
-  const deadline = Math.max(500, 4 * (performance.now() - start));
-  assert.equal(edit(v, sid, 'src/b.txt', { text: `make(${'1,'.repeat(407)}1`, timeout: deadline }), null);
+  const trigger = 'make\\(.*,.*,.*,.*\\)';
+  v.write('wiki/demo/rules/slow.md', withTriggers(ruleNote({ applies_to: ['src/**/*.txt'] }), trigger));
+  assert.ok(denied(edit(v, sessionId(), 'src/a.txt', { text: 'make(1,1,1,1)' })), 'the trigger matches a short call');
+  // Only the match is timed, in this process, so process start and a loaded machine don't count. A backtracking engine
+  // takes seconds on this 820-character line, and the match runs synchronously, so nothing could stop it from outside.
+  // The best of three keeps one pause from failing the test.
+  const { tryRegex } = await v.import('lib/rules.mjs');
+  const line = `make(${'1,'.repeat(407)}1`;
+  const re = tryRegex(trigger);
+  let best = Infinity;
+  for (let i = 0; i < 3 && best >= 10; i++) {
+    const start = performance.now();
+    assert.equal(re.test(line), false);
+    best = Math.min(best, performance.now() - start);
+  }
+  assert.ok(best < 10, `the match took ${best.toFixed(1)} ms`);
 });
 
 test('a file path with the long-path prefix is gated by the rules of its project', { skip: process.platform !== 'win32' && 'the prefix is a Windows spelling' }, t => {
