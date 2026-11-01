@@ -1,7 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
-import { makeVault, ruleNote, userTurn, sessionId, denied, editFile as edit } from './fixture.mjs';
+import { makeVault, ruleNote, userTurn, sessionId, denied, editFile as edit, unrelatedRules, proposeAtOnce } from './fixture.mjs';
+import { setField, parse } from '../tools/lib/frontmatter.mjs';
 
 function setup(t, { quote } = {}) {
   const v = makeVault(t);
@@ -256,4 +257,20 @@ test('a session that never started is refused', t => {
   const r = v.propose(sessionId(), proposal());
   assert.equal(r.code, 1);
   assert.match(r.stderr, /has no session/);
+});
+
+test('setField changes a field in text that starts with a byte-order mark', () => {
+  const text = '﻿---\ntype: rule\nas_of: 2026-01-01\n---\nbody\n';
+  const set = setField(text, 'as_of', '2026-10-01');
+  assert.equal(parse(set).data.as_of, '2026-10-01');
+  assert.equal(set, text.replace('2026-01-01', '2026-10-01'));
+});
+
+test('three proposes at once all write their notes and inbox rows', async t => {
+  const v = makeVault(t);
+  const rules = unrelatedRules('demo', 'at-once');
+  const results = await proposeAtOnce(v, rules, { timeout: 30e3 });
+  assert.deepEqual(results.map(r => r.code), [0, 0, 0], results.map(r => r.stderr.trim()).filter(Boolean).join('\n'));
+  for (const { slug } of rules) assert.ok(v.exists(`wiki/demo/rules/${slug}.md`), `${slug} was written`);
+  assert.deepEqual(inbox(v).map(r => r.note).sort(), rules.map(r => `demo/${r.slug}`));
 });

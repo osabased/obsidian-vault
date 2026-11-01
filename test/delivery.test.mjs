@@ -1,7 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import os from 'node:os';
-import { makeVault, ruleNote, denied, sessionId, editFile as edit, prompt } from './fixture.mjs';
+import path from 'node:path';
+import { makeVault, ruleNote, pageNote, denied, sessionId, editFile as edit, prompt } from './fixture.mjs';
 
 const withTriggers = (text, ...res) => text.replace('triggers: []', `triggers:\n${res.map(r => `  - '${r}'`).join('\n')}`);
 
@@ -184,4 +185,93 @@ test('a rule with a lint error or superseded_by is never delivered', t => {
   v.write('wiki/demo/bad.md', ruleNote({ applies_to: ['src/**'], basis: 'bogus' }));
   v.write('wiki/demo/old.md', ruleNote({ applies_to: ['src/**'], extra: ['superseded_by: demo/new'] }));
   assert.equal(edit(v, sessionId(), 'src/a.lua'), null);
+});
+
+const gatedOnTxt = t => {
+  const v = makeVault(t);
+  v.write('wiki/demo/ui-rule.md', ruleNote({ applies_to: ['src/**/*.txt'] }));
+  return v;
+};
+
+test('a subagent editing a file its parent was gated on is refused once more', { todo: '6.3a' }, t => {
+  const v = gatedOnTxt(t);
+  const sid = sessionId();
+  assert.ok(denied(edit(v, sid, 'src/a.txt')), 'the parent is gated');
+  assert.equal(edit(v, sid, 'src/a.txt'), null, 'the parent retry goes through');
+  assert.ok(denied(edit(v, sid, 'src/a.txt', { agent: 'agent-1' })), 'the subagent is gated on the same file');
+  assert.equal(edit(v, sid, 'src/a.txt', { agent: 'agent-1' }), null, 'the subagent retry goes through');
+});
+
+test('each agent is gated on a file once, whichever agent edited it first', { todo: '6.3a' }, t => {
+  const v = gatedOnTxt(t);
+  const sid = sessionId();
+  assert.ok(denied(edit(v, sid, 'src/b.txt', { agent: 'agent-2' })), 'the first subagent is gated');
+  assert.equal(edit(v, sid, 'src/b.txt', { agent: 'agent-2' }), null, 'the first subagent retry goes through');
+  assert.ok(denied(edit(v, sid, 'src/b.txt', { agent: 'agent-3' })), 'a second subagent is gated');
+  assert.equal(edit(v, sid, 'src/b.txt', { agent: 'agent-3' }), null, 'the second subagent retry goes through');
+  assert.ok(denied(edit(v, sid, 'src/b.txt')), 'the parent is gated');
+  assert.equal(edit(v, sid, 'src/b.txt'), null, 'the parent retry goes through');
+});
+
+const checkedOut = (t, name, rule) => {
+  const v = makeVault(t);
+  v.write(`wiki/demo/rules/${name}.md`, rule);
+  v.checkout();
+  return v;
+};
+
+test('session start still delivers always rules after a checkout touches every note', { todo: '6.6d' }, t => {
+  const v = checkedOut(t, 'always-rule', ruleNote({ always: true, doLine: 'Be brief.', notLine: 'Ramble.' }));
+  const ctx = v.startSession(sessionId())?.hookSpecificOutput.additionalContext ?? '';
+  assert.match(ctx, /demo\/always-rule: Do: Be brief\./);
+});
+
+test('the gate still refuses after a checkout touches every note', { todo: '6.6d' }, t => {
+  const v = checkedOut(t, 'ui-rule', ruleNote({ applies_to: ['src/**/*.txt'] }));
+  assert.ok(denied(edit(v, sessionId(), 'src/a.txt')));
+});
+
+test('20 rules and 2 pages on one glob refuse the first edit of a file once, and the retry passes', { todo: '6.5' }, t => {
+  const v = makeVault(t);
+  const sid = sessionId();
+  const keys = [];
+  for (let i = 0; i < 20; i++) {
+    v.write(`wiki/demo/rules/rule-${i}.md`, ruleNote({ applies_to: ['**/*.txt'], doLine: `Rule ${i}.` }));
+    keys.push(`demo/rule-${i}`);
+  }
+  for (const slug of ['page-a', 'page-b']) {
+    v.write(`wiki/demo/concepts/${slug}.md`, pageNote({ kind: 'concept', applies_to: ['**/*.txt'], summary: `'About ${slug}.'` }));
+    keys.push(`demo/${slug}`);
+  }
+  const first = denied(edit(v, sid, 'src/x.txt')) ?? '';
+  for (const key of keys) assert.match(first, new RegExp(`${key}(?![\\w-])`), `the first refusal names ${key}`);
+  assert.equal(edit(v, sid, 'src/x.txt'), null, 'the retry passes');
+});
+
+test('a trigger with nested wildcards does not hold the edit hook up on a long line', { todo: '6.6c' }, t => {
+  const v = makeVault(t);
+  const sid = sessionId();
+  v.write('wiki/demo/rules/slow.md', withTriggers(ruleNote({ applies_to: ['src/**/*.txt'] }), 'make\\(.*,.*,.*,.*\\)'));
+  const start = performance.now();
+  assert.ok(denied(edit(v, sid, 'src/a.txt', { text: 'make(1,1,1,1)' })), 'the trigger matches a short call');
+  // The hook's own run sets the scale, so a slow machine doesn't fail the test. Backtracking takes seconds here; the
+  // match runs synchronously inside the hook, so a deadline on its process is the only way to stop it.
+  const deadline = Math.max(500, 4 * (performance.now() - start));
+  assert.equal(edit(v, sid, 'src/b.txt', { text: `make(${'1,'.repeat(407)}1`, timeout: deadline }), null);
+});
+
+test('a file path with the long-path prefix is gated by the rules of its project', { todo: '6.6h', skip: process.platform !== 'win32' && 'the prefix is a Windows spelling' }, t => {
+  const v = makeVault(t);
+  v.write('wiki/demo/rules/ui-rule.md', ruleNote({ applies_to: ['src/**/*.txt'] }));
+  const file = path.join(v.project, 'src', 'a.txt');
+  assert.ok(denied(edit(v, sessionId(), '', { abs: file })), 'the plain spelling is gated');
+  assert.ok(denied(edit(v, sessionId(), '', { abs: `\\\\?\\${file}` })), 'the prefixed spelling is gated');
+});
+
+test('a negated glob in applies_to excludes the files it names from the gate', { todo: '6.1g' }, t => {
+  const v = makeVault(t);
+  const sid = sessionId();
+  v.write('wiki/demo/rules/no-tests.md', ruleNote({ applies_to: ['src/**/*.ts', '!src/**/*.test.ts'] }));
+  assert.ok(denied(edit(v, sid, 'src/a.ts')), 'a source file is gated');
+  assert.equal(edit(v, sid, 'src/a.test.ts'), null, 'a test file is not');
 });

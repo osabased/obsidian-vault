@@ -147,3 +147,10 @@ test('settleSeconds in the config changes the window', async t => {
   zero.v.write('wiki/demo/fresh.md', ruleNote({ keywords: ['x'] }), { settled: false });
   assert.deepEqual(zero.rules.settledNotes().map(n => n.key), ['demo/fresh']);
 });
+
+test('a folded summary reads as its text, or lint refuses it', { todo: '6.6h' }, async t => {
+  const { rules } = await vault(t);
+  const n = rules.parseNote(pageNote({ summary: '>-\n  Shop screens the user liked\n  and why.' }), 'wiki/demo/shop.md');
+  assert.ok(n.summary === 'Shop screens the user liked and why.' || rules.noteErrors(n).some(e => /summary/.test(e)),
+    `summary reads as ${JSON.stringify(n.summary)} and lint finds no error in it`);
+});
