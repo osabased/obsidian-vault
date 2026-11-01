@@ -96,3 +96,16 @@ test('a shell-written file fires a rule by its triggers against the file as it i
   assert.match(ctx, /^src\/todo\.txt:\n- demo\/todo-rule: Do: Track work in issues\./m);
   assert.doesNotMatch(ctx, /clean\.txt/);
 });
+
+test('a file a subagent wrote through the gated Edit path is not taken for a shell write at the parent\'s stop', t => {
+  const v = makeVault(t);
+  gitProject(v);
+  v.write('wiki/demo/rules/ui-rule.md', ruleNote({ applies_to: ['src/**/*.txt'] }));
+  const sid = sessionId();
+  v.startSession(sid);
+  prompt(v, sid, 'have a subagent edit the file');
+  assert.ok(denied(editFile(v, sid, 'src/a.txt', { agent: 'agent-1' })));
+  assert.equal(editFile(v, sid, 'src/a.txt', { agent: 'agent-1' }), null);
+  write(v, 'src/a.txt', 'local x = 1');
+  assert.equal(stop(v, sid), null);
+});
