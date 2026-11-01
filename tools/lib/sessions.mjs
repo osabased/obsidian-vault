@@ -30,11 +30,26 @@ export function touchSession(event, hits, agent) {
     transcript: event.transcript ?? prev.transcript ?? null,
     cwd: prev.cwd ?? event.cwd ?? null,
     last_seen: new Date().toISOString(),
-    ...(hits
+    // A folder no domain reaches records no reach, so a domain added to the config later reaches the session from its
+    // next prompt rather than its next start.
+    ...(hits?.length
       ? { reach: { cwd: event.cwd ?? null, domains: [...new Set(hits.map(h => h.domain))], roots: hits.map(({ domain, root }) => ({ domain, root })) } }
       : prev.reach ? { reach: prev.reach } : {}),
   };
   writeJson(file, entry);
+}
+
+// A domain started in a session joins the reach its start recorded, rather than the reach being found again, since this
+// process still holds the config from before the domain was added. cwd stays as it was, since prompts read the reach only
+// for that folder. An entry with no reach, from a session no start registered, gets its folder's first.
+export function addReach(sid, { domain, root }) {
+  const file = registry(safeId(sid));
+  const entry = readJsonSafe(file);
+  if (!entry) return;
+  const hits = entry.reach ? (Array.isArray(entry.reach.roots) ? entry.reach.roots : []) : sessionReach(entry.cwd);
+  const roots = [...hits.map(({ domain: d, root: r }) => ({ domain: d, root: r })), { domain, root }];
+  const domains = [...new Set([...(Array.isArray(entry.reach?.domains) ? entry.reach.domains : hits.map(h => h.domain)), domain])];
+  writeJson(file, { ...entry, reach: { cwd: entry.reach ? entry.reach.cwd : entry.cwd ?? null, domains, roots } });
 }
 
 const samePath = (a, b) => Boolean(a && b) && toPosix(a).toLowerCase() === toPosix(b).toLowerCase();

@@ -43,8 +43,7 @@ export async function prompt(event, agent) {
   turnStarted(sid);
   const doms = sessionDomains(sid, event.cwd);
   const vaultFolder = inVaultFolder(event.cwd);
-  const registered = doms.length > 0 || vaultFolder;
-  if (registered) touchSession(event, undefined, agent.name);
+  touchSession(event, undefined, agent.name);
   const scope = ['global', ...doms];
   const said = String(event.text ?? '');
   // An everywhere domain's keyword rules reach every session; its always rules only the sessions its reach puts it in.
@@ -53,7 +52,7 @@ export async function prompt(event, agent) {
   const ctx = deliveryFor(sessionHits(sid, event.cwd));
   const rules = deliverable(liveRules(notes), ctx);
   const sections = [
-    registered ? late(sid, scope, rules) : null,
+    late(sid, scope, rules),
     excerpts(sid, heard, rules, said),
     pointers(event, deliverable(livePages(notes), ctx), readableDomains(doms, vaultFolder), said),
   ];
