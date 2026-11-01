@@ -1,6 +1,6 @@
 import fs from 'node:fs';
 import path from 'node:path';
-import { vaultPath, readJsonSafe, writeText, shortHash, toPosix } from './vault.mjs';
+import { vaultPath, readJsonSafe, writeText, shortHash, toPosix, logError, config } from './vault.mjs';
 import { checkDeadline } from './deadline.mjs';
 import { changedFiles } from './git.mjs';
 
@@ -13,9 +13,11 @@ const CACHE = ['.state', 'cache'];
 // is read once more on a later call.
 const RACY_MS = 2000;
 
+// The config names domains in NFC and a folder may be stored NFD, so a folder goes by its NFC name.
+const nfc = s => s.normalize('NFC');
 const bucketOf = rel => {
   const parts = rel.split('/');
-  return parts.length > 2 ? parts[1] : '';
+  return parts.length > 2 ? nfc(parts[1]) : '';
 };
 // Names starting with a dot are never walked, so .root can't be a folder's file.
 const cacheFile = b => vaultPath(...CACHE, `${b === '' ? '.root' : /^[\p{L}\p{N}_-]+$/u.test(b) ? b : shortHash(b)}.json`);
@@ -24,13 +26,22 @@ const readBucket = (b, stamp) => {
   return c?.stamp === stamp && c.notes && typeof c.notes === 'object' ? c.notes : {};
 };
 
+// The cache only saves reading time, so a write that fails (a read-only .state, a full disk, a file another program
+// holds) leaves what this call read to this call, and is logged once.
+let unsaved = false;
+
 // Two hooks may write one file at once. Each entry it holds is the one read last, and a note gone from the folder this
 // call walked is dropped.
 function saveBucket(b, stamp, found, dropped) {
   const notes = readBucket(b, stamp);
   for (const [rel, e] of Object.entries(found)) if (!notes[rel] || notes[rel].at <= e.at) notes[rel] = e;
   for (const rel of dropped) delete notes[rel];
-  writeText(cacheFile(b), JSON.stringify({ stamp, notes }));
+  try {
+    writeText(cacheFile(b), JSON.stringify({ stamp, notes }));
+  } catch (e) {
+    if (!unsaved) logError('note cache', e);
+    unsaved = true;
+  }
 }
 
 function mdFiles(dir, deep) {
@@ -55,38 +66,73 @@ export function cachedNotes(buckets, read, stamp) {
   const root = vaultPath('wiki');
   let tops = [];
   try { tops = fs.readdirSync(root, { withFileTypes: true }); } catch {}
-  const dirs = tops.filter(e => e.isDirectory() && !e.name.startsWith('.')).map(e => e.name);
-  const names = buckets ? [...new Set(buckets)].filter(b => typeof b === 'string' && b && !b.startsWith('.')) : ['', ...dirs];
+  const dirs = new Map(tops.filter(e => e.isDirectory() && !e.name.startsWith('.')).map(e => [nfc(e.name), e.name]));
+  const names = buckets
+    ? [...new Set(buckets.filter(b => typeof b === 'string').map(nfc))].filter(b => b && !b.startsWith('.'))
+    : ['', ...dirs.keys()];
   const out = [];
   for (const b of names) {
     const old = readBucket(b, stamp);
     const found = {};
     let changed = false;
-    const files = b === '' ? mdFiles(root, false) : dirs.includes(b) ? mdFiles(path.join(root, b), true) : [];
-    for (const full of files) {
-      checkDeadline();
-      const rel = `wiki/${path.relative(root, full).split(path.sep).join('/')}`;
-      const st = fs.statSync(full, { throwIfNoEntry: false });
-      if (!st) continue;
-      const e = old[rel];
-      const same = e && e.m === st.mtimeMs && e.s === st.size;
-      if (same && e.at - e.m >= RACY_MS) {
-        found[rel] = e;
-        continue;
+    let whole = false;
+    const files = b === '' ? mdFiles(root, false) : dirs.has(b) ? mdFiles(path.join(root, dirs.get(b)), true) : [];
+    // A walk the deadline stops keeps what it read, and drops none of the notes it didn't reach.
+    try {
+      for (const full of files) {
+        checkDeadline();
+        const rel = `wiki/${path.relative(root, full).split(path.sep).join('/')}`;
+        const e = old[rel];
+        let st;
+        let text;
+        // A file another program holds for a moment keeps its last entry, but a note never read can't be served.
+        try {
+          st = fs.statSync(full, { throwIfNoEntry: false });
+          if (!st) continue;
+          // A file dated in the future would otherwise never be trusted.
+          if (e && e.m === st.mtimeMs && e.s === st.size && Math.abs(e.at - e.m) >= RACY_MS) {
+            found[rel] = e;
+            continue;
+          }
+          text = fs.readFileSync(full, 'utf8');
+        } catch (err) {
+          if (err.code === 'ENOENT') continue;
+          if (!e) throw err;
+          found[rel] = e;
+          continue;
+        }
+        const same = e && e.m === st.mtimeMs && e.s === st.size;
+        const now = Date.now();
+        const h = shortHash(text);
+        const kept = e?.h === h;
+        found[rel] = { m: st.mtimeMs, s: st.size, h, seen: kept ? e.seen : now, at: now, ...(kept && same && e.clean !== undefined ? { clean: e.clean } : {}), note: read(rel, text) };
+        changed = true;
       }
-      let text;
-      try { text = fs.readFileSync(full, 'utf8'); } catch { continue; }
-      const now = Date.now();
-      const h = shortHash(text);
-      const kept = e?.h === h;
-      found[rel] = { m: st.mtimeMs, s: st.size, h, seen: kept ? e.seen : now, at: now, ...(kept && same && e.clean !== undefined ? { clean: e.clean } : {}), note: read(rel, text) };
-      changed = true;
+      whole = true;
+    } finally {
+      const dropped = whole ? Object.keys(old).filter(rel => !found[rel]) : [];
+      if (changed || dropped.length) saveBucket(b, stamp, found, dropped);
     }
-    const dropped = Object.keys(old).filter(rel => !found[rel]);
-    if (changed || dropped.length) saveBucket(b, stamp, found, dropped);
     for (const [rel, e] of Object.entries(found)) out.push({ rel, ...e });
   }
   return out;
+}
+
+// The modified time of every note in wiki/ outside the folders skipped, from a stat of each file: the cache files hold
+// whole notes, so reading them all would cost more.
+export function noteTimes(skip = []) {
+  const root = vaultPath('wiki');
+  const skipped = new Set(skip.map(nfc));
+  let tops = [];
+  try { tops = fs.readdirSync(root, { withFileTypes: true }); } catch {}
+  const dirs = tops.filter(e => e.isDirectory() && !e.name.startsWith('.') && !skipped.has(nfc(e.name)));
+  const times = [];
+  for (const full of [...mdFiles(root, false), ...dirs.flatMap(e => mdFiles(path.join(root, e.name), true))]) {
+    checkDeadline();
+    const st = fs.statSync(full, { throwIfNoEntry: false });
+    if (st) times.push(st.mtimeMs);
+  }
+  return times;
 }
 
 // Asks git once which notes differ from HEAD, for the notes whose files changed since it last answered, and keeps the
@@ -106,20 +152,28 @@ export function cleanFromGit(notes, stamp) {
   }
 }
 
-const BUILT = () => vaultPath(...CACHE, 'built.json');
+// A dot name, so no folder of wiki/ shares the file.
+const BUILT = () => vaultPath(...CACHE, '.built.json');
+const CONFIG = '.config';
 
-// What each folder of wiki/ held, as one hash per folder of its notes' paths and texts.
+// What each folder of wiki/ held, as one hash per folder of its notes' paths and texts, and the config a build reads.
+// A domain's paths differ per machine and shape no generated file.
 function fingerprints(notes) {
+  const c = config();
+  const domains = Object.fromEntries(Object.entries(c.domains).map(([d, { paths, ...x }]) => [d, x]));
   const by = Map.groupBy(notes, n => bucketOf(n.rel));
-  return new Map([...by].map(([b, ns]) => [b, shortHash(ns.map(n => `${n.rel}\0${n.contentHash}`).sort().join('\n'))]));
+  return new Map([
+    [CONFIG, shortHash(JSON.stringify({ ...c, domains }))],
+    ...[...by].map(([b, ns]) => [b, shortHash(ns.map(n => `${n.rel}\0${n.contentHash}`).sort().join('\n'))]),
+  ]);
 }
 
-// Whether a note in the folders walked changed since the last build that markBuilt recorded.
+// Whether the config, or a note in the folders walked, changed since the last build that markBuilt recorded.
 export function changedSinceBuild(notes, buckets) {
   const built = readJsonSafe(BUILT());
   if (!built || typeof built !== 'object') return true;
   const now = fingerprints(notes);
-  const names = buckets ? new Set(buckets) : new Set([...Object.keys(built), ...now.keys()]);
+  const names = buckets ? new Set([CONFIG, ...buckets.map(nfc)]) : new Set([...Object.keys(built), ...now.keys()]);
   return [...names].some(b => (built[b] ?? '') !== (now.get(b) ?? ''));
 }
 

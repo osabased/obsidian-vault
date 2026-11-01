@@ -3,6 +3,7 @@ import path from 'node:path';
 import {
   config, vaultPath, statePath, stateDir, readJsonSafe, writeJson, appendJsonl, safeId, shortHash, logError, guarded, hookErrors, errorsLog, domainsFor, sessionReach, toPosix, inVaultFolder, isVaultOnly,
 } from './vault.mjs';
+import { noteTimes } from './cache.mjs';
 
 const DAY = 86400e3;
 
@@ -255,12 +256,13 @@ export const lintRan = () => writeJson(vaultPath('.state', 'lint.json'), { at: n
 // /lint marks its end too, so the notes it changed itself don't count toward the next reminder.
 export const lintDone = () => writeJson(vaultPath('.state', 'lint.json'), { ...lastLint(), done: new Date().toISOString() });
 
-export function sinceLint(notes) {
+// Counts every note in the vault, whichever domains the session walks.
+export function sinceLint(times = noteTimes()) {
   const { at, done } = lastLint();
   const ran = Date.parse(at);
-  if (Number.isNaN(ran)) return { days: null, changed: notes.length };
+  if (Number.isNaN(ran)) return { days: null, changed: times.length };
   const since = Math.max(ran, Date.parse(done) || 0);
-  return { days: Math.floor((Date.now() - ran) / DAY), changed: notes.filter(n => n.saved > since).length };
+  return { days: Math.floor((Date.now() - ran) / DAY), changed: times.filter(m => m > since).length };
 }
 
 // logError moves a full log to errors.log.1, so a log shorter than /lint saw has rotated since, and the end of
