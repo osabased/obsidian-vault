@@ -1,4 +1,4 @@
-import { config, plural, toPosix, guarded, hookErrors, errorsLog, localDay, appendLog, isVaultOnly, sessionReach, cwdOf } from './lib/vault.mjs';
+import { config, plural, toPosix, guarded, hookErrors, errorsLog, localDay, appendLog, isVaultOnly, sessionReach, cwdOf, readJson, statePath } from './lib/vault.mjs';
 import {
   clip, normTopic, topicNotes, loadNotes, liveRules, evidenceSessions, validDay, byKey, cmp, sharedFiles, resolver, linkedKeys, evidenceSources, isSourcePage, joinList,
   rankPair, sourceItem, fitIn,
@@ -7,7 +7,7 @@ import { lint, tally } from './lib/lint.mjs';
 import { lintRan, lintDone, tidy, trackedSessions, sessionDomains } from './lib/sessions.mjs';
 import { subjectRows, liveRows, newestFirst, projectName } from './lib/picks.mjs';
 import { UsageError } from './lib/input.mjs';
-import { refSources, sourceVersion } from './lib/sources.mjs';
+import { refSources, sourceVersion, sourceChains, noteCitations, newerCopies, unverifiedNow } from './lib/sources.mjs';
 
 // Each section reads these once a run; a read that fails is tried again by the next section, which reports it too.
 const once = f => {
@@ -105,19 +105,47 @@ const resolve = once(() => resolver(notes()));
 // A file in a bundle is cited as part of the bundle, the one source a source page names.
 const sourceKey = x => sourceItem(x).rel ?? x;
 
+const chains = once(sourceChains);
+const citations = once(() => noteCitations(notes(), chains()));
+const derived = once(() => readJson(statePath('derived.json'), {}));
+
+// The copies of each source a note cites that are later in its chain than the latest one it cites, as [id, copies].
+const laterCopies = n => [...citations()(n).latest].flatMap(([id, i]) => {
+  const newer = newerCopies(chains(), id, i);
+  return newer.length ? [[id, newer]] : [];
+});
+
 // A knowledge rule states a fact as of a day, so a source page on its topic dated after it, that the rule neither
-// cites in its Evidence nor links, may say the fact has changed.
+// cites in its Evidence nor links, may say the fact has changed. So may a source page in any domain, on any topic, whose
+// source is a later copy of one the rule cites.
 function newerSources() {
   const dated = sourcePages().filter(s => s.topic && validDay(s.data.source_date)).sort((a, b) => cmp(a.key, b.key));
   return liveNotes().flatMap(([k, r, n]) => {
     if (!validDay(n.as_of)) return [];
     const after = dated.filter(s => s.domain === r.domain && s.topic === r.topic && s.data.source_date > n.as_of);
-    if (!after.length) return [];
+    const copies = new Set(laterCopies(n).flatMap(([, rels]) => rels));
+    const later = copies.size ? sourcePages().filter(s => copies.has(sourceItem(s.data.source).rel)) : [];
     const linked = new Set(linkedKeys(n, resolve()));
     const cited = new Set(evidenceSources(n).map(sourceKey));
-    const newer = after.filter(s => !linked.has(s.key) && !cited.has(sourceKey(s.data.source)));
-    return newer.length ? [`- ${k}, as of ${n.as_of}: ${joinList(newer.map(s => `${s.key} (dated ${s.data.source_date})`), 'and')}`] : [];
+    const newer = [...new Set([...after, ...later])].filter(s => !linked.has(s.key) && !cited.has(sourceKey(s.data.source))).sort((a, b) => cmp(a.key, b.key));
+    const shown = s => (validDay(s.data.source_date) ? `${s.key} (dated ${s.data.source_date})` : `${s.key} (a later copy)`);
+    return newer.length ? [`- ${k}, as of ${n.as_of}: ${joinList(newer.map(shown), 'and')}`] : [];
   });
+}
+
+// A note stays listed until it cites the newer copy or its file changes, as the hooks label it.
+function unverifiedNotes() {
+  return notes().filter(n => unverifiedNow(derived(), n)).sort((a, b) => cmp(a.key, b.key)).map(n => {
+    const { since } = unverifiedNow(derived(), n);
+    const changed = laterCopies(n).map(([id, rels]) => `${id}, newer copy ${rels.at(-1)}`);
+    return `- ${n.key}: since ${since ?? '(no date)'} · ${changed.join('; ') || '(the source is no longer in raw/refs/)'}`;
+  });
+}
+
+function failedChecks() {
+  const sources = derived().sources ?? {};
+  return Object.keys(sources).sort(cmp).filter(id => sources[id]?.result === 'failed')
+    .map(id => `- ${id}: last checked ${sources[id].checked ?? 'never'} · ${sources[id].why}`);
 }
 
 // A browser saves a whole web page as <name>.html, or .htm, and the files it shows in <name>_files/ beside it.
@@ -175,6 +203,8 @@ const status = () => [
   ...section('Rules no session was shown', neverShown),
   ...section('Rules on one topic whose globs overlap', globPairs),
   ...section('Knowledge rules a newer source on their topic may override', newerSources),
+  ...section('Notes a changed source has left unverified', unverifiedNotes),
+  ...section('Source checks that failed', failedChecks),
   ...section('Provisional picks not yet confirmed', provisional),
   ...section('Sources in raw/refs/ no source page names', () => unnamedSources().map(f => `- ${f}`)),
 ].join('\n');

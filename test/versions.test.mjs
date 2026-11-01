@@ -191,10 +191,11 @@ test('a source changed since the note labels it while the note file is unchanged
 
 test('an edit refusal carries the source changed label after the clipped rule', t => {
   const v = makeVault(t, { presets: ['almanac'] });
-  const st = fs.statSync(v.at('wiki', 'almanac', 'rules', 'ledger-v2.md'));
-  v.write('.state/derived.json', JSON.stringify({ unverified: { 'almanac/ledger-v2': { mtime: st.mtimeMs, size: st.size, since: '2026-11-01', sources: [] } } }), { saved: null });
   const sid = sessionId();
   v.startSession(sid, { cwd: v.projects.almanac });
+  // Session start builds, and build rewrites derived.json from the sources, so the hand-written entry goes in after it.
+  const st = fs.statSync(v.at('wiki', 'almanac', 'rules', 'ledger-v2.md'));
+  v.write('.state/derived.json', JSON.stringify({ unverified: { 'almanac/ledger-v2': { mtime: st.mtimeMs, size: st.size, since: '2026-11-01', sources: [] } } }), { saved: null });
   assert.match(ledgerEdit(v, sid), /- almanac\/ledger-v2: .* source changed on \d{4}-\d\d-\d\d/);
 });
 

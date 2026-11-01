@@ -1,8 +1,9 @@
-import { runHook, sessionReach, inVaultFolder, readableDomains, vaultPath, toolsPath, toPosix, guarded, config, plural, clock } from '../lib/vault.mjs';
-import { alwaysContext, alwaysIn, fitContext, indexNote, scopeTopics, loadNotes, settledNotes, liveRules, deliverable, deliveryFor, clip, undelivered, knownDomain } from '../lib/rules.mjs';
+import { runHook, sessionReach, inVaultFolder, readableDomains, vaultPath, toolsPath, toPosix, guarded, config, plural, clock, readJson, statePath, today } from '../lib/vault.mjs';
+import { alwaysContext, alwaysIn, fitContext, indexNote, scopeTopics, loadNotes, settledNotes, liveRules, deliverable, deliveryFor, clip, undelivered, knownDomain, joinList } from '../lib/rules.mjs';
 import { build } from '../lib/build.mjs';
 import { remaining } from '../lib/deadline.mjs';
 import { changedSinceBuild, noteTimes } from '../lib/cache.mjs';
+import { knowledgeDays } from '../lib/sources.mjs';
 import { touchSession, clearMarkers, markAlways, markShown, tidy, errorsSinceLint, sinceLint } from '../lib/sessions.mjs';
 
 function proposeNote(sid) {
@@ -63,6 +64,29 @@ function lintNote(notes, walked) {
   return `Taste vault: /lint ${ran}. Remind the user to run /lint in \`${toPosix(vaultPath())}\`.`;
 }
 
+// A failed check doesn't move checked, so a source that only fails stays counted until a check goes through.
+function sourcesNote(scope) {
+  const { sources = {}, domains = {} } = readJson(statePath('derived.json'), {});
+  const now = Date.parse(today());
+  const stale = new Set();
+  const named = [];
+  const limits = [];
+  for (const d of scope) {
+    const { checkAfterDays } = knowledgeDays(d);
+    const old = (domains[d] ?? []).filter(id => {
+      const checked = sources[id]?.checked;
+      return !checked || Math.round((now - Date.parse(checked)) / 864e5) > checkAfterDays;
+    });
+    if (!old.length) continue;
+    old.forEach(id => stale.add(id));
+    named.push(d);
+    limits.push(checkAfterDays);
+  }
+  if (!stale.size) return '';
+  const verb = stale.size === 1 ? "hasn't" : "haven't";
+  return `Taste vault: ${plural(stale.size, 'source')} the ${joinList(named, 'and')} notes cite ${verb} been checked in ${plural(Math.min(...limits), 'day')}. Remind the user to run /lint in \`${toPosix(vaultPath())}\`, which refreshes them.`;
+}
+
 runHook('session-start', input => {
   guarded('tidy', tidy);
   const hits = sessionReach(input.cwd);
@@ -107,6 +131,7 @@ runHook('session-start', input => {
     pick,
     { noun: 'topic', items: topics, render: indexNote },
     again ? '' : guarded('lint reminder', () => lintNote(notes, walked)),
+    again ? '' : guarded('source checks', () => sourcesNote(scope)),
   ]);
   // Only the rules in the block count as shown, but those the block cut for size are marked too, since it points to
   // active.md for them. A block the output budget left out marks nothing, so the next prompt brings its rules.

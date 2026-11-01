@@ -19,7 +19,9 @@ export const toolsPath = (...xs) => path.join(import.meta.dirname, '..', ...xs);
 
 const DEFAULTS = {
   delivery: { maxRulesPerEdit: 3, maxRuleChars: 300, maxKnowledgeRuleChars: 600, maxBlockChars: 1200, maxPromptExcerpts: 3, maxPages: 3, maxContextChars: 8000, activeMaxLines: 60, activeMaxBytes: 4096, settleSeconds: 60, tidyMaxMarkers: 2000 },
-  knowledge: { staleAfterDays: 180 },
+  knowledge: { staleAfterDays: 180, checkAfterDays: 14 },
+  refresh: { timeoutSeconds: 20, maxBytes: 5_000_000 },
+  docSets: { manifests: ['llms.txt'] },
   lint: { remindAfterDays: 14, remindAfterNotes: 10 },
   picks: { maxSheetBytes: 3_000_000 },
   reach: { markerDepth: 3 },
@@ -71,7 +73,7 @@ export const vaultRel = (p, base) => {
 
 // The vault's notes and sources are the user's taste, and the rest are written by the tools or kept for this machine,
 // so no rule covers them, and the edit guard decides what may change.
-const VAULT_OWN = /^(?:wiki|raw|derived|\.state|\.live)(?:\/|$)|^(?:active\.md|index\.md|decisions\.md|vault\.local\.json)$/i;
+const VAULT_OWN = /^(?:wiki|raw|derived|\.state|\.live|\.sources)(?:\/|$)|^(?:active\.md|index\.md|decisions\.md|vault\.local\.json)$/i;
 export const vaultOwn = rel => typeof rel === 'string' && VAULT_OWN.test(rel);
 
 const caseFolds = process.platform === 'win32' || process.platform === 'darwin';
