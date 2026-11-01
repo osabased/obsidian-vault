@@ -1,17 +1,31 @@
+// A namespace is a separator, an escape character, and the character that stands for a separator in the text a glob is
+// matched against. Files have no escape: normGlob has already turned their backslashes into slashes.
+const FILE = { separator: '/', escape: null, mark: '/' };
+const MARK = '\uE000';
+export const NAMESPACE_NAME = /^[a-z][a-z0-9_-]+$/;
+
 // The glob's parts, which the gate's regex and the overlap check are both built from: 'any' (a ** that ends the glob),
 // 'dirs' (a **/ that crosses folders), 'seg' (*, or ** inside a name), 'one' (?), a list of alternatives, or a character.
-function parse(glob) {
+function parse(glob, ns) {
   const parts = [];
+  const sepAt = i => glob.startsWith(ns.separator, i);
   for (let i = 0; i < glob.length; i++) {
     const ch = glob[i];
-    if (ch === '*' && glob[i + 1] === '*') {
-      const whole = i === 0 || glob[i - 1] === '/';
+    const last = parts[parts.length - 1];
+    if (ch === ns.escape) {
+      parts.push({ ch: glob[i + 1] ?? ch });
+      if (i + 1 < glob.length) i++;
+    } else if (sepAt(i)) {
+      parts.push({ ch: ns.mark, sep: true });
+      i += ns.separator.length - 1;
+    } else if (ch === '*' && glob[i + 1] === '*') {
+      const whole = !last || last.sep || last === 'dirs';
       if (whole && i + 2 === glob.length) {
         parts.push('any');
         i++;
-      } else if (whole && glob[i + 2] === '/') {
+      } else if (whole && sepAt(i + 2)) {
         parts.push('dirs');
-        i += 2;
+        i += 1 + ns.separator.length;
       } else {
         parts.push('seg');
         i++;
@@ -21,10 +35,8 @@ function parse(glob) {
     } else if (ch === '?') {
       parts.push('one');
     } else if (ch === '{') {
-      const close = glob.indexOf('}', i);
-      const body = close < 0 ? '' : glob.slice(i + 1, close);
-      if (close < 0 || body.includes('{')) throw new Error(`unbalanced braces in ${glob}`);
-      parts.push(body.split(',').map(parse));
+      const { close, alts } = braces(glob, i, ns);
+      parts.push(alts.map(alt => parse(alt, ns)));
       i = close;
     } else if (ch === '}') {
       throw new Error(`unbalanced braces in ${glob}`);
@@ -35,27 +47,78 @@ function parse(glob) {
   return parts;
 }
 
-const PATTERN = { any: '.*', dirs: '(?:.*/)?', seg: '[^/]*', one: '[^/]' };
+function braces(glob, open, ns) {
+  const alts = [];
+  let from = open + 1;
+  for (let j = open + 1; j < glob.length; j++) {
+    const ch = glob[j];
+    if (ch === ns.escape) j++;
+    else if (ch === '{') break;
+    else if (ch === ',' || ch === '}') {
+      alts.push(glob.slice(from, j));
+      from = j + 1;
+      if (ch === '}') return { close: j, alts };
+    }
+  }
+  throw new Error(`unbalanced braces in ${glob}`);
+}
 
-function pattern(parts) {
+const PATTERN = m => ({ any: '.*', dirs: `(?:.*${m})?`, seg: `[^${m}]*`, one: `[^${m}]` });
+
+function pattern(parts, mark) {
   return parts.map(p => {
-    if (Array.isArray(p)) return `(?:${p.map(pattern).join('|')})`;
-    if (typeof p === 'string') return PATTERN[p];
-    return /[\\^$.|+()[\]]/.test(p.ch) ? `\\${p.ch}` : p.ch;
+    if (Array.isArray(p)) return `(?:${p.map(alt => pattern(alt, mark)).join('|')})`;
+    if (typeof p === 'string') return PATTERN(mark)[p];
+    return /[\\^$.|+()[\]*?{}]/.test(p.ch) ? `\\${p.ch}` : p.ch;
   }).join('');
 }
 
 export const normGlob = glob => String(glob).replace(/\\/g, '/').replace(/^\.?\//, '');
-export const globToRegExp = glob => new RegExp(`^${pattern(parse(normGlob(glob)))}$`, 'i');
+export const globToRegExp = glob => new RegExp(`^${pattern(parse(normGlob(glob), FILE), FILE.mark)}$`, 'i');
 
-export function validGlob(glob) {
-  if (typeof glob !== 'string' || !glob.trim()) return false;
+// An entry of an applies_to list: an optional leading !, an optional lowercase '<namespace>:' prefix, then a glob. A
+// prefix needs two characters so that a drive letter such as c:/ stays a file glob.
+export function entryParts(entry) {
+  const negated = entry.startsWith('!');
+  const rest = negated ? entry.slice(1) : entry;
+  const m = /^([a-z][a-z0-9_-]+):(.*)$/s.exec(rest);
+  return m ? { negated, namespace: m[1], glob: m[2] } : { negated, namespace: 'file', glob: rest };
+}
+
+// Two spellings of one entry get one key. File globs ignore case and slash style; names in a namespace do not.
+export function entryKey(entry) {
+  const { negated, namespace, glob } = entryParts(entry);
+  return (negated ? '!' : '') + (namespace === 'file' ? normGlob(glob).toLowerCase() : `${namespace}:${glob}`);
+}
+
+// A namespace the config declares badly, or doesn't declare, gets null.
+function declOf(namespace, namespaces) {
+  if (namespace === 'file') return FILE;
+  const d = namespaces && Object.hasOwn(namespaces, namespace) ? namespaces[namespace] : null;
+  const ok = typeof d?.separator === 'string' && d.separator && typeof d.escape === 'string' && d.escape.length === 1;
+  return ok ? { separator: d.separator, escape: d.escape, mark: MARK } : null;
+}
+
+// An entry the gate can't use gets null.
+function compiled(entry, namespaces) {
+  if (typeof entry !== 'string') return null;
+  const { negated, namespace, glob } = entryParts(entry);
+  const ns = declOf(namespace, namespaces);
+  if (!ns || !glob.trim() || glob.startsWith('!')) return null;
   try {
-    globToRegExp(glob);
-    return true;
+    const regex = ns === FILE ? globToRegExp(glob) : new RegExp(`^${pattern(parse(glob, ns), ns.mark)}$`, 's');
+    return { negated, namespace, ns, regex };
   } catch {
-    return false;
+    return null;
   }
+}
+
+// Without the namespaces, a namespaced entry is only checked for having a glob: its syntax depends on the declaration.
+export function validGlob(entry, namespaces) {
+  if (typeof entry !== 'string') return false;
+  const { namespace, glob } = entryParts(entry);
+  if (namespaces === undefined && namespace !== 'file') return Boolean(glob.trim());
+  return compiled(entry, namespaces) !== null;
 }
 
 // The parts as an automaton, with edges labelled null (no character), 'any', 'seg' (any but /) or a lowercase character.
@@ -89,7 +152,13 @@ const meets = (x, y) => x === 'any' || y === 'any' || (x === 'seg' ? y !== '/' :
 // A glob the gate can't use gets null.
 const automata = new Map();
 function automatonOf(glob) {
-  if (!automata.has(glob)) automata.set(glob, validGlob(glob) ? automaton(parse(normGlob(glob))) : null);
+  if (!automata.has(glob)) {
+    try {
+      automata.set(glob, automaton(parse(normGlob(glob), FILE)));
+    } catch {
+      automata.set(glob, null);
+    }
+  }
   return automata.get(glob);
 }
 
@@ -113,21 +182,72 @@ function globsOverlap(a, b) {
   return false;
 }
 
-// The first pair of globs, one from each list, that some path matches, reading each list's globs as under its folder.
+// The first pair of entries, one from each list, that some file path matches, reading each list's globs as under its
+// folder. A ! entry is left out, so the pair may be one the exclusions rule out but never misses a real overlap.
+// Namespaced entries are left out: they match no file.
 export function overlapping(as, bs, [inA, inB] = ['', '']) {
-  const under = (dir, g) => (dir && validGlob(g) ? `${dir}/${normGlob(g)}` : g);
-  for (const a of as) for (const b of bs) if (globsOverlap(under(inA, a), under(inB, b))) return [a, b];
+  const globs = list => list.flatMap(entry => {
+    if (!validGlob(entry)) return [];
+    const { negated, namespace, glob } = entryParts(entry);
+    return negated || namespace !== 'file' ? [] : [[entry, glob]];
+  });
+  const under = (dir, g) => (dir ? `${dir}/${normGlob(g)}` : g);
+  for (const [a, ga] of globs(as)) for (const [b, gb] of globs(bs)) if (globsOverlap(under(inA, ga), under(inB, gb))) return [a, b];
   return null;
 }
 
-export function specificity(glob) {
-  const literal = glob.split('/').filter(s => s && !/[*?{]/.test(s)).length;
+export function specificity(entry, namespaces) {
+  const { namespace, glob } = entryParts(entry);
+  const sep = declOf(namespace, namespaces)?.separator ?? '/';
+  const literal = glob.split(sep).filter(s => s && !/[*?{]/.test(s)).length;
   return [literal, glob.replace(/[*?{},]/g, '').length];
 }
 
 export const bySpecificity = (a, b) => b[0] - a[0] || b[1] - a[1];
 
-export function bestMatch(globs, rel) {
-  const hits = globs.filter(g => validGlob(g) && globToRegExp(g).test(rel));
-  return hits.sort((a, b) => bySpecificity(specificity(a), specificity(b)))[0] ?? null;
+// Entries of one namespace apply in order, as in a .gitignore: the last one that matches decides. The result is the
+// most specific entry that adds the subject, or null when none does or the last match is a ! entry.
+function select(list, namespace, namespaces, subject) {
+  let added = false;
+  const hits = [];
+  for (const entry of list) {
+    const c = compiled(entry, namespaces);
+    if (!c || c.namespace !== namespace || !c.regex.test(subject)) continue;
+    added = !c.negated;
+    if (added) hits.push(entry);
+  }
+  return added ? hits.sort((a, b) => bySpecificity(specificity(a, namespaces), specificity(b, namespaces)))[0] : null;
+}
+
+export const bestMatch = (globs, rel) => select(globs, 'file', undefined, rel);
+
+// A target's path is written with its namespace's escape character; its segments are compared as names.
+export function matchTarget(list, { namespace = 'file', path }, namespaces) {
+  const ns = declOf(namespace, namespaces);
+  if (!ns) return null;
+  let subject = '';
+  for (let i = 0; i < path.length; i++) {
+    if (path[i] === ns.escape && i + 1 < path.length) subject += path[++i];
+    else if (ns !== FILE && path.startsWith(ns.separator, i)) {
+      subject += ns.mark;
+      i += ns.separator.length - 1;
+    } else subject += path[i];
+  }
+  return select(list, namespace, namespaces, subject);
+}
+
+// What lint should show about a whole list, beyond each entry: a ! entry that has no earlier entry in its namespace to
+// remove from.
+export function globListProblems(list, namespaces) {
+  const added = new Set();
+  return list.flatMap(entry => {
+    const c = compiled(entry, namespaces);
+    if (!c) return [];
+    if (!c.negated) added.add(c.namespace);
+    if (c.negated && !added.has(c.namespace)) {
+      const what = c.namespace === 'file' ? 'files' : `${c.namespace} targets`;
+      return [`exclusion in applies_to comes before any entry that adds ${what}: ${entry}`];
+    }
+    return [];
+  });
 }
