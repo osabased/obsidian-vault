@@ -1,3 +1,4 @@
+import fs from 'node:fs';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { makeVault, sha256, withFields } from './fixture.mjs';
@@ -144,5 +145,112 @@ test('lint errors on privacy that is not an object of allow ids', async t => {
     const v = makeVault(t, { config });
     const errors = (await (await v.import('lib/lint.mjs')).lint()).filter(f => f.level === 'error' && f.file === 'vault.config.json').map(f => f.msg);
     assert.deepEqual(errors, expect, JSON.stringify(config));
+  }
+});
+
+const bytes = (v, rel) => fs.readFileSync(v.at(...rel.split('/')));
+const SECRET = 'api_key = "ab12cd34ef56gh78"';
+const BASE64 = 'MIIEpAIBAAKCAQEAu1SU1LfVLPHCozMxH2Mo4lgOEePzNm0tRgeLezV6ffAt0gun';
+
+test('a PEM block hides only its base64 and armor headers, and only when the END with its own label closes it', () => {
+  const cases = {
+    'a certificate with a line that is neither': [`-----BEGIN CERTIFICATE-----\n${SECRET}\n-----END CERTIFICATE-----`, [2]],
+    'a header name armor never uses': [`-----BEGIN CERTIFICATE-----\npassword: hunter2xyz9\n${BASE64}\n-----END CERTIFICATE-----`, [2, 3]],
+    'a BEGIN with no END': [`Your cert file starts:\n-----BEGIN PUBLIC KEY-----\n${BASE64}\n\nThen set:\n${SECRET}`, [3, 6]],
+    'an END with another label': [`-----BEGIN TRUSTED CERTIFICATE-----\n${BASE64}\n-----END CERTIFICATE-----\n${SECRET}`, [2, 4]],
+    'a clearsigned message': [`-----BEGIN PGP SIGNED MESSAGE-----\nHash: SHA256\n\n${SECRET}\n-----BEGIN PGP SIGNATURE-----\n\n${BASE64}\n-----END PGP SIGNATURE-----\nlater ${TOKEN}`, [4, 9]],
+  };
+  for (const [name, [text, lines]] of Object.entries(cases)) assert.deepEqual(found(text).map(f => f.line), lines, name);
+  const closed = `-----BEGIN PGP PUBLIC KEY BLOCK-----\nVersion: Glim 2\nComment: the ledger key\n\n${BASE64}\n=Zq3x\n-----END PGP PUBLIC KEY BLOCK-----\n${SECRET}`;
+  assert.deepEqual(found(closed).map(f => f.line), [8], 'a closed public block still passes, and scanning resumes after it');
+});
+
+test("a PGP private key block is a private key, and an unclosed private key's value runs to the end of the text", () => {
+  const block = `-----BEGIN PGP PRIVATE KEY BLOCK-----\nVersion: Glim 2\n\n${BASE64}\n=Zq3x\n-----END PGP PRIVATE KEY BLOCK-----`;
+  assert.deepEqual(found(`${block}\n${SECRET}`), [
+    { line: 1, kind: 'private key', masked: 'private key' },
+    { line: 7, kind: 'assignment', masked: 'ab…78', name: 'api_key' },
+  ]);
+  assert.equal(secretsIn(block)[0].value, block);
+  const encrypted = `-----BEGIN RSA PRIVATE KEY-----\nProc-Type: 4,ENCRYPTED\nDEK-Info: AES-128-CBC,3F17F5316E2BAC89\n\n${BASE64}\n-----END RSA PRIVATE KEY-----`;
+  assert.deepEqual(found(encrypted).map(f => f.kind), ['private key']);
+});
+
+test('a PEM block indented, in a list or quoted reads as one block', () => {
+  const pem = (lead, inner, label = 'RSA PRIVATE KEY') => `${lead}-----BEGIN ${label}-----\n${inner}${BASE64}\n${inner}${BASE64}\n${inner}-----END ${label}-----`;
+  for (const [name, text] of Object.entries({
+    yaml: `key: |\n${pem('  ', '  ')}`,
+    list: `- ${pem('', '  ')}`,
+    json: `[\n  "-----BEGIN RSA PRIVATE KEY-----",\n  "${BASE64}",\n  "${BASE64}",\n  "-----END RSA PRIVATE KEY-----"\n]`,
+  })) {
+    assert.deepEqual(found(text).map(f => f.kind), ['private key'], name);
+  }
+  assert.deepEqual(found(`key: |\n${pem('    ', '    ', 'PUBLIC KEY')}\n${SECRET}`).map(f => f.line), [6], 'an indented public key passes, and its END ends it');
+  assert.deepEqual(found(`-----BEGIN PUBLIC KEY-----\n${BASE64}\n  -----END PUBLIC KEY-----\n${SECRET}`).map(f => f.line), [4], 'so does an END indented otherwise');
+});
+
+test('a run of words and numbers joined as names, paths and URLs join them is no token', () => {
+  const passing = [
+    'source: raw/refs/Quarterly-Report-2024-Final.pdf',
+    'source: raw/refs/IMG_20250314_Whiteboard-Photo.jpg',
+    'source: raw/refs/MeetingRecording-2025-03-14-Team.mp4',
+    'source: raw/refs/ACME_Corp_Statement_Of_Work_2025Q1.pdf',
+    'handleUserAuthenticationCallback2FAResponseWithRetries',
+    'handleOAuth2CallbackWithPKCEVerifier',
+    'see https://glim.example/docs/api/v2/Authentication/OAuth2Flow',
+    'https://ledger.example/docs/reference/RenderingContext2D/drawImageWithShadow',
+  ];
+  for (const text of passing) assert.deepEqual(found(text), [], text);
+  for (const token of [TOKEN, 'Zq3xV9pL2mK8wR4tYb7NcQ1sHf6DgJ0aEu5WiOy', 'aB3dE5fG7hJ9kL1mN2pQ4rS6tU8vW0xYz', `raw/refs/${TOKEN}`]) {
+    assert.deepEqual(found(`see ${token}`).map(f => f.kind), ['token'], token);
+  }
+});
+
+test("derived text's frontmatter, which the core writes, isn't scanned, and a text file's own is", t => {
+  const v = vault(t);
+  const rel = `raw/refs/${TOKEN}.pdf`;
+  v.write(rel, Buffer.concat([Buffer.from('%PDF-1.4\nA lit cell.\n'), Buffer.from([0xff])]));
+  const r = v.run('extract.mjs', [rel]);
+  assert.equal(r.code, 0, r.stdout + r.stderr);
+  assert.match(r.stdout, /^wrote /);
+  const scan = v.run('scan.mjs', [rel]);
+  assert.equal(scan.code, 0, scan.stdout + scan.stderr);
+  v.write('raw/refs/own.md', `---\nurl: https://glim.example/${TOKEN}\n---\n# Own\n`);
+  assert.match(v.run('scan.mjs', ['raw/refs/own.md']).stdout, /^raw\/refs\/own\.md:2 token /);
+});
+
+test('scan takes a bundle folder and scans each file in it, a binary through its derived text', t => {
+  const v = vault(t);
+  v.write('raw/refs/kit/a.txt', `${SECRET}\n`);
+  v.write('raw/refs/kit/b.txt', 'b\n');
+  v.write('raw/refs/kit/deep/paper.pdf', bytes(v, 'raw/refs/paper.pdf'));
+  v.write('raw/refs/kit/talk.mp4', bytes(v, 'raw/refs/talk.mp4'));
+  assert.equal(v.run('bundle.mjs', ['raw/refs/kit']).code, 0);
+  assert.match(v.run('review.mjs', ['sources']).stdout, /raw\/refs\/kit\b/);
+  const r = v.run('scan.mjs', ['raw/refs/kit']);
+  assert.equal(r.code, 1, r.stderr);
+  assert.deepEqual(r.stdout.trimEnd().split('\n'), [
+    `raw/refs/kit/a.txt:1 assignment api_key=ab…78 · allow ${allowOf('ab12cd34ef56gh78')}`,
+    "skipped raw/refs/kit/talk.mp4: it isn't UTF-8 and has no derived text. Run node tools/extract.mjs raw/refs/kit/talk.mp4, then scan again.",
+    "1 key- or token-shaped value in 1 file. Remove them, or add an allow id to privacy.allow in vault.config.json if it isn't a secret.",
+  ]);
+  v.write('raw/refs/kit/a.txt', 'a\n');
+  assert.equal(v.run('scan.mjs', ['raw/refs/kit/']).stdout, 'skipped raw/refs/kit/talk.mp4: it isn\'t UTF-8 and has no derived text. Run node tools/extract.mjs raw/refs/kit/talk.mp4, then scan again.\nNo key- or token-shaped values in 4 files.\n');
+  v.write('raw/refs/loose/a.txt', `${SECRET}\n`);
+  for (const ref of ['raw/refs/loose', 'raw/refs/kit/deep']) {
+    const other = v.run('scan.mjs', [ref]);
+    assert.equal(other.code, 2, `${ref}: ${other.stdout}`);
+    assert.match(other.stderr, /usage: node tools\/scan\.mjs/);
+  }
+});
+
+test("scan and extract exit 2 when they can't finish", t => {
+  const v = vault(t);
+  v.write('vault.config.json', '{ "privacy": { "allow": [], } }');
+  for (const [script, args] of [['scan.mjs', ['raw/refs/notes.md']], ['extract.mjs', ['raw/refs/paper.pdf']]]) {
+    const r = v.run(script, args);
+    assert.equal(r.code, 2, `${script}: ${r.stdout}${r.stderr}`);
+    assert.equal(r.stdout, '');
+    assert.match(r.stderr, new RegExp(`^${script.replace('.mjs', '')} failed: `));
   }
 });
