@@ -81,7 +81,7 @@ test('session start looks below its folder only to reach.markerDepth, past dot-f
 test('a domain\'s paths in vault.local.json put a folder in it, and edits there get its rules', t => {
   const v = makeVault(t, { domains: { alpha: { title: 'Alpha', topics: ['code'] } } });
   const dir = folder(t, ['src/x.txt']);
-  writeLocal(v, { demo: { paths: [v.project.replace(/\\/g, '/')] }, alpha: { paths: [dir.replace(/\\/g, '/')] } });
+  writeLocal(v, { glim: { paths: [v.project.replace(/\\/g, '/')] }, alpha: { paths: [dir.replace(/\\/g, '/')] } });
   v.write('wiki/alpha/rules/gate-a.md', ruleNote({ domain: 'alpha', applies_to: ['src/**'] }));
   assert.match(denied(edit(v, sessionId(), '', { abs: path.join(dir, 'src', 'x.txt'), cwd: dir })) ?? '', /alpha\/gate-a/);
 });
@@ -107,7 +107,7 @@ test('an everywhere domain\'s pages and keyword rules reach any folder, and its 
 
 test('lint reports a missing path as an error and a domain that reaches no project as a warning', async t => {
   const v = makeVault(t, { domains: { alpha: { title: 'Alpha', topics: [] }, beta: { title: 'Beta', topics: [] } } });
-  writeLocal(v, { demo: { paths: [v.project.replace(/\\/g, '/')] }, beta: { paths: ['C:/nowhere/beta'] } });
+  writeLocal(v, { glim: { paths: [v.project.replace(/\\/g, '/')] }, beta: { paths: ['C:/nowhere/beta'] } });
   assert.deepEqual(await reachFound(v), [
     ['error', 'vault.local.json', "beta's path C:/nowhere/beta doesn't exist on this machine. Fix it or remove it"],
     ['warn', 'vault.config.json', "alpha reaches no project on this machine. Add its folders to vault.local.json as paths, give it markers, or set vaultOnly: true if it holds only pages"],
@@ -131,7 +131,7 @@ test('lint checks the shape of markers, everywhere, vaultOnly and vault.local.js
       old: { title: 'Old', projects: ['C:/old'], markers: ['old.project'], topics: [] },
     },
   });
-  writeLocal(v, { demo: { paths: [v.project.replace(/\\/g, '/')] }, alpha: { paths: 'x' }, delta: { paths: [v.project.replace(/\\/g, '/')] }, nobody: { paths: [] } });
+  writeLocal(v, { glim: { paths: [v.project.replace(/\\/g, '/')] }, alpha: { paths: 'x' }, delta: { paths: [v.project.replace(/\\/g, '/')] }, nobody: { paths: [] } });
   assert.deepEqual(await reachFound(v), [
     ['error', 'vault.config.json', 'alpha: markers must be a list of file names, with no folders in them'],
     ['error', 'vault.config.json', 'beta: everywhere must be true or false'],
@@ -146,10 +146,10 @@ test('lint checks the shape of markers, everywhere, vaultOnly and vault.local.js
 });
 
 test('a missing vault.local.json gives a paths-only domain a warning, not an error', async t => {
-  const v = makeVault(t);
+  const v = makeVault(t, { domains: { glim: { markers: [] } } });
   fs.rmSync(v.at('vault.local.json'));
   assert.deepEqual(await reachFound(v), [
-    ['warn', 'vault.config.json', "demo reaches no project on this machine. Add its folders to vault.local.json as paths, give it markers, or set vaultOnly: true if it holds only pages"],
+    ['warn', 'vault.config.json', "glim reaches no project on this machine. Add its folders to vault.local.json as paths, give it markers, or set vaultOnly: true if it holds only pages"],
   ]);
 });
 
@@ -206,7 +206,7 @@ test('pick and propose reach the domains of the latest session start and of the 
   const moved = sessionId();
   v.startSession(moved);
   v.startSession(moved, { cwd: mono, source: 'compact' });
-  for (const domain of ['demo', 'beta']) {
+  for (const domain of ['glim', 'beta']) {
     const p = pickFor(v, moved, domain);
     assert.equal(p.code, 0, `${domain}: ${p.stderr}`);
   }
@@ -223,7 +223,7 @@ test('in the vault folder propose takes any domain but a vault-only one', t => {
   const sid = sessionId();
   v.startSession(sid, { cwd: v.root });
   const r = v.propose(sid, widgetRule('nope'));
-  assert.equal(r.stderr, 'Not proposed: domain must be demo, alpha or global.\n');
+  assert.equal(r.stderr, 'Not proposed: domain must be glim, alpha or global.\n');
 });
 
 test('a marker in a worktree of a project makes the main checkout the project root', async t => {

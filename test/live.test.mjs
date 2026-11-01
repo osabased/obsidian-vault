@@ -10,7 +10,7 @@ const HOOKS = path.resolve(import.meta.dirname, '..', '.githooks');
 
 test('a copy of tools/ inside the vault reads and writes the vault, and names its own scripts', t => {
   const v = makeVault(t);
-  v.write('wiki/demo/rules/said.md', ruleNote({ always: true, doLine: 'Zebra quartz mango.' }));
+  v.write('wiki/glim/rules/said.md', ruleNote({ always: true, doLine: 'Zebra quartz mango.' }));
   fs.cpSync(v.at('tools'), v.at('.live', 'tools'), { recursive: true });
   const r = spawnSync(process.execPath, [v.at('.live', 'tools', 'hooks', 'session-start.mjs')], {
     input: JSON.stringify({ session_id: sessionId(), cwd: v.project, hook_event_name: 'SessionStart', source: 'startup' }), env: cleanEnv(), encoding: 'utf8',

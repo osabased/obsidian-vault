@@ -10,16 +10,16 @@ const withTriggers = (text, ...res) => text.replace('triggers: []', `triggers:\n
 test('edit hook refuses the first matching edit and lets the retry through', t => {
   const v = makeVault(t);
   const sid = sessionId();
-  v.write('wiki/demo/ui-rule.md', ruleNote({ applies_to: ['src/**/*.luau'], doLine: 'Start with strict.', notLine: 'Leave nonstrict.' }));
+  v.write('wiki/glim/ui-rule.md', ruleNote({ applies_to: ['src/**/*.luau'], doLine: 'Start with strict.', notLine: 'Leave nonstrict.' }));
   const first = denied(edit(v, sid, 'src/ui/main.luau'));
-  assert.match(first, /^Taste rules apply to src\/ui\/main\.luau:\n- demo\/ui-rule: Do: Start with strict\. Not: Leave nonstrict\.\nRevise this edit to follow them, then retry\. The retry is allowed\.$/);
+  assert.match(first, /^Taste rules apply to src\/ui\/main\.luau:\n- glim\/ui-rule: Do: Start with strict\. Not: Leave nonstrict\.\nRevise this edit to follow them, then retry\. The retry is allowed\.$/);
   assert.equal(edit(v, sid, 'src/ui/main.luau'), null);
 });
 
 test('the marker is per rule, file and session', t => {
   const v = makeVault(t);
   const [s1, s2] = [sessionId(), sessionId()];
-  v.write('wiki/demo/ui-rule.md', ruleNote({ applies_to: ['src/**/*.luau'] }));
+  v.write('wiki/glim/ui-rule.md', ruleNote({ applies_to: ['src/**/*.luau'] }));
   assert.ok(denied(edit(v, s1, 'src/a.luau')));
   assert.equal(edit(v, s1, 'src/a.luau'), null);
   assert.ok(denied(edit(v, s1, 'src/b.luau')), 'another file is gated again');
@@ -29,21 +29,21 @@ test('the marker is per rule, file and session', t => {
 
 test('Write is gated too, other tools are not', t => {
   const v = makeVault(t);
-  v.write('wiki/demo/ui-rule.md', ruleNote({ applies_to: ['src/**'] }));
+  v.write('wiki/glim/ui-rule.md', ruleNote({ applies_to: ['src/**'] }));
   assert.ok(denied(edit(v, sessionId(), 'src/a.lua', { tool: 'Write' })));
   assert.equal(edit(v, sessionId(), 'src/a.lua', { tool: 'Read' }), null);
 });
 
 test('a note saved within the settle window does not gate', t => {
   const v = makeVault(t);
-  v.write('wiki/demo/ui-rule.md', ruleNote({ applies_to: ['src/**'] }), { settled: false });
+  v.write('wiki/glim/ui-rule.md', ruleNote({ applies_to: ['src/**'] }), { settled: false });
   assert.equal(edit(v, sessionId(), 'src/a.lua'), null);
 });
 
 test('triggers narrow the rule to edits whose new text matches', t => {
   const v = makeVault(t);
   const sid = sessionId();
-  v.write('wiki/demo/ui-rule.md', withTriggers(ruleNote({ applies_to: ['src/**'] }), 'wait\\(', 'delay\\('));
+  v.write('wiki/glim/ui-rule.md', withTriggers(ruleNote({ applies_to: ['src/**'] }), 'wait\\(', 'delay\\('));
   assert.equal(edit(v, sid, 'src/a.lua', { text: 'local x = 1' }), null);
   assert.ok(denied(edit(v, sid, 'src/a.lua', { text: 'task.wait(1)' })));
   assert.equal(edit(v, sid, 'src/a.lua', { text: 'task.wait(1)' }), null);
@@ -52,17 +52,17 @@ test('triggers narrow the rule to edits whose new text matches', t => {
 
 test('a more specific rule is listed first and the list is capped', t => {
   const v = makeVault(t);
-  v.write('wiki/demo/broad.md', ruleNote({ applies_to: ['**/*.lua'], doLine: 'Broad.' }));
-  v.write('wiki/demo/narrow.md', ruleNote({ applies_to: ['src/ui/*.lua'], doLine: 'Narrow.' }));
+  v.write('wiki/glim/broad.md', ruleNote({ applies_to: ['**/*.lua'], doLine: 'Broad.' }));
+  v.write('wiki/glim/narrow.md', ruleNote({ applies_to: ['src/ui/*.lua'], doLine: 'Narrow.' }));
   const why = denied(edit(v, sessionId(), 'src/ui/a.lua'));
-  assert.ok(why.indexOf('demo/narrow') < why.indexOf('demo/broad'));
+  assert.ok(why.indexOf('glim/narrow') < why.indexOf('glim/broad'));
 });
 
 test('edits inside the vault wiki/ and raw/ are not gated by rules', t => {
   const v = makeVault(t);
-  v.write('wiki/demo/ui-rule.md', ruleNote({ applies_to: ['**'] }));
+  v.write('wiki/glim/ui-rule.md', ruleNote({ applies_to: ['**'] }));
   const sid = sessionId();
-  assert.equal(edit(v, sid, '', { abs: v.at('wiki', 'demo', 'other.md') }), null);
+  assert.equal(edit(v, sid, '', { abs: v.at('wiki', 'glim', 'other.md') }), null);
   assert.equal(edit(v, sid, '', { abs: v.at('raw', 'refs', 'new.md') }), null);
   assert.ok(denied(edit(v, sid, 'src/a.lua')), 'project files still are');
 });
@@ -85,7 +85,7 @@ test('the vault guard refuses edits to generated files, .state and existing raw 
   assert.match(guard('raw/inbox/2026-10-01.jsonl'), /already exists/);
   assert.match(guard('raw/inbox/new.jsonl'), /^raw\/ is append-only\. New files go under raw\/refs\//);
   assert.equal(guard('raw/refs/new.md'), null);
-  assert.equal(guard('wiki/demo/note.md'), null);
+  assert.equal(guard('wiki/glim/note.md'), null);
   assert.equal(guard('AGENTS.md'), null);
 });
 
@@ -99,34 +99,34 @@ test('the vault guard is not retry-able', t => {
 test('prompt hook shows a rule whose keyword is in the prompt once per session', t => {
   const v = makeVault(t);
   const [s1, s2] = [sessionId(), sessionId()];
-  v.write('wiki/demo/kw-rule.md', ruleNote({ keywords: ['strict mode'], doLine: 'Use strict.', notLine: 'Skip strict.' }));
+  v.write('wiki/glim/kw-rule.md', ruleNote({ keywords: ['strict mode'], doLine: 'Use strict.', notLine: 'Skip strict.' }));
   assert.equal(prompt(v, s1, 'nothing relevant here'), null);
   const out = prompt(v, s1, 'please turn on Strict Mode in the shop');
   assert.equal(out.hookSpecificOutput.hookEventName, 'UserPromptSubmit');
-  assert.equal(out.hookSpecificOutput.additionalContext, 'Taste rules that may apply to this request:\n- demo/kw-rule: Do: Use strict. Not: Skip strict.');
+  assert.equal(out.hookSpecificOutput.additionalContext, 'Taste rules that may apply to this request:\n- glim/kw-rule: Do: Use strict. Not: Skip strict.');
   assert.equal(prompt(v, s1, 'strict mode again'), null);
   assert.ok(prompt(v, s2, 'strict mode'), 'another session sees it');
 });
 
 test('prompt keywords match whole words only and the prompt outside a domain gets only global rules', t => {
   const v = makeVault(t);
-  v.write('wiki/demo/kw-rule.md', ruleNote({ keywords: ['strict'] }));
+  v.write('wiki/glim/kw-rule.md', ruleNote({ keywords: ['strict'] }));
   assert.equal(prompt(v, sessionId(), 'a strictly worded prompt'), null);
   v.write('wiki/global/g-rule.md', ruleNote({ domain: 'global', keywords: ['strict'] }));
   const elsewhere = { session_id: sessionId(), cwd: os.tmpdir(), prompt: 'strict' };
   const out = v.hook('prompt', elsewhere);
   assert.match(out.hookSpecificOutput.additionalContext, /global\/g-rule/);
-  assert.ok(!out.hookSpecificOutput.additionalContext.includes('demo/kw-rule'));
+  assert.ok(!out.hookSpecificOutput.additionalContext.includes('glim/kw-rule'));
 });
 
 test('session-start delivers always rules and the next prompt does not repeat them', t => {
   const v = makeVault(t);
   const sid = sessionId();
-  v.write('wiki/demo/always-rule.md', ruleNote({ always: true, doLine: 'Be brief.', notLine: 'Ramble.' }));
-  v.write('wiki/demo/quiet-rule.md', ruleNote({ keywords: ['quiet'], doLine: 'Hush.', notLine: 'Shout.' }));
+  v.write('wiki/glim/always-rule.md', ruleNote({ always: true, doLine: 'Be brief.', notLine: 'Ramble.' }));
+  v.write('wiki/glim/quiet-rule.md', ruleNote({ keywords: ['quiet'], doLine: 'Hush.', notLine: 'Shout.' }));
   const ctx = v.startSession(sid).hookSpecificOutput.additionalContext;
   assert.match(ctx, /^# Taste rules\n/);
-  assert.match(ctx, /## demo\n- demo\/always-rule: Do: Be brief\. Not: Ramble\./);
+  assert.match(ctx, /## glim\n- glim\/always-rule: Do: Be brief\. Not: Ramble\./);
   assert.ok(!ctx.includes('quiet-rule'));
   assert.match(ctx, /Taste vault: propose a rule/);
   assert.equal(prompt(v, sid, 'hello'), null);
@@ -136,15 +136,15 @@ test('an always rule written after session start reaches the next prompt', t => 
   const v = makeVault(t);
   const sid = sessionId();
   v.startSession(sid);
-  v.write('wiki/demo/late-rule.md', ruleNote({ always: true, doLine: 'Be late.', notLine: 'Be early.' }));
+  v.write('wiki/glim/late-rule.md', ruleNote({ always: true, doLine: 'Be late.', notLine: 'Be early.' }));
   const out = prompt(v, sid, 'hello');
-  assert.match(out.hookSpecificOutput.additionalContext, /^Taste rules that apply for the rest of this session:\n- demo\/late-rule:/);
+  assert.match(out.hookSpecificOutput.additionalContext, /^Taste rules that apply for the rest of this session:\n- glim\/late-rule:/);
   assert.equal(prompt(v, sid, 'hello'), null);
 });
 
 test('a compact or clear start clears the markers so the edit gate and prompt refuse again', t => {
   const v = makeVault(t);
-  v.write('wiki/demo/ui-rule.md', ruleNote({ applies_to: ['src/**'], keywords: ['strict'] }));
+  v.write('wiki/glim/ui-rule.md', ruleNote({ applies_to: ['src/**'], keywords: ['strict'] }));
   for (const source of ['compact', 'clear']) {
     const sid = sessionId();
     v.startSession(sid);
@@ -165,32 +165,32 @@ test('a compact or clear start clears the markers so the edit gate and prompt re
 
 test('session start names the notes in its domains that an error keeps from delivery', t => {
   const v = makeVault(t, { domains: { other: { title: 'Other', markers: ['other.project'], topics: [] } } });
-  v.write('wiki/demo/rules/bad.md', ruleNote({ basis: 'bogus', keywords: ['x'] }));
+  v.write('wiki/glim/rules/bad.md', ruleNote({ basis: 'bogus', keywords: ['x'] }));
   v.write('wiki/global/rules/no-not.md', ruleNote({ domain: 'global', notLine: '', keywords: ['x'] }));
   v.write('wiki/other/rules/elsewhere.md', ruleNote({ domain: 'other', basis: 'bogus', keywords: ['x'] }));
-  v.write('wiki/demo/rules/retired.md', ruleNote({ basis: 'bogus', extra: ['superseded_by: demo/bad'] }));
-  v.write('wiki/demo/rules/typing.md', ruleNote({ basis: 'bogus' }), { settled: false });
+  v.write('wiki/glim/rules/retired.md', ruleNote({ basis: 'bogus', extra: ['superseded_by: glim/bad'] }));
+  v.write('wiki/glim/rules/typing.md', ruleNote({ basis: 'bogus' }), { settled: false });
   const context = (cwd, source) => v.startSession(sessionId(), { cwd, source })?.hookSpecificOutput.additionalContext ?? '';
   const line = /^Taste vault: (.*)\. Tell the user; \/lint in `.*` lists the fixes\.$/m;
   assert.equal(context(v.project).match(line)?.[1],
-    "2 notes have an error and aren't delivered: demo/bad (basis must be stated, inferred, pick or reading), global/no-not (no **Not:** line)");
-  assert.match(context(v.root).match(line)?.[1], /^3 notes have an error and aren't delivered: demo\/bad .*, global\/no-not .*, other\/elsewhere /);
+    "2 notes have an error and aren't delivered: glim/bad (basis must be stated, inferred, pick or reading), global/no-not (no **Not:** line)");
+  assert.match(context(v.root).match(line)?.[1], /^3 notes have an error and aren't delivered: glim\/bad .*, global\/no-not .*, other\/elsewhere /);
   assert.doesNotMatch(context(v.project, 'compact'), line);
-  v.write('wiki/demo/rules/bad.md', ruleNote({ keywords: ['x'] }));
+  v.write('wiki/glim/rules/bad.md', ruleNote({ keywords: ['x'] }));
   v.write('wiki/global/rules/no-not.md', ruleNote({ domain: 'global', keywords: ['x'] }));
   assert.doesNotMatch(context(v.project), line);
 });
 
 test('a rule with a lint error or superseded_by is never delivered', t => {
   const v = makeVault(t);
-  v.write('wiki/demo/bad.md', ruleNote({ applies_to: ['src/**'], basis: 'bogus' }));
-  v.write('wiki/demo/old.md', ruleNote({ applies_to: ['src/**'], extra: ['superseded_by: demo/new'] }));
+  v.write('wiki/glim/bad.md', ruleNote({ applies_to: ['src/**'], basis: 'bogus' }));
+  v.write('wiki/glim/old.md', ruleNote({ applies_to: ['src/**'], extra: ['superseded_by: glim/new'] }));
   assert.equal(edit(v, sessionId(), 'src/a.lua'), null);
 });
 
 const gatedOnTxt = t => {
   const v = makeVault(t);
-  v.write('wiki/demo/ui-rule.md', ruleNote({ applies_to: ['src/**/*.txt'] }));
+  v.write('wiki/glim/ui-rule.md', ruleNote({ applies_to: ['src/**/*.txt'] }));
   return v;
 };
 
@@ -217,24 +217,24 @@ test('each agent is gated on a file once, whichever agent edited it first', t =>
 test("a subagent's first context holds the session's always rules and topics", t => {
   const v = makeVault(t);
   const sid = sessionId();
-  v.write('wiki/demo/always-rule.md', ruleNote({ always: true, doLine: 'Be brief.', notLine: 'Ramble.' }));
+  v.write('wiki/glim/always-rule.md', ruleNote({ always: true, doLine: 'Be brief.', notLine: 'Ramble.' }));
   v.startSession(sid);
   const start = { session_id: sid, cwd: v.project, hook_event_name: 'SubagentStart', agent_type: 'general-purpose' };
   for (const agent_id of ['agent-1', 'agent-2']) {
     const out = v.hook('subagent-start', { ...start, agent_id }).hookSpecificOutput;
     assert.equal(out.hookEventName, 'SubagentStart');
-    assert.match(out.additionalContext, /^# Taste rules\n[\s\S]*## demo\n- demo\/always-rule: Do: Be brief\. Not: Ramble\./, agent_id);
+    assert.match(out.additionalContext, /^# Taste rules\n[\s\S]*## glim\n- glim\/always-rule: Do: Be brief\. Not: Ramble\./, agent_id);
     assert.match(out.additionalContext, /Taste vault: when the task touches .*, read `[^`]*index\.md`/, agent_id);
     assert.ok(!out.additionalContext.includes('propose a rule'), agent_id);
   }
-  v.write('wiki/demo/late-rule.md', ruleNote({ always: true, doLine: 'Be late.', notLine: 'Be early.' }));
+  v.write('wiki/glim/late-rule.md', ruleNote({ always: true, doLine: 'Be late.', notLine: 'Be early.' }));
   v.hook('subagent-start', { ...start, agent_id: 'agent-3' });
-  assert.match(prompt(v, sid, 'hello').hookSpecificOutput.additionalContext, /demo\/late-rule/, "the parent still gets a rule a subagent was shown");
+  assert.match(prompt(v, sid, 'hello').hookSpecificOutput.additionalContext, /glim\/late-rule/, "the parent still gets a rule a subagent was shown");
 });
 
 const checkedOut = (t, name, rule) => {
   const v = makeVault(t);
-  v.write(`wiki/demo/rules/${name}.md`, rule);
+  v.write(`wiki/glim/rules/${name}.md`, rule);
   v.checkout();
   return v;
 };
@@ -242,7 +242,7 @@ const checkedOut = (t, name, rule) => {
 test('session start still delivers always rules after a checkout touches every note', t => {
   const v = checkedOut(t, 'always-rule', ruleNote({ always: true, doLine: 'Be brief.', notLine: 'Ramble.' }));
   const ctx = v.startSession(sessionId())?.hookSpecificOutput.additionalContext ?? '';
-  assert.match(ctx, /demo\/always-rule: Do: Be brief\./);
+  assert.match(ctx, /glim\/always-rule: Do: Be brief\./);
 });
 
 test('the gate still refuses after a checkout touches every note', t => {
@@ -255,12 +255,12 @@ test('20 rules and 2 pages on one glob refuse the first edit of a file once, and
   const sid = sessionId();
   const keys = [];
   for (let i = 0; i < 20; i++) {
-    v.write(`wiki/demo/rules/rule-${i}.md`, ruleNote({ applies_to: ['**/*.txt'], doLine: `Rule ${i}.` }));
-    keys.push(`demo/rule-${i}`);
+    v.write(`wiki/glim/rules/rule-${i}.md`, ruleNote({ applies_to: ['**/*.txt'], doLine: `Rule ${i}.` }));
+    keys.push(`glim/rule-${i}`);
   }
   for (const slug of ['page-a', 'page-b']) {
-    v.write(`wiki/demo/concepts/${slug}.md`, pageNote({ kind: 'concept', applies_to: ['**/*.txt'], summary: `'About ${slug}.'` }));
-    keys.push(`demo/${slug}`);
+    v.write(`wiki/glim/concepts/${slug}.md`, pageNote({ kind: 'concept', applies_to: ['**/*.txt'], summary: `'About ${slug}.'` }));
+    keys.push(`glim/${slug}`);
   }
   const first = denied(edit(v, sid, 'src/x.txt')) ?? '';
   for (const key of keys) assert.match(first, new RegExp(`${key}(?![\\w-])`), `the first refusal names ${key}`);
@@ -270,7 +270,7 @@ test('20 rules and 2 pages on one glob refuse the first edit of a file once, and
 test('a refusal writes its markers in one file per kind however many rules are due, and markers older tools wrote still count', async t => {
   const v = makeVault(t);
   const sid = sessionId();
-  for (let i = 0; i < 30; i++) v.write(`wiki/demo/rules/rule-${i}.md`, ruleNote({ applies_to: ['**/*.txt'], doLine: `Rule ${i}.` }));
+  for (let i = 0; i < 30; i++) v.write(`wiki/glim/rules/rule-${i}.md`, ruleNote({ applies_to: ['**/*.txt'], doLine: `Rule ${i}.` }));
   assert.ok(denied(edit(v, sid, 'src/x.txt')));
   for (const kind of ['gate', 'delivered', 'excerpts']) assert.deepEqual(fs.readdirSync(v.at('.state', kind, sid)), ['keys.jsonl'], kind);
 
@@ -287,7 +287,7 @@ test('a refusal writes its markers in one file per kind however many rules are d
 test('a trigger with nested wildcards does not hold the edit hook up on a long line', async t => {
   const v = makeVault(t);
   const trigger = 'make\\(.*,.*,.*,.*\\)';
-  v.write('wiki/demo/rules/slow.md', withTriggers(ruleNote({ applies_to: ['src/**/*.txt'] }), trigger));
+  v.write('wiki/glim/rules/slow.md', withTriggers(ruleNote({ applies_to: ['src/**/*.txt'] }), trigger));
   assert.ok(denied(edit(v, sessionId(), 'src/a.txt', { text: 'make(1,1,1,1)' })), 'the trigger matches a short call');
   // Only the match is timed, in this process, so process start and a loaded machine don't count. A backtracking engine
   // takes seconds on this 820-character line, and the match runs synchronously, so nothing could stop it from outside.
@@ -306,7 +306,7 @@ test('a trigger with nested wildcards does not hold the edit hook up on a long l
 
 test('a file path with the long-path prefix is gated by the rules of its project', { skip: process.platform !== 'win32' && 'the prefix is a Windows spelling' }, t => {
   const v = makeVault(t);
-  v.write('wiki/demo/rules/ui-rule.md', ruleNote({ applies_to: ['src/**/*.txt'] }));
+  v.write('wiki/glim/rules/ui-rule.md', ruleNote({ applies_to: ['src/**/*.txt'] }));
   const file = path.join(v.project, 'src', 'a.txt');
   assert.ok(denied(edit(v, sessionId(), '', { abs: file })), 'the plain spelling is gated');
   assert.ok(denied(edit(v, sessionId(), '', { abs: `\\\\?\\${file}` })), 'the prefixed spelling is gated');
@@ -315,7 +315,7 @@ test('a file path with the long-path prefix is gated by the rules of its project
 test('a negated glob in applies_to excludes the files it names from the gate', t => {
   const v = makeVault(t);
   const sid = sessionId();
-  v.write('wiki/demo/rules/no-tests.md', ruleNote({ applies_to: ['src/**/*.ts', '!src/**/*.test.ts'] }));
+  v.write('wiki/glim/rules/no-tests.md', ruleNote({ applies_to: ['src/**/*.ts', '!src/**/*.test.ts'] }));
   assert.ok(denied(edit(v, sid, 'src/a.ts')), 'a source file is gated');
   assert.equal(edit(v, sid, 'src/a.test.ts'), null, 'a test file is not');
 });
@@ -335,10 +335,10 @@ test('session start in the vault folder with 10 domains stays under the output b
 
 test('the output budget is delivery.maxContextChars, and the topics are the first to go', t => {
   const v = makeVault(t, { config: { delivery: { maxContextChars: 3000 } }, topics: Array.from({ length: 200 }, (_, i) => `topic-${i}-padding`) });
-  v.write('wiki/demo/rules/brief.md', ruleNote({ always: true, doLine: 'Be brief.' }));
+  v.write('wiki/glim/rules/brief.md', ruleNote({ always: true, doLine: 'Be brief.' }));
   const ctx = v.startSession(sessionId()).hookSpecificOutput.additionalContext;
   assert.ok(ctx.length <= 3000, `${ctx.length} characters`);
-  assert.match(ctx, /demo\/brief: Do: Be brief\./, 'the always rule ranks above the topics');
+  assert.match(ctx, /glim\/brief: Do: Be brief\./, 'the always rule ranks above the topics');
   assert.match(ctx, /Taste vault: propose a rule/, 'the instructions rank above the topics');
   assert.match(ctx, /Left out to stay within 3000 characters: \d+ topics\b/);
 });
@@ -347,15 +347,15 @@ test('the prompt hook fits the output budget, the always rules written since ses
   const v = makeVault(t);
   const sid = sessionId();
   v.startSession(sid);
-  for (let i = 0; i < 40; i++) v.write(`wiki/demo/rules/late-${i}.md`, ruleNote({ always: true, doLine: `Late rule ${i}. ${'Mind the detail. '.repeat(12)}` }));
-  v.write('wiki/demo/rules/kw.md', ruleNote({ keywords: ['strict'], doLine: 'Use strict.' }));
-  v.write('wiki/demo/concepts/strict-mode.md', pageNote({ kind: 'concept', keywords: ['strict'], summary: "'On strict mode.'" }));
+  for (let i = 0; i < 40; i++) v.write(`wiki/glim/rules/late-${i}.md`, ruleNote({ always: true, doLine: `Late rule ${i}. ${'Mind the detail. '.repeat(12)}` }));
+  v.write('wiki/glim/rules/kw.md', ruleNote({ keywords: ['strict'], doLine: 'Use strict.' }));
+  v.write('wiki/glim/concepts/strict-mode.md', pageNote({ kind: 'concept', keywords: ['strict'], summary: "'On strict mode.'" }));
   const ctx = prompt(v, sid, 'strict').hookSpecificOutput.additionalContext;
   assert.ok(ctx.length <= LIMIT, `${ctx.length} characters`);
-  assert.match(ctx, /^Taste rules that apply for the rest of this session:\n- demo\/late-0:/);
+  assert.match(ctx, /^Taste rules that apply for the rest of this session:\n- glim\/late-0:/);
   assert.match(ctx, /\(Left out to stay within 8000 characters: \d+ rules/);
   // What the budget cut arrives with the next prompt: the rest of the always rules, the keyword rule and the page.
-  const named = text => new Set([...text.matchAll(/demo\/(late-\d+|kw|strict-mode)(?![\w-])/g)].map(m => m[1]));
+  const named = text => new Set([...text.matchAll(/glim\/(late-\d+|kw|strict-mode)(?![\w-])/g)].map(m => m[1]));
   const first = named(ctx);
   assert.ok(!first.has('kw') && !first.has('strict-mode'), 'the keyword rule and the page were cut');
   const rest = named(prompt(v, sid, 'strict').hookSpecificOutput.additionalContext);
@@ -367,13 +367,13 @@ test('the prompt hook fits the output budget, the always rules written since ses
 test('a page the output budget leaves out of a refusal does not refuse the retry, and comes up on the next file it covers', t => {
   const v = makeVault(t);
   const sid = sessionId();
-  for (let i = 0; i < 80; i++) v.write(`wiki/demo/rules/rule-${String(i).padStart(2, '0')}.md`, ruleNote({ applies_to: ['src/a.txt'], doLine: `Rule ${i}. ${'Mind the detail. '.repeat(8)}` }));
-  for (let i = 0; i < 3; i++) v.write(`wiki/demo/concepts/page-${i}.md`, pageNote({ kind: 'concept', applies_to: ['src/**'], summary: `'Page ${i}.'` }));
-  const pagesIn = text => [...text.matchAll(/demo\/page-\d/g)].map(m => m[0]);
+  for (let i = 0; i < 80; i++) v.write(`wiki/glim/rules/rule-${String(i).padStart(2, '0')}.md`, ruleNote({ applies_to: ['src/a.txt'], doLine: `Rule ${i}. ${'Mind the detail. '.repeat(8)}` }));
+  for (let i = 0; i < 3; i++) v.write(`wiki/glim/concepts/page-${i}.md`, pageNote({ kind: 'concept', applies_to: ['src/**'], summary: `'Page ${i}.'` }));
+  const pagesIn = text => [...text.matchAll(/glim\/page-\d/g)].map(m => m[0]);
   const first = denied(edit(v, sid, 'src/a.txt')) ?? '';
   assert.match(first, /\(Left out to stay within 8000 characters: .*3 pages/);
   assert.equal(edit(v, sid, 'src/a.txt'), null, 'the retry passes');
-  assert.deepEqual(pagesIn(denied(edit(v, sid, 'src/b.txt')) ?? ''), ['demo/page-0', 'demo/page-1', 'demo/page-2']);
+  assert.deepEqual(pagesIn(denied(edit(v, sid, 'src/b.txt')) ?? ''), ['glim/page-0', 'glim/page-1', 'glim/page-2']);
   assert.equal(edit(v, sid, 'src/b.txt'), null);
   assert.equal(edit(v, sid, 'src/c.txt'), null, 'a page shown once is not shown again');
 });
@@ -381,9 +381,9 @@ test('a page the output budget leaves out of a refusal does not refuse the retry
 test('a refusal counts the rules it shows in full or as pointers as shown, and not those it leaves out', t => {
   const v = makeVault(t);
   const sid = sessionId();
-  for (let i = 0; i < 80; i++) v.write(`wiki/demo/rules/rule-${String(i).padStart(2, '0')}.md`, ruleNote({ applies_to: ['**/*.txt'], doLine: `Rule ${i}. ${'Mind the detail. '.repeat(8)}` }));
+  for (let i = 0; i < 80; i++) v.write(`wiki/glim/rules/rule-${String(i).padStart(2, '0')}.md`, ruleNote({ applies_to: ['**/*.txt'], doLine: `Rule ${i}. ${'Mind the detail. '.repeat(8)}` }));
   const why = denied(edit(v, sid, 'src/a.txt')) ?? '';
-  const named = [...new Set([...why.matchAll(/demo\/rule-\d\d/g)].map(m => m[0]))].sort();
+  const named = [...new Set([...why.matchAll(/glim\/rule-\d\d/g)].map(m => m[0]))].sort();
   assert.ok(named.length > 3 && named.length < 80, `${named.length} rules named`);
   const shown = v.read(`.state/delivered/${sid}/keys.jsonl`).split('\n').filter(Boolean).map(l => JSON.parse(l)).sort();
   assert.deepEqual(shown, named);
@@ -392,36 +392,36 @@ test('a refusal counts the rules it shows in full or as pointers as shown, and n
 test('an always block that higher-ranked lines leave no room for at session start reaches the next prompt', t => {
   const v = makeVault(t, { config: { delivery: { maxContextChars: 2000 } } });
   for (let i = 0; i < 8; i++) {
-    v.write(`wiki/demo/rules/al-${i}.md`, ruleNote({ always: true, doLine: `Always do thing number ${i} with a fairly long sentence to fill the budget up nicely here.`, notLine: `Never skip thing ${i} whatever happens in the session today.` }));
+    v.write(`wiki/glim/rules/al-${i}.md`, ruleNote({ always: true, doLine: `Always do thing number ${i} with a fairly long sentence to fill the budget up nicely here.`, notLine: `Never skip thing ${i} whatever happens in the session today.` }));
   }
   // Notes an error keeps from delivery are named in a line that ranks above the always block.
-  for (let i = 0; i < 3; i++) v.write(`wiki/demo/rules/bad-${i}.md`, ruleNote({ basis: 'bogus', keywords: ['x'] }));
+  for (let i = 0; i < 3; i++) v.write(`wiki/glim/rules/bad-${i}.md`, ruleNote({ basis: 'bogus', keywords: ['x'] }));
   const sid = sessionId();
   const start = v.startSession(sid).hookSpecificOutput.additionalContext;
-  assert.match(start, /demo\/bad-0/);
-  assert.doesNotMatch(start, /demo\/al-0/, 'the always block was left out');
-  assert.match(prompt(v, sid, 'hello')?.hookSpecificOutput.additionalContext ?? '', /demo\/al-0/);
+  assert.match(start, /glim\/bad-0/);
+  assert.doesNotMatch(start, /glim\/al-0/, 'the always block was left out');
+  assert.match(prompt(v, sid, 'hello')?.hookSpecificOutput.additionalContext ?? '', /glim\/al-0/);
 });
 
 test('an edit that goes through carries no page pointer', t => {
   const v = makeVault(t);
   const sid = sessionId();
-  v.write('wiki/demo/concepts/grid.md', pageNote({ kind: 'concept', applies_to: ['**/*.txt'] }));
-  assert.match(denied(edit(v, sid, 'src/a.txt')), /demo\/grid/);
+  v.write('wiki/glim/concepts/grid.md', pageNote({ kind: 'concept', applies_to: ['**/*.txt'] }));
+  assert.match(denied(edit(v, sid, 'src/a.txt')), /glim\/grid/);
   assert.equal(edit(v, sid, 'src/a.txt'), null);
   assert.equal(edit(v, sid, 'src/b.txt'), null);
 });
 
 // A fixture namespace and an MCP tool that sets a property on a name in it.
-const TREE = { namespaces: { 'demo-tree': { separator: '.', escape: '\\' } }, editTools: { mcp__demo__set_property: { namespace: 'demo-tree', path: 'tool_input.path', after: 'tool_input.value' } } };
-const setProperty = (v, sid, name, value = 'x', opts) => v.edit(sid, 'mcp__demo__set_property', { path: name, value }, opts);
+const TREE = { namespaces: { 'glim-tree': { separator: '.', escape: '\\' } }, editTools: { mcp__fixture__set_property: { namespace: 'glim-tree', path: 'tool_input.path', after: 'tool_input.value' } } };
+const setProperty = (v, sid, name, value = 'x', opts) => v.edit(sid, 'mcp__fixture__set_property', { path: name, value }, opts);
 
 test('a mapped call on a name is refused once by a rule on its namespace, then goes through', t => {
   const v = makeVault(t, { config: TREE });
   const sid = sessionId();
   v.startSession(sid);
-  v.write('wiki/demo/tree-rule.md', ruleNote({ applies_to: ['demo-tree:A.**'], doLine: 'Name nodes plainly.' }));
-  assert.match(denied(setProperty(v, sid, 'A.B.C')), /^Taste rules apply to demo-tree:A\.B\.C:\n- demo\/tree-rule: Do: Name nodes plainly\./);
+  v.write('wiki/glim/tree-rule.md', ruleNote({ applies_to: ['glim-tree:A.**'], doLine: 'Name nodes plainly.' }));
+  assert.match(denied(setProperty(v, sid, 'A.B.C')), /^Taste rules apply to glim-tree:A\.B\.C:\n- glim\/tree-rule: Do: Name nodes plainly\./);
   assert.equal(setProperty(v, sid, 'A.B.C'), null, 'the retry goes through');
   assert.equal(setProperty(v, sid, 'B.A.C'), null, 'a name outside the glob is not gated');
   assert.equal(setProperty(v, sid, 'a.B.C'), null, 'names match with case');
@@ -431,13 +431,13 @@ test('a mapped call on a name is refused once by a rule on its namespace, then g
 test("a mapped call's triggers test the new text the map names", t => {
   const v = makeVault(t, { config: TREE });
   const sid = sessionId();
-  v.write('wiki/demo/tree-rule.md', withTriggers(ruleNote({ applies_to: ['demo-tree:A.**'] }), 'Color'));
+  v.write('wiki/glim/tree-rule.md', withTriggers(ruleNote({ applies_to: ['glim-tree:A.**'] }), 'Color'));
   assert.equal(setProperty(v, sid, 'A.B', 'Size'), null);
   assert.ok(denied(setProperty(v, sid, 'A.B', { Color: 1 })), 'a value that is not text is matched as JSON');
 });
 
 test('through a fixture alias a mapped call is also refused by a rule on the file the name maps to', t => {
-  const domains = { demo: { title: 'Demo', topics: ['code'], aliases: { 'demo-tree': 'fixture' } } };
+  const domains = { glim: { title: 'Glim', topics: ['code'], aliases: { 'glim-tree': 'fixture' } } };
   const v = makeVault(t, { config: TREE, domains });
   v.write('tools/ext/aliases/fixture.mjs', [
     "import fs from 'node:fs';",
@@ -452,23 +452,23 @@ test('through a fixture alias a mapped call is also refused by a rule on the fil
   ].join('\n'));
   const sid = sessionId();
   v.startSession(sid);
-  v.write('wiki/demo/file-rule.md', ruleNote({ applies_to: ['src/**/*.txt'], doLine: 'Keep files short.' }));
-  v.write('wiki/demo/both-rule.md', ruleNote({ applies_to: ['demo-tree:A.**', 'src/**'], doLine: 'Both ways.' }));
+  v.write('wiki/glim/file-rule.md', ruleNote({ applies_to: ['src/**/*.txt'], doLine: 'Keep files short.' }));
+  v.write('wiki/glim/both-rule.md', ruleNote({ applies_to: ['glim-tree:A.**', 'src/**'], doLine: 'Both ways.' }));
   const before = denied(setProperty(v, sid, 'A.B.C'));
   assert.doesNotMatch(before, /file-rule/, 'the alias maps nothing where the project lacks what it reads');
-  assert.match(before, /demo\/both-rule/);
+  assert.match(before, /glim\/both-rule/);
   fs.writeFileSync(path.join(v.project, 'tree.json'), JSON.stringify({ A: 'src' }));
   const why = denied(setProperty(v, sid, 'A.B.D'));
-  assert.match(why, /demo\/file-rule: Do: Keep files short\./);
-  assert.equal(why.match(/demo\/both-rule/g)?.length, 1, 'a rule both namespaces match refuses once');
+  assert.match(why, /glim\/file-rule: Do: Keep files short\./);
+  assert.equal(why.match(/glim\/both-rule/g)?.length, 1, 'a rule both namespaces match refuses once');
   assert.equal(setProperty(v, sid, 'A.B.D'), null, 'the retry goes through');
 });
 
 test('an unmapped MCP call returns at once without reading notes, and a mapped call without its path fails loudly', t => {
   const v = makeVault(t, { config: TREE });
   const sid = sessionId();
-  v.write('wiki/demo/tree-rule.md', ruleNote({ applies_to: ['demo-tree:**', '**'] }));
+  v.write('wiki/glim/tree-rule.md', ruleNote({ applies_to: ['glim-tree:**', '**'] }));
   assert.equal(v.edit(sid, 'mcp__other__set_property', { path: 'A.B', value: 'x' }), null);
   assert.equal(v.exists('.state/cache'), false, 'no note was read');
-  assert.throws(() => v.edit(sid, 'mcp__demo__set_property', { value: 'x' }), /editTools\.mcp__demo__set_property\.path is tool_input\.path, which this call's input doesn't hold as text/);
+  assert.throws(() => v.edit(sid, 'mcp__fixture__set_property', { value: 'x' }), /editTools\.mcp__fixture__set_property\.path is tool_input\.path, which this call's input doesn't hold as text/);
 });

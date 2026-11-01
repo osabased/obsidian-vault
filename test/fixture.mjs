@@ -2,17 +2,27 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { execFileSync, spawn, spawnSync } from 'node:child_process';
+import { createHash } from 'node:crypto';
 import { pathToFileURL } from 'node:url';
 
 const TOOLS = path.resolve(import.meta.dirname, '..', 'tools');
 
 // The tools find the vault from their own location, so each test runs a copy of tools/ inside a vault of its own.
-export function makeVault(t, { config = {}, domain = 'demo', topics = ['layout', 'code'], domains = {}, local = {}, under = os.tmpdir() } = {}) {
+// presets names shapes from PRESETS to add; the test's own domains, local and config merge over theirs.
+export function makeVault(t, { config = {}, domain = 'glim', topics = ['layout', 'code'], domains = {}, local = {}, presets = [], under = os.tmpdir() } = {}) {
+  const unknown = presets.filter(p => !Object.hasOwn(PRESETS, p));
+  if (unknown.length) throw new Error(`no preset ${unknown.join(', ')}; the presets are ${Object.keys(PRESETS).join(', ')}`);
+  if (presets.includes('glim') && domain !== 'glim') throw new Error(`the glim preset fills the default domain, so it needs domain 'glim', not '${domain}'`);
   const root = fs.mkdtempSync(path.join(under, 'vault-test-'));
-  const project = fs.mkdtempSync(path.join(os.tmpdir(), 'vault-project-'));
+  const folders = [root];
+  const newProject = () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'vault-project-'));
+    folders.push(dir);
+    return dir;
+  };
+  const project = newProject();
   t.after(() => {
-    fs.rmSync(root, { recursive: true, force: true });
-    fs.rmSync(project, { recursive: true, force: true });
+    for (const dir of folders) fs.rmSync(dir, { recursive: true, force: true });
   });
   fs.cpSync(TOOLS, path.join(root, 'tools'), { recursive: true });
   const at = (...xs) => path.join(root, ...xs);
@@ -20,6 +30,7 @@ export function makeVault(t, { config = {}, domain = 'demo', topics = ['layout',
   const v = {
     root,
     project,
+    projects: { [domain]: project },
     domain,
     at,
     // Hooks skip notes saved within delivery.settleSeconds, so a fixture note is dated back unless a test wants it fresh.
@@ -100,14 +111,31 @@ export function makeVault(t, { config = {}, domain = 'demo', topics = ['layout',
     import: rel => import(pathToFileURL(at('tools', ...rel.split('/'))).href),
   };
 
+  // The default domain reaches the project folder by its marker, so every test exercises markers; a test's own entry for
+  // it changes only the fields it gives.
+  const marker = `${domain}.project`;
+  fs.writeFileSync(path.join(project, marker), '');
+  const asOf = new Date(Date.now() - 30 * 86400e3).toISOString().slice(0, 10);
+  const shapes = presets.map(name => PRESETS[name](v, { newProject, asOf }));
   v.write('vault.config.json', `${JSON.stringify({
-    domains: { [domain]: { title: 'Demo', topics }, ...domains },
-    ...config,
+    domains: merged([{ [domain]: { title: 'Glim', topics, markers: [marker] } }, ...shapes.map(s => s.domains ?? {}), domains]),
+    ...merged([...shapes.map(s => s.config ?? {}), config]),
   }, null, 2)}\n`);
-  // The project folder is the default domain's path on this machine; local adds or replaces other domains' entries.
-  v.write('vault.local.json', `${JSON.stringify({ domains: { [domain]: { paths: [project.replace(/\\/g, '/')] }, ...local } }, null, 2)}\n`);
+  v.write('vault.local.json', `${JSON.stringify({ domains: merged([...shapes.map(s => s.local ?? {}), local]) }, null, 2)}\n`);
   return v;
 }
+
+// Each key's value from the objects given, later ones winning. Where two give an object for a key, their fields merge
+// the same way, one level only: a test's entry for a domain changes only the fields it gives, and its namespaces join a
+// preset's.
+function merged(objects) {
+  const out = {};
+  for (const o of objects) {
+    for (const [k, x] of Object.entries(o)) out[k] = isPlain(out[k]) && isPlain(x) ? { ...out[k], ...x } : x;
+  }
+  return out;
+}
+const isPlain = x => typeof x === 'object' && x !== null && !Array.isArray(x);
 
 // The test run may itself be inside a Claude Code session, whose id would make propose.mjs and pick.mjs refuse the fixture's,
 // or inside the pre-commit hook, whose GIT_DIR and GIT_INDEX_FILE would point a test's git at the vault's own repository.
@@ -121,7 +149,7 @@ export function cleanEnv(extra) {
 let sessions = 0;
 export const sessionId = () => `a1b2c3d4-0000-4000-8000-${String(++sessions).padStart(12, '0')}`;
 
-export const editFile = (v, sid, rel, { tool = 'Edit', text = 'local x = 1', abs, cwd, agent, timeout } = {}) => v.edit(sid, tool, {
+export const editFile = (v, sid, rel, { tool = 'Edit', text = 'set x to 1', abs, cwd, agent, timeout } = {}) => v.edit(sid, tool, {
   file_path: abs ?? path.join(v.project, ...rel.split('/')), ...(tool === 'Write' ? { content: text } : { old_string: 'a', new_string: text }),
 }, { cwd, agent, timeout });
 export const prompt = (v, sid, text, { cwd = v.project } = {}) => v.hook('prompt', { session_id: sid, cwd, prompt: text, hook_event_name: 'UserPromptSubmit' });
@@ -156,7 +184,7 @@ export const toolResult = (text, toolUseResult = {}) => ({
 
 const list = (name, xs) => (xs.length ? [`${name}:`, ...xs.map(x => `  - '${x}'`)] : [`${name}: []`]);
 
-export const pageNote = ({ domain = 'demo', kind = 'topic', topic = 'code', summary = "'What we know.'", keywords = [], applies_to = [], extra = [], body = ['Body.'] } = {}) => [
+export const pageNote = ({ domain = 'glim', kind = 'topic', topic = 'code', summary = "'What we know.'", keywords = [], applies_to = [], extra = [], body = ['Body.'] } = {}) => [
   '---', 'type: page', `domain: ${domain}`, ...(kind ? [`kind: ${kind}`] : []), `topic: ${topic}`, `summary: ${summary}`,
   ...(keywords.length ? list('keywords', keywords) : []), ...(applies_to.length ? list('applies_to', applies_to) : []), ...extra,
   'created: 2026-10-01', 'updated: 2026-10-01', '---', '', ...body, '',
@@ -166,10 +194,134 @@ export const sourcePage = ({ source, dated, body = ['## You said', '', "## Agent
   ...opts, kind: 'source', extra: [`source: ${source}`, ...(dated ? [`source_date: ${dated}`] : [])], body,
 });
 
-export function ruleNote({ domain = 'demo', topic = 'code', basis = 'stated', kind = 'taste', applies_to = [], keywords = [], always = false, doLine = 'Do the thing.', notLine = 'Skip the thing.', because = '', extra = [], evidence = ['- 2026-10-01 · stated · session 1a2b3c4d · "do the thing" (a-00000001)'] } = {}) {
+export function ruleNote({ domain = 'glim', topic = 'code', basis = 'stated', kind = 'taste', applies_to = [], triggers = [], keywords = [], always = false, doLine = 'Do the thing.', notLine = 'Skip the thing.', because = '', extra = [], evidence = ['- 2026-10-01 · stated · session 1a2b3c4d · "do the thing" (a-00000001)'] } = {}) {
   return [
     '---', 'type: rule', `domain: ${domain}`, `kind: ${kind}`, `basis: ${basis}`, ...extra, `topic: ${topic}`, `always: ${always}`,
-    ...list('applies_to', applies_to), 'triggers: []', ...list('keywords', keywords), 'created: 2026-10-01', 'updated: 2026-10-01', '---', '',
+    ...list('applies_to', applies_to), ...list('triggers', triggers), ...list('keywords', keywords), 'created: 2026-10-01', 'updated: 2026-10-01', '---', '',
     `**Do:** ${doLine}`, `**Not:** ${notLine}`, `**Because:**${because ? ` ${because}` : ''}`, '', '## Examples', '', '## Evidence', ...evidence, '',
   ].join('\n');
 }
+
+const sha256 = data => createHash('sha256').update(data).digest('hex');
+const link = rel => `[[${rel.replace(/\.md$/, '')}|${path.posix.basename(rel, '.md')}]]`;
+const topicPage = ({ domain, topic, summary, links }) => pageNote({ domain, topic, summary, body: ['What the vault holds on this topic.', '', '## Rules', ...links.map(l => `- ${link(l)}`)] });
+const withFields = (fields, body) => `---\n${Object.entries(fields).map(([k, x]) => `${k}: ${x}`).join('\n')}\n---\n${body}`;
+
+// An alias that maps a name's first part to a folder through the project's tree.json, as test/delivery.test.mjs's does.
+const FIXTURE_ALIAS = [
+  "import fs from 'node:fs';",
+  "import path from 'node:path';",
+  'export function toFile(names, root) {',
+  "  const map = path.join(root, 'tree.json');",
+  '  if (!fs.existsSync(map)) return null;',
+  "  const folder = JSON.parse(fs.readFileSync(map, 'utf8'))[names[0]];",
+  "  return folder ? `${path.join(root, folder, ...names.slice(1))}.txt` : null;",
+  '}',
+  '',
+].join('\n');
+
+// The five shapes a domain can take (design §8 item 3). Each writes its notes and files into v and returns its share of
+// vault.config.json and vault.local.json. Tests address their keys, slugs and ids, so those stay as they are.
+export const PRESETS = {
+  // Code taste, reached by the default domain's marker in v.project.
+  glim(v) {
+    const notes = {
+      'wiki/glim/rules/always-rule.md': ruleNote({ always: true, doLine: 'Open each glim file with a purpose line.', notLine: 'Start a file straight with code.', because: 'The user reads the first line first.' }),
+      'wiki/glim/rules/zq-trigger.md': ruleNote({ applies_to: ['src/**/*.zq'], triggers: ['set \\w+ to'], doLine: 'Set values through a named step.', notLine: 'Set a value inline.', because: 'The user traces values by step name.' }),
+      'wiki/glim/rules/keyword-rule.md': ruleNote({ keywords: ['shimmer'], doLine: 'Fade a shimmer in over two frames.', notLine: 'Flash a shimmer on at once.', because: 'The user found the flash harsh.' }),
+      'wiki/glim/rules/ask-rule.md': ruleNote({ topic: 'layout', extra: ['tools:', "  - 'AskUserQuestion'"], doLine: 'Offer layouts as two to four options.', notLine: 'Ask an open question about layout.', because: 'The user picks faster from options.' }),
+      'wiki/glim/concepts/zq-files.md': pageNote({ kind: 'concept', summary: "'How a .zq file is laid out.'", applies_to: ['src/**/*.zq'], body: ['A .zq file holds one named step per line.'] }),
+    };
+    notes['wiki/glim/topics/code.md'] = topicPage({ domain: 'glim', topic: 'code', summary: "'Code taste for glim files.'", links: Object.keys(notes) });
+    for (const [rel, text] of Object.entries(notes)) v.write(rel, text);
+    const project = v.project.replace(/\\/g, '/');
+    v.write('raw/picks/2026-10-01-91170001.jsonl', `${JSON.stringify({
+      id: 'q-91170001', at: '2026-10-01T10:00:00.000Z', source: 'pick', session: '91170001-0000-4000-8000-000000000001', transcript: null, cwd: project,
+      domain: 'glim', project, subject: 'cards', question: 'Which card layout?', header: null,
+      options: [{ label: 'A, Grid', description: 'Cards in an even grid.' }, { label: 'B, Shelf', description: 'One featured card above a row.' }],
+      multiSelect: false, pick: 'B, Shelf', notes: 'the featured card reads first', reason: null, status: 'user',
+    })}\n`);
+    v.write('tools/ext/aliases/fixture.mjs', FIXTURE_ALIAS);
+    return {
+      domains: { glim: { aliases: { 'glim-tree': 'fixture' } } },
+      config: {
+        namespaces: { 'glim-tree': { separator: '.', escape: '\\' } },
+        editTools: { mcp__fixture__set_property: { namespace: 'glim-tree', path: 'tool_input.path', after: 'tool_input.value' } },
+      },
+    };
+  },
+
+  // Knowledge, reached by its marker in a project of its own, whose lockfile nothing reads yet.
+  almanac(v, { newProject, asOf }) {
+    const dir = newProject();
+    v.projects.almanac = dir;
+    fs.writeFileSync(path.join(dir, 'almanac.project'), '');
+    fs.writeFileSync(path.join(dir, 'almanac.lock'), 'pkg 2.4.0\n');
+    const guide = '# Opening a ledger\n\nIn pkg 2, openLedger takes a path and returns the ledger.\nIn pkg 3, openLedger takes an options object with a path field.\n';
+    v.write('raw/refs/ledger-guide.md', withFields({
+      url: 'https://example.com/pkg/ledger', fetched: asOf, etag: `'"ledger-1"'`, last_modified: 'Tue, 15 Sep 2026 08:12:31 GMT', sha256: sha256(guide),
+    }, guide));
+    v.write('raw/refs/ledger-repo.md', withFields({ repo: 'https://example.com/pkg.git', path: 'docs/ledger.md', commit: 'a1b2c3d4e5f6' }, 'openLedger returns the ledger it opened.\n'));
+    const knowledge = (since, before, quote, doLine, notLine) => ruleNote({
+      domain: 'almanac', topic: 'ledger', kind: 'knowledge', basis: 'source', applies_to: ['src/**'], keywords: ['openLedger'], doLine, notLine, because: 'The ledger guide says so.',
+      extra: [`as_of: ${asOf}`, `requires: [{ package: { ecosystem: fixture, name: pkg }, ranges: [{ type: SEMVER, events: [{ introduced: '${since}' }${before ? `, { fixed: '${before}' }` : ''}] }] }]`],
+      evidence: [`- ${asOf} · source · session 1a2b3c4d · raw/refs/ledger-guide.md · dated ${asOf} · "${quote}" (a-00000002)`],
+    });
+    const notes = {
+      'wiki/almanac/rules/ledger-v2.md': knowledge('2.0.0', '3.0.0', 'openLedger takes a path and returns the ledger', 'Call openLedger with the path.', 'Pass openLedger an options object.'),
+      'wiki/almanac/rules/ledger-v3.md': knowledge('3.0.0', null, 'openLedger takes an options object with a path field', 'Call openLedger with { path }.', 'Pass openLedger a bare path.'),
+    };
+    const rules = Object.keys(notes);
+    const source = ref => sourcePage({
+      domain: 'almanac', topic: 'ledger', summary: `'What ${ref} says about openLedger.'`, source: ref, dated: asOf,
+      body: ['## You said', '', "## Agent's reading", 'How openLedger is called in each major version.', '', '## Rules', ...rules.map(r => `- ${link(r)}`)],
+    });
+    notes['wiki/almanac/sources/source-ledger-guide.md'] = source('raw/refs/ledger-guide.md');
+    notes['wiki/almanac/sources/source-ledger-repo.md'] = source('raw/refs/ledger-repo.md');
+    notes['wiki/almanac/topics/ledger.md'] = topicPage({ domain: 'almanac', topic: 'ledger', summary: "'Facts about the pkg ledger API.'", links: Object.keys(notes) });
+    for (const [rel, text] of Object.entries(notes)) v.write(rel, text);
+    return { domains: { almanac: { title: 'Almanac', topics: ['ledger'], markers: ['almanac.project'] } } };
+  },
+
+  // Research: pages only, read in the vault, over a binary source with derived text and one without.
+  archive(v) {
+    const pdf = Buffer.concat([Buffer.from('%PDF-1.4\n'), Buffer.from([0xff, 0xfe, 0xc3, 0x28, 0x0a])]);
+    v.write('raw/refs/paper.pdf', pdf);
+    v.write('raw/refs/talk.mp4', Buffer.from([0x00, 0x00, 0x00, 0x18, 0x66, 0x74, 0x79, 0x70, 0xff]));
+    v.write(`derived/${sha256(pdf)}.md`, withFields(
+      { kind: 'pdf', extractor: 'fixture', extractor_version: "'1.0'", source: 'raw/refs/paper.pdf' },
+      '[p. 1]\nThe glimmer index counts each lit cell.\n[p. 2]\nA cell lit twice still counts once.\n',
+    ));
+    const paper = 'wiki/archive/sources/source-paper.md';
+    v.write(paper, sourcePage({
+      domain: 'archive', topic: 'papers', summary: "'How the paper counts lit cells.'", keywords: ['glimmer index'], source: 'raw/refs/paper.pdf',
+      body: ['## You said', '', "## Agent's reading", 'A cell lit twice counts once.[^1]', '', '[^1]: raw/refs/paper.pdf#page=2', '', '## Rules'],
+    }));
+    v.write('wiki/archive/topics/papers.md', topicPage({ domain: 'archive', topic: 'papers', summary: "'Papers on lit cells.'", links: [paper] }));
+    return { domains: { archive: { title: 'Archive', topics: ['papers'], vaultOnly: true } } };
+  },
+
+  // Personal, reached by a path in vault.local.json, with a page in the user's own words.
+  journal(v, { newProject }) {
+    const dir = newProject();
+    v.projects.journal = dir;
+    const mine = 'wiki/journal/concepts/morning-pages.md';
+    v.write(mine, pageNote({
+      domain: 'journal', kind: 'concept', topic: 'days', summary: "'How I start a day.'", extra: ['author: user'],
+      body: ['I write three pages before I open any mail.', '', '## Agent notes', ''],
+    }));
+    v.write('wiki/journal/topics/days.md', topicPage({ domain: 'journal', topic: 'days', summary: "'How the user plans a day.'", links: [mine] }));
+    return { domains: { journal: { title: 'Journal', topics: ['days'] } }, local: { journal: { paths: [dir.replace(/\\/g, '/')] } } };
+  },
+
+  // Everywhere: its pages and keyword rules reach every session, with no markers or paths.
+  commons(v) {
+    const notes = {
+      'wiki/commons/rules/plain-rule.md': ruleNote({ domain: 'commons', topic: 'words', keywords: ['plainspeak'], doLine: 'Use the short word.', notLine: 'Reach for the long word.', because: 'The user reads in a terminal.' }),
+      'wiki/commons/concepts/plain-words.md': pageNote({ domain: 'commons', kind: 'concept', topic: 'words', summary: "'Short words that say the same.'", keywords: ['plainspeak'], body: ['Use for utilize; end for terminate.'] }),
+    };
+    notes['wiki/commons/topics/words.md'] = topicPage({ domain: 'commons', topic: 'words', summary: "'Word choice everywhere.'", links: Object.keys(notes) });
+    for (const [rel, text] of Object.entries(notes)) v.write(rel, text);
+    return { domains: { commons: { title: 'Commons', topics: ['words'], everywhere: true } } };
+  },
+};

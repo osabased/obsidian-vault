@@ -11,25 +11,25 @@ const pathOf = (v, key) => v.at('wiki', ...key.split('/')).replace(/\\/g, '/') +
 test('a prompt that names a page\'s keyword points the session to the page, once, and again after compaction', t => {
   const v = makeVault(t);
   const sid = sessionId();
-  v.write('wiki/demo/luau-types.md', pushed({ keywords: ['strict mode'], summary: "'How the checker treats strict mode'" }));
+  v.write('wiki/glim/luau-types.md', pushed({ keywords: ['strict mode'], summary: "'How the checker treats strict mode'" }));
   assert.equal(context(prompt(v, sid, 'turn on strict mode here')), [
     'Vault pages on this request. Read the ones that bear on it:',
-    `- demo/luau-types (concept page): How the checker treats strict mode. ${pathOf(v, 'demo/luau-types')}`,
+    `- glim/luau-types (concept page): How the checker treats strict mode. ${pathOf(v, 'glim/luau-types')}`,
   ].join('\n'));
   assert.equal(prompt(v, sid, 'strict mode again'), null);
   assert.equal(prompt(v, sid, 'nothing it names'), null);
   v.startSession(sid, { source: 'compact' });
-  assert.match(context(prompt(v, sid, 'strict mode')), /demo\/luau-types/);
+  assert.match(context(prompt(v, sid, 'strict mode')), /glim\/luau-types/);
 });
 
 test('the first edit to a file a page applies to is refused with a pointer to it, once per session', t => {
   const v = makeVault(t);
   const sid = sessionId();
-  v.write('wiki/demo/shop-layout.md', pushed({ applies_to: ['src/ui/**'], keywords: ['shop'] }));
+  v.write('wiki/glim/shop-layout.md', pushed({ applies_to: ['src/ui/**'], keywords: ['shop'] }));
   const out = edit(v, sid, 'src/ui/shop.luau');
   assert.equal(denied(out), [
     'Vault pages on src/ui/shop.luau. Read the ones that bear on this work:',
-    `- demo/shop-layout (concept page): What we know. ${pathOf(v, 'demo/shop-layout')}`,
+    `- glim/shop-layout (concept page): What we know. ${pathOf(v, 'glim/shop-layout')}`,
     'Revise this edit to follow the pages, then retry. The retry is allowed.',
   ].join('\n'));
   assert.equal(context(out), null, 'an allowed edit carries no pointer');
@@ -42,11 +42,11 @@ test('the first edit to a file a page applies to is refused with a pointer to it
 test('a subagent hears of a page apart from the agent that started it', t => {
   const v = makeVault(t);
   const sid = sessionId();
-  v.write('wiki/demo/shop-layout.md', pushed({ applies_to: ['src/ui/**'], keywords: ['shop'] }));
-  assert.deepEqual(pointed(prompt(v, sid, 'build the shop')), ['demo/shop-layout']);
-  assert.deepEqual(pointed(edit(v, sid, 'src/ui/shop.luau', { agent: 'agent-1' })), ['demo/shop-layout']);
+  v.write('wiki/glim/shop-layout.md', pushed({ applies_to: ['src/ui/**'], keywords: ['shop'] }));
+  assert.deepEqual(pointed(prompt(v, sid, 'build the shop')), ['glim/shop-layout']);
+  assert.deepEqual(pointed(edit(v, sid, 'src/ui/shop.luau', { agent: 'agent-1' })), ['glim/shop-layout']);
   assert.equal(edit(v, sid, 'src/ui/bag.luau', { agent: 'agent-1' }), null);
-  assert.deepEqual(pointed(edit(v, sid, 'src/ui/bag.luau', { agent: 'agent-2' })), ['demo/shop-layout']);
+  assert.deepEqual(pointed(edit(v, sid, 'src/ui/bag.luau', { agent: 'agent-2' })), ['glim/shop-layout']);
   assert.equal(edit(v, sid, 'src/ui/bag.luau'), null, 'the main agent already heard of it');
 });
 
@@ -63,7 +63,7 @@ test('an edit to the vault\'s notes or sources brings up no page', t => {
   const sid = sessionId();
   v.write('wiki/global/everything.md', pushed({ domain: 'global', applies_to: ['**'] }));
   const write = rel => edit(v, sid, null, { tool: 'Write', abs: v.at(...rel.split('/')), cwd: v.root, text: 'x' });
-  assert.equal(write('wiki/demo/new-note.md'), null);
+  assert.equal(write('wiki/glim/new-note.md'), null);
   assert.equal(write('raw/refs/new-ref.md'), null);
   assert.deepEqual(pointed(write('notes.md')), ['global/everything']);
 });
@@ -71,11 +71,11 @@ test('an edit to the vault\'s notes or sources brings up no page', t => {
 test('a rule that refuses an edit carries the pages in the same refusal, and the retry passes', t => {
   const v = makeVault(t);
   const sid = sessionId();
-  v.write('wiki/demo/ui-rule.md', ruleNote({ applies_to: ['src/**'] }));
-  v.write('wiki/demo/shop-layout.md', pushed({ applies_to: ['src/**'] }));
+  v.write('wiki/glim/ui-rule.md', ruleNote({ applies_to: ['src/**'] }));
+  v.write('wiki/glim/shop-layout.md', pushed({ applies_to: ['src/**'] }));
   const first = denied(edit(v, sid, 'src/a.luau'));
-  assert.match(first, /demo\/ui-rule/);
-  assert.match(first, /demo\/shop-layout/);
+  assert.match(first, /glim\/ui-rule/);
+  assert.match(first, /glim\/shop-layout/);
   assert.match(first, /Revise this edit to follow them and the pages, then retry\./);
   assert.equal(edit(v, sid, 'src/a.luau'), null);
 });
@@ -90,49 +90,49 @@ test('pages reach the sessions their domain\'s rules reach, and every page reach
 
 test('a page saved within the settle window, or with an error, does not come up', t => {
   const v = makeVault(t);
-  for (const slug of ['a-grid', 'b-grid']) v.write(`wiki/demo/${slug}.md`, pushed({ keywords: ['grid'], applies_to: ['src/**'] }));
+  for (const slug of ['a-grid', 'b-grid']) v.write(`wiki/glim/${slug}.md`, pushed({ keywords: ['grid'], applies_to: ['src/**'] }));
   // Both sort ahead of the settled pages, so either one coming up shows in the pointers.
-  v.write('wiki/demo/a-fresh-grid.md', pushed({ keywords: ['grid'], applies_to: ['src/**'] }), { settled: false });
-  v.write('wiki/demo/a-broken-grid.md', pushed({ applies_to: ['src/**'], extra: ['keywords: grid'] }));
-  assert.deepEqual(pointed(prompt(v, sessionId(), 'a grid')), ['demo/a-grid', 'demo/b-grid']);
-  assert.deepEqual(pointed(edit(v, sessionId(), 'src/a.luau')), ['demo/a-grid', 'demo/b-grid']);
+  v.write('wiki/glim/a-fresh-grid.md', pushed({ keywords: ['grid'], applies_to: ['src/**'] }), { settled: false });
+  v.write('wiki/glim/a-broken-grid.md', pushed({ applies_to: ['src/**'], extra: ['keywords: grid'] }));
+  assert.deepEqual(pointed(prompt(v, sessionId(), 'a grid')), ['glim/a-grid', 'glim/b-grid']);
+  assert.deepEqual(pointed(edit(v, sessionId(), 'src/a.luau')), ['glim/a-grid', 'glim/b-grid']);
 });
 
 test('at most delivery.maxPages come up at a time on a prompt, and the rest on the next match', t => {
   const v = makeVault(t);
-  for (const slug of ['a-grid', 'b-grid', 'c-grid', 'd-grid']) v.write(`wiki/demo/${slug}.md`, pushed({ keywords: ['grid'], applies_to: ['src/**'] }));
+  for (const slug of ['a-grid', 'b-grid', 'c-grid', 'd-grid']) v.write(`wiki/glim/${slug}.md`, pushed({ keywords: ['grid'], applies_to: ['src/**'] }));
   const sid = sessionId();
-  assert.deepEqual(pointed(prompt(v, sid, 'a grid')), ['demo/a-grid', 'demo/b-grid', 'demo/c-grid']);
-  assert.deepEqual(pointed(prompt(v, sid, 'a grid')), ['demo/d-grid']);
+  assert.deepEqual(pointed(prompt(v, sid, 'a grid')), ['glim/a-grid', 'glim/b-grid', 'glim/c-grid']);
+  assert.deepEqual(pointed(prompt(v, sid, 'a grid')), ['glim/d-grid']);
 });
 
 test('a refusal lists every page due, the ones past delivery.maxPages without their summaries', t => {
   const v = makeVault(t);
-  for (const slug of ['a-grid', 'b-grid', 'c-grid', 'd-grid']) v.write(`wiki/demo/${slug}.md`, pushed({ applies_to: ['src/**'] }));
+  for (const slug of ['a-grid', 'b-grid', 'c-grid', 'd-grid']) v.write(`wiki/glim/${slug}.md`, pushed({ applies_to: ['src/**'] }));
   const sid = sessionId();
   const first = edit(v, sid, 'src/a.luau');
-  assert.deepEqual(pointed(first), ['demo/a-grid', 'demo/b-grid', 'demo/c-grid', 'demo/d-grid']);
-  assert.ok(denied(first).includes(`- demo/c-grid (concept page): What we know. ${pathOf(v, 'demo/c-grid')}`));
-  assert.ok(denied(first).includes(`- demo/d-grid (concept page): ${pathOf(v, 'demo/d-grid')}`));
+  assert.deepEqual(pointed(first), ['glim/a-grid', 'glim/b-grid', 'glim/c-grid', 'glim/d-grid']);
+  assert.ok(denied(first).includes(`- glim/c-grid (concept page): What we know. ${pathOf(v, 'glim/c-grid')}`));
+  assert.ok(denied(first).includes(`- glim/d-grid (concept page): ${pathOf(v, 'glim/d-grid')}`));
   assert.equal(edit(v, sid, 'src/a.luau'), null, 'the retry goes through');
   assert.equal(edit(v, sid, 'src/b.luau'), null, 'every page was told of');
 });
 
 test('lint checks a page\'s scope fields as it does a rule\'s, always and triggers included', async t => {
   const v = makeVault(t, { domains: { reading: { title: 'Reading', vaultOnly: true, topics: ['solvers'] } } });
-  v.write('wiki/demo/code.md', page({ body: ['[[bad-glob]] [[rule-fields]] [[bad-triggers]] [[bad-regex]]', '', '## Rules'] }));
-  v.write('wiki/demo/bad-glob.md', pushed({ applies_to: ['src/{a'] }));
-  v.write('wiki/demo/rule-fields.md', pushed({ extra: ['always: true', 'triggers: []'] }));
-  v.write('wiki/demo/bad-triggers.md', pushed({ extra: ['always: maybe', 'triggers: wait'] }));
-  v.write('wiki/demo/bad-regex.md', pushed({ applies_to: ['src/**'], extra: ["triggers: ['(']"] }));
+  v.write('wiki/glim/code.md', page({ body: ['[[bad-glob]] [[rule-fields]] [[bad-triggers]] [[bad-regex]]', '', '## Rules'] }));
+  v.write('wiki/glim/bad-glob.md', pushed({ applies_to: ['src/{a'] }));
+  v.write('wiki/glim/rule-fields.md', pushed({ extra: ['always: true', 'triggers: []'] }));
+  v.write('wiki/glim/bad-triggers.md', pushed({ extra: ['always: maybe', 'triggers: wait'] }));
+  v.write('wiki/glim/bad-regex.md', pushed({ applies_to: ['src/**'], extra: ["triggers: ['(']"] }));
   v.write('wiki/reading/solvers.md', page({ domain: 'reading', topic: 'solvers', body: ['[[solver-history]]', '', '## Rules'] }));
   v.write('wiki/reading/solver-history.md', pushed({ domain: 'reading', topic: 'solvers', applies_to: ['src/**'] }));
   const found = await lintFound(v, /glob|for rules|no edit|triggers|always/);
   assert.deepEqual(found.map(f => [f.level, f.file, f.msg]).sort(), [
-    ['error', 'wiki/demo/bad-glob.md', 'bad glob in applies_to: src/{a'],
-    ['error', 'wiki/demo/bad-regex.md', 'bad regex in triggers: ('],
-    ['error', 'wiki/demo/bad-triggers.md', 'always must be true or false'],
-    ['error', 'wiki/demo/bad-triggers.md', 'triggers must be a list'],
+    ['error', 'wiki/glim/bad-glob.md', 'bad glob in applies_to: src/{a'],
+    ['error', 'wiki/glim/bad-regex.md', 'bad regex in triggers: ('],
+    ['error', 'wiki/glim/bad-triggers.md', 'always must be true or false'],
+    ['error', 'wiki/glim/bad-triggers.md', 'triggers must be a list'],
     ['warn', 'wiki/reading/solver-history.md', 'reading is vault-only, so no edit brings this page up. Give it keywords instead'],
   ]);
 });
@@ -142,14 +142,14 @@ test('a rule\'s errors keep their order, and a note of another type gets only th
   const rules = await v.import('lib/rules.mjs');
   const rule = rules.parseNote(ruleNote({ domain: 'reading', applies_to: ['src/{a'] }), 'wiki/reading/x.md');
   assert.match(rules.noteErrors(rule)[0], /is vault-only/);
-  const memo = rules.parseNote(page({ extra: ['keywords: grid'] }).replace('type: page', 'type: memo'), 'wiki/demo/x.md');
+  const memo = rules.parseNote(page({ extra: ['keywords: grid'] }).replace('type: page', 'type: memo'), 'wiki/glim/x.md');
   assert.deepEqual(rules.noteErrors(memo), ['type must be rule or page']);
 });
 
 test('a page\'s triggers narrow it to edits whose new text matches, as a rule\'s do', t => {
   const v = makeVault(t);
   const sid = sessionId();
-  v.write('wiki/demo/waits.md', pushed({ applies_to: ['src/**'], extra: ['triggers:', "  - 'wait\\('"] }));
+  v.write('wiki/glim/waits.md', pushed({ applies_to: ['src/**'], extra: ['triggers:', "  - 'wait\\('"] }));
   assert.equal(edit(v, sid, 'src/a.luau', { text: 'local x = 1' }), null);
-  assert.deepEqual(pointed(edit(v, sid, 'src/a.luau', { text: 'task.wait(1)' })), ['demo/waits']);
+  assert.deepEqual(pointed(edit(v, sid, 'src/a.luau', { text: 'task.wait(1)' })), ['glim/waits']);
 });
