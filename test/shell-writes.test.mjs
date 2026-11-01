@@ -109,3 +109,47 @@ test('a file a subagent wrote through the gated Edit path is not taken for a she
   write(v, 'src/a.txt', 'local x = 1');
   assert.equal(stop(v, sid), null);
 });
+
+test('a file the gate let through on a trigger miss is checked again when a shell command writes it in a later turn', t => {
+  const v = makeVault(t);
+  gitProject(v);
+  v.write('wiki/demo/rules/todo-rule.md', withTriggers(ruleNote({ applies_to: ['src/**/*.txt'], doLine: 'Track work in issues.' }), 'TODO'));
+  const sid = sessionId();
+  v.startSession(sid);
+  prompt(v, sid, 'edit the file');
+  assert.equal(editFile(v, sid, 'src/a.txt', { text: 'local x = 1' }), null, 'the trigger misses the edit');
+  write(v, 'src/a.txt', 'local x = 1\n');
+  assert.equal(stop(v, sid), null);
+  prompt(v, sid, 'now add a note with a script');
+  write(v, 'src/a.txt', 'local x = 1\n-- TODO later\n');
+  assert.match(context(stop(v, sid)) ?? '', /^src\/a\.txt:\n- demo\/todo-rule: Do: Track work in issues\./m);
+});
+
+test('a shell-written file with a BOM and CRLF line ends fires triggers as the edit hook reads text', t => {
+  const v = makeVault(t);
+  gitProject(v);
+  v.write('wiki/demo/rules/head-rule.md', withTriggers(ruleNote({ applies_to: ['src/**/*.txt'], doLine: 'Head the file.' }), '^-- head'));
+  v.write('wiki/demo/rules/pair-rule.md', withTriggers(ruleNote({ applies_to: ['src/**/*.txt'], doLine: 'Pair the lines.' }), 'one[^a-z]two'));
+  const sid = sessionId();
+  v.startSession(sid);
+  prompt(v, sid, 'write the file with a script');
+  write(v, 'src/a.txt', '\uFEFF-- head\r\none\r\ntwo\r\n');
+  const ctx = context(stop(v, sid)) ?? '';
+  assert.match(ctx, /demo\/head-rule/);
+  assert.match(ctx, /demo\/pair-rule/);
+});
+
+test("the vault's own files a shell command writes get no rule at Stop, vault.local.json among them", t => {
+  const v = makeVault(t);
+  const env = cleanEnv({ GIT_CONFIG_NOSYSTEM: '1', GIT_CONFIG_GLOBAL: '/dev/null' });
+  execFileSync('git', ['init', '-q'], { cwd: v.root, env, stdio: 'pipe' });
+  v.write('wiki/global/rules/json-rule.md', ruleNote({ domain: 'global', applies_to: ['*.json'], doLine: 'Sort the keys.' }));
+  const sid = sessionId();
+  v.startSession(sid, { cwd: v.root });
+  prompt(v, sid, 'change the settings with a script', { cwd: v.root });
+  v.write('vault.local.json', v.read('vault.local.json'), { settled: false });
+  v.write('other.json', '{}\n', { settled: false });
+  const ctx = v.hook('stop', { session_id: sid, cwd: v.root, hook_event_name: 'Stop', stop_hook_active: false })?.hookSpecificOutput?.additionalContext ?? '';
+  assert.match(ctx, /^other\.json:/m, 'a file of the vault folder that is not its own still gets the rule');
+  assert.doesNotMatch(ctx, /vault\.local\.json/);
+});

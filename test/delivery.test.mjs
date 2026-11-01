@@ -349,11 +349,58 @@ test('the prompt hook fits the output budget, the always rules written since ses
   v.startSession(sid);
   for (let i = 0; i < 40; i++) v.write(`wiki/demo/rules/late-${i}.md`, ruleNote({ always: true, doLine: `Late rule ${i}. ${'Mind the detail. '.repeat(12)}` }));
   v.write('wiki/demo/rules/kw.md', ruleNote({ keywords: ['strict'], doLine: 'Use strict.' }));
+  v.write('wiki/demo/concepts/strict-mode.md', pageNote({ kind: 'concept', keywords: ['strict'], summary: "'On strict mode.'" }));
   const ctx = prompt(v, sid, 'strict').hookSpecificOutput.additionalContext;
   assert.ok(ctx.length <= LIMIT, `${ctx.length} characters`);
   assert.match(ctx, /^Taste rules that apply for the rest of this session:\n- demo\/late-0:/);
   assert.match(ctx, /\(Left out to stay within 8000 characters: \d+ rules/);
-  assert.equal(prompt(v, sid, 'hello'), null, 'what was cut is not offered again');
+  // What the budget cut arrives with the next prompt: the rest of the always rules, the keyword rule and the page.
+  const named = text => new Set([...text.matchAll(/demo\/(late-\d+|kw|strict-mode)(?![\w-])/g)].map(m => m[1]));
+  const first = named(ctx);
+  assert.ok(!first.has('kw') && !first.has('strict-mode'), 'the keyword rule and the page were cut');
+  const rest = named(prompt(v, sid, 'strict').hookSpecificOutput.additionalContext);
+  assert.deepEqual([...first].filter(k => rest.has(k)), [], 'nothing shown first is shown again');
+  assert.equal(first.size + rest.size, 42, 'everything cut arrives with the next prompt');
+  assert.equal(prompt(v, sid, 'strict'), null);
+});
+
+test('a page the output budget leaves out of a refusal does not refuse the retry, and comes up on the next file it covers', t => {
+  const v = makeVault(t);
+  const sid = sessionId();
+  for (let i = 0; i < 80; i++) v.write(`wiki/demo/rules/rule-${String(i).padStart(2, '0')}.md`, ruleNote({ applies_to: ['src/a.txt'], doLine: `Rule ${i}. ${'Mind the detail. '.repeat(8)}` }));
+  for (let i = 0; i < 3; i++) v.write(`wiki/demo/concepts/page-${i}.md`, pageNote({ kind: 'concept', applies_to: ['src/**'], summary: `'Page ${i}.'` }));
+  const pagesIn = text => [...text.matchAll(/demo\/page-\d/g)].map(m => m[0]);
+  const first = denied(edit(v, sid, 'src/a.txt')) ?? '';
+  assert.match(first, /\(Left out to stay within 8000 characters: .*3 pages/);
+  assert.equal(edit(v, sid, 'src/a.txt'), null, 'the retry passes');
+  assert.deepEqual(pagesIn(denied(edit(v, sid, 'src/b.txt')) ?? ''), ['demo/page-0', 'demo/page-1', 'demo/page-2']);
+  assert.equal(edit(v, sid, 'src/b.txt'), null);
+  assert.equal(edit(v, sid, 'src/c.txt'), null, 'a page shown once is not shown again');
+});
+
+test('a refusal counts the rules it shows in full or as pointers as shown, and not those it leaves out', t => {
+  const v = makeVault(t);
+  const sid = sessionId();
+  for (let i = 0; i < 80; i++) v.write(`wiki/demo/rules/rule-${String(i).padStart(2, '0')}.md`, ruleNote({ applies_to: ['**/*.txt'], doLine: `Rule ${i}. ${'Mind the detail. '.repeat(8)}` }));
+  const why = denied(edit(v, sid, 'src/a.txt')) ?? '';
+  const named = [...new Set([...why.matchAll(/demo\/rule-\d\d/g)].map(m => m[0]))].sort();
+  assert.ok(named.length > 3 && named.length < 80, `${named.length} rules named`);
+  const shown = v.read(`.state/delivered/${sid}/keys.jsonl`).split('\n').filter(Boolean).map(l => JSON.parse(l)).sort();
+  assert.deepEqual(shown, named);
+});
+
+test('an always block that higher-ranked lines leave no room for at session start reaches the next prompt', t => {
+  const v = makeVault(t, { config: { delivery: { maxContextChars: 2000 } } });
+  for (let i = 0; i < 8; i++) {
+    v.write(`wiki/demo/rules/al-${i}.md`, ruleNote({ always: true, doLine: `Always do thing number ${i} with a fairly long sentence to fill the budget up nicely here.`, notLine: `Never skip thing ${i} whatever happens in the session today.` }));
+  }
+  // Notes an error keeps from delivery are named in a line that ranks above the always block.
+  for (let i = 0; i < 3; i++) v.write(`wiki/demo/rules/bad-${i}.md`, ruleNote({ basis: 'bogus', keywords: ['x'] }));
+  const sid = sessionId();
+  const start = v.startSession(sid).hookSpecificOutput.additionalContext;
+  assert.match(start, /demo\/bad-0/);
+  assert.doesNotMatch(start, /demo\/al-0/, 'the always block was left out');
+  assert.match(prompt(v, sid, 'hello')?.hookSpecificOutput.additionalContext ?? '', /demo\/al-0/);
 });
 
 test('an edit that goes through carries no page pointer', t => {
