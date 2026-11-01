@@ -301,3 +301,15 @@ test('propose --help says the vault folder takes any domain that is not vaultOnl
   const { v } = setup(t);
   assert.match(v.run('propose.mjs', ['--help']).stdout, /in the vault folder, any domain that isn't vaultOnly/);
 });
+
+test('propose and pick refuse a missing or unknown session before they read their input', t => {
+  const v = makeVault(t);
+  for (const script of ['propose.mjs', 'pick.mjs']) {
+    const none = v.run(script, [], { input: 'not json' });
+    assert.equal(none.code, 1, script);
+    assert.match(none.stderr, /there's no session id to (propose|record) for\./, script);
+    const unknown = v.run(script, [sessionId()], { input: 'not json' });
+    assert.equal(unknown.code, 1, script);
+    assert.match(unknown.stderr, /has no session/, script);
+  }
+});

@@ -1,18 +1,12 @@
-import fs from 'node:fs';
-import { createRequire } from 'node:module';
 import { config, sessionReach, toolsPath, toPosix, inside } from './vault.mjs';
 import { loadNotes, settledNotes, liveRules, deliverable, deliveryFor, ruleLine, cmp } from './rules.mjs';
 import { entryParts, normGlob } from './glob.mjs';
-import { AGENT_NAME } from './agents.mjs';
+import { byName } from './ext.mjs';
 
 // Each format is tools/adapters/<name>/compile.mjs, loaded by its path, since an agent with no hooks has no adapter.mjs.
-const fileOf = name => toolsPath('adapters', name, 'compile.mjs');
-export const hasFormat = name => typeof name === 'string' && AGENT_NAME.test(name) && fs.existsSync(fileOf(name));
-
-// Hooks run synchronously, and require loads an ES module synchronously from Node 22.12 on.
-const load = createRequire(import.meta.url);
-
-export const formatNamed = name => load(fileOf(name));
+const formats = byName(name => toolsPath('adapters', name, 'compile.mjs'));
+export const hasFormat = formats.has;
+export const formatNamed = formats.load;
 
 const optedIn = d => (Array.isArray(config().domains[d]?.compile) ? config().domains[d].compile.filter(hasFormat) : []);
 

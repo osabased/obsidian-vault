@@ -45,6 +45,19 @@ export function changedFiles(cwd, pathspec = [], { ignored = false, timeout = 20
   return files;
 }
 
+// The work tree of the repository's main checkout, from git's common dir, which every worktree of it shares wherever the
+// worktree lives. Null when git is missing or fails, or the repository is bare.
+export function mainWorktree(dir, { timeout = 2000 } = {}) {
+  let common;
+  try {
+    common = execFileSync('git', ['rev-parse', '--git-common-dir'], { cwd: dir, env: gitEnv(), timeout, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'], windowsHide: true }).trim();
+  } catch {
+    return null;
+  }
+  const abs = path.resolve(dir, common);
+  return path.basename(abs) === '.git' ? path.dirname(abs) : null;
+}
+
 // The git calls refresh makes on its clones in .sources/. Each throws an Error whose message is the reason refresh
 // records: git not found, no answer in time, output past the cap, or the command, its exit code and the first line git
 // printed to stderr. A repo that asks for a password fails at once rather than waiting out the timeout on a prompt no

@@ -4,7 +4,6 @@ import v8 from 'node:v8';
 import { parse, yamlQuote } from './frontmatter.mjs';
 import { validGlob, overlapping, entryParts, globListProblems } from './glob.mjs';
 import { config, vaultPath, shortHash, toPosix, today, inside, plural, isVaultOnly, memo, readJson, statePath, logError } from './vault.mjs';
-import { editsFile, sentToHook, hookMatchers } from './agents.mjs';
 import { cachedNotes, cleanFromGit, noteStats } from './cache.mjs';
 import { SEMVER, SCHEMES, fitOf, projectVersions } from './versions.mjs';
 import { checkDeadline } from './deadline.mjs';
@@ -198,13 +197,9 @@ function listErrors(n) {
     ...globs.filter(g => !validGlob(g, namespaces)).map(g => targetError(g, namespaces)),
     ...globListProblems(globs, namespaces),
     ...(n.tools ?? []).filter(x => !/^\S+$/.test(x)).map(x => `tools must name each tool exactly, with no spaces: ${x === '' ? '(empty)' : x}`),
-    ...(n.tools ?? []).filter(x => /^\S+$/.test(x)).flatMap(x => toolError(x)),
     ...(n.triggers ?? []).map(t => regexError(t)).filter(Boolean),
   ];
 }
-
-const toolError = x => (editsFile(x) ? [`tools names ${x}, which edits a file; give the rule applies_to instead`]
-  : sentToHook(x) ? [] : [`tools names ${x}, which the edit hook's matcher, ${hookMatchers()}, never sends to the hook, so it would never bring the rule up`]);
 
 export const hasChannel = n => n.always === true || ['applies_to', 'keywords', 'tools'].some(f => n[f]?.length);
 

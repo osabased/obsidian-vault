@@ -4,7 +4,7 @@ import {
   config, vaultPath, statePath, stateDir, readJsonSafe, writeJson, appendJsonl, safeId, shortHash, logError, guarded, hookErrors, errorsLog, domainsFor, sessionReach, toPosix, inVaultFolder, isVaultOnly,
 } from './vault.mjs';
 import { noteTimes } from './cache.mjs';
-import { currentSession } from './agents.mjs';
+import { sessionIds, shortName } from './agents.mjs';
 
 const DAY = 86400e3;
 
@@ -12,8 +12,8 @@ export const registry = id => statePath('sessions', `${id}.json`);
 
 // Scripts take the session id as an argument, so one session can't write under another's.
 export function ownEntry(sid) {
-  const own = currentSession()?.id;
-  if (own && own !== sid) return { entry: null, notOwn: `${sid} isn't this session, which is ${own}.` };
+  const own = sessionIds();
+  if (own.length && !own.includes(String(sid))) return { entry: null, notOwn: `${sid} isn't this session, which is ${own.join(' or ')}.` };
   return { entry: readJsonSafe(registry(safeId(sid))), notOwn: null };
 }
 
@@ -196,11 +196,28 @@ function registeredIds() {
   return names.filter(n => n.endsWith('.json')).map(n => n.slice(0, -'.json'.length));
 }
 
-// Pages name a session by the first 8 characters of its id. Returns its registry entry, or null when no registered
-// session, or more than one, has them, or when its transcript is gone; tidy() drops old sessions from the registry.
-export function transcriptFor(prefix) {
-  const ids = registeredIds().filter(id => id.startsWith(prefix));
-  const entry = ids.length === 1 ? readJsonSafe(registry(ids[0])) : null;
+// A session's short name, from the agent the row naming it or its registry entry gives.
+export const sessionName = (sid, agentName) => shortName(sid, agentName ?? readJsonSafe(registry(safeId(sid)))?.agent);
+
+// The registered sessions' entries by short name, and by full id, the names pages call them by.
+export function sessionsByName() {
+  const byName = new Map();
+  const add = (name, entry) => byName.set(name, [...(byName.get(name) ?? []), entry]);
+  for (const id of registeredIds()) {
+    const entry = readJsonSafe(registry(id));
+    if (!entry) continue;
+    const sid = String(entry.session ?? id);
+    add(shortName(sid, entry.agent), entry);
+    add(sid, entry);
+  }
+  return byName;
+}
+
+// Returns the registry entry of the session a page names, or null when no registered session, or more than one, has
+// that name, or when its transcript is gone; tidy() drops old sessions from the registry.
+export function transcriptFor(name, byName = sessionsByName()) {
+  const entries = byName.get(name) ?? [];
+  const entry = entries.length === 1 ? entries[0] : null;
   return typeof entry?.transcript === 'string' && fs.existsSync(entry.transcript) ? entry : null;
 }
 
@@ -239,7 +256,7 @@ export const carryMarkers = (sid, key, from, to) => guarded('carry markers', () 
 export function trackedSessions() {
   return [...new Set([...registeredIds(), ...fs.readdirSync(stateDir('delivered'))])].map(id => {
     const entry = readJsonSafe(registry(id));
-    return { id, keys: shownKeys(id), cwd: entry?.cwd ?? null, last: entry?.last_seen ?? null };
+    return { id, name: shortName(entry?.session ?? id, entry?.agent), keys: shownKeys(id), cwd: entry?.cwd ?? null, last: entry?.last_seen ?? null };
   });
 }
 

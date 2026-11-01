@@ -45,6 +45,12 @@ for (const d of [claudeCode, codex]) {
     assert.match(d.deny(d.editFile(v, sid, 'src/a.zq')) ?? '', ZQ);
   });
 
+  test(`${d.name}: the session start's propose note names the project's own agent instructions, no one agent's files`, t => {
+    const text = d.context(d.start(vault(t), sessionId())) ?? '';
+    assert.match(text, /Leave out what the project's own agent instructions already say; a compiled taste-vault section in them is the vault's copy\./);
+    assert.doesNotMatch(text, /CLAUDE\.md|\.claude\/rules/);
+  });
+
   test(`${d.name}: a prompt with a keyword gets the excerpt once`, t => {
     const { v, sid } = started(t);
     assert.match(d.context(d.prompt(v, sid, 'make the shimmer softer')) ?? '', KEYWORD);
@@ -128,6 +134,23 @@ for (const d of [claudeCode, codex]) {
     const r = v.run('propose.mjs', [], { input: rule, env: { [sessionVar]: sid } });
     assert.equal(r.code, 0, r.stderr);
     assert.match(r.stdout, /^Wrote wiki\/glim\/rules\/own-session\.md\./);
+  });
+
+  test(`${d.name}: propose refuses a session id other than the agent's own, whatever agents lists`, async t => {
+    for (const agents of [[], [d === codex ? claudeCode.name : codex.name]]) {
+      const v = makeVault(t, { presets: ['glim'], config: { ...d.config, agents } });
+      const { sessionVar } = await v.import(`adapters/${d.name}/adapter.mjs`);
+      const [sid, other] = [sessionId(), sessionId()];
+      d.start(v, sid);
+      d.start(v, other);
+      const rule = {
+        domain: 'glim', slug: 'not-mine', topic: 'naming', basis: 'reading', reading: 'The user rewrote the screen twice.',
+        do: 'Zebra quartz mango.', not: 'Plover lantern ember.', applies_to: ['src/new/**'],
+      };
+      const r = v.run('propose.mjs', [other], { input: rule, env: { [sessionVar]: sid } });
+      assert.equal(r.code, 1, `agents ${JSON.stringify(agents)}: ${r.stdout}`);
+      assert.match(r.stderr, new RegExp(`${other} isn't this session, which is ${sid}\.`));
+    }
   });
 
   test(`${d.name}: the typed-text provider returns the typed message and none of the injected text`, async t => {
