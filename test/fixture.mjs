@@ -207,7 +207,7 @@ const link = rel => `[[${rel.replace(/\.md$/, '')}|${path.posix.basename(rel, '.
 const topicPage = ({ domain, topic, summary, links }) => pageNote({ domain, topic, summary, body: ['What the vault holds on this topic.', '', '## Rules', ...links.map(l => `- ${link(l)}`)] });
 const withFields = (fields, body) => `---\n${Object.entries(fields).map(([k, x]) => `${k}: ${x}`).join('\n')}\n---\n${body}`;
 
-// An alias that maps a name's first part to a folder through the project's tree.json, as test/delivery.test.mjs's does.
+// An alias that maps a name's first part to a folder through the project's tree.json, and the rest to a .zq file in it.
 const FIXTURE_ALIAS = [
   "import fs from 'node:fs';",
   "import path from 'node:path';",
@@ -215,7 +215,7 @@ const FIXTURE_ALIAS = [
   "  const map = path.join(root, 'tree.json');",
   '  if (!fs.existsSync(map)) return null;',
   "  const folder = JSON.parse(fs.readFileSync(map, 'utf8'))[names[0]];",
-  "  return folder ? `${path.join(root, folder, ...names.slice(1))}.txt` : null;",
+  "  return folder ? `${path.join(root, folder, ...names.slice(1))}.zq` : null;",
   '}',
   '',
 ].join('\n');
