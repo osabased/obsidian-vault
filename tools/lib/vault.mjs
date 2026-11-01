@@ -365,8 +365,13 @@ export function logError(name, e) {
 }
 
 // A hook section that fails, like a line built from a malformed config, costs its own result, not the rest of the hook.
+// Running out of time is the hook's failure, not the section's, so that error goes on up.
 export function guarded(name, fn, fallback = '') {
-  try { return fn(); } catch (e) { logError(name, e); return fallback; }
+  try { return fn(); } catch (e) {
+    if (e?.code === 'EDEADLINE') throw e;
+    logError(name, e);
+    return fallback;
+  }
 }
 
 const ENTRY = /^(\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d\.\d{3}Z) (.*)$/;
@@ -420,8 +425,8 @@ const alive = pid => {
 
 const LOCK_UNOWNED_MS = 10_000;
 
-// A dead owner's lock is stale at once. A live owner keeps it until staleMs, which only guards against a recycled pid, so
-// a slow propose is never robbed. A file with no token yet is being written, or was cut short.
+// A dead owner's lock is stale at once. A live owner keeps it until staleMs, which guards against a recycled pid, as
+// Windows hands out; it has to pass well before a waiter gives up, and well after the longest real hold. A file with no token yet is being written, or was cut short.
 function stale(token, ageMs, staleMs) {
   const pid = Number(/^(\d+)/.exec(token)?.[1]);
   if (!pid) return ageMs > LOCK_UNOWNED_MS;
@@ -454,8 +459,8 @@ function tryLock(file, token, staleMs) {
 }
 
 // A propose holds the lock for about 6 s at 3,000 notes, and three at once run one after another, so a waiter gives up
-// only after a minute.
-export function withLock(file, fn, { waitMs = 60_000, staleMs = 300_000 } = {}) {
+// only after a minute, and a live holder's lock goes stale at half that.
+export function withLock(file, fn, { waitMs = 60_000, staleMs = 30_000 } = {}) {
   const token = `${process.pid}:${crypto.randomBytes(6).toString('hex')}`;
   fs.mkdirSync(path.dirname(file), { recursive: true });
   const giveUp = Date.now() + waitMs;

@@ -18,9 +18,14 @@ function deadline() {
   return limit;
 }
 
-// performance.now() counts from the process's start, which the timeout counts from too.
+// performance.now() counts from the process's start, which the timeout counts from too. The code lets guarded tell this
+// error from a section's own failure, since a hook past its deadline has to fail, not carry on with what is left.
 export function checkDeadline() {
   if (!armed) return;
   const { timeout, margin, ms } = deadline();
-  if (performance.now() > ms) throw new Error(`stopped at its deadline, ${margin} s before the ${timeout} s hook timeout`);
+  if (performance.now() > ms) throw Object.assign(new Error(`stopped at its deadline, ${margin} s before the ${timeout} s hook timeout`), { code: 'EDEADLINE' });
 }
+
+// Milliseconds left before the deadline, for work that can't call checkDeadline, such as another program. Infinity when
+// the process has no deadline.
+export const remaining = () => (armed ? deadline().ms - performance.now() : Infinity);
