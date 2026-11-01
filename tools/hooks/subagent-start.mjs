@@ -12,7 +12,7 @@ runHook('subagent-start', input => {
   const ready = settledNotes(loadNotes(vaultFolder ? null : readable));
   const always = alwaysContext([...doms, 'global'], liveRules(ready));
   const topics = guarded('index note', () => scopeTopics(readable, ready), []);
-  if (input.session_id) for (const k of always.keys) markShown(input.session_id, k);
+  if (input.session_id) markShown(input.session_id, always.keys);
   const { text: context } = fitContext([
     { noun: 'block of always rules', items: always.text ? [always.text] : [] },
     { noun: 'topic', items: topics, render: indexNote },

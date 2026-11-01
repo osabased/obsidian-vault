@@ -1,7 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import {
-  config, vaultPath, statePath, stateDir, readJsonSafe, writeJson, safeId, shortHash, logError, guarded, hookErrors, errorsLog, domainsFor, sessionReach, toPosix, inVaultFolder, isVaultOnly,
+  config, vaultPath, statePath, stateDir, readJsonSafe, writeJson, appendJsonl, safeId, shortHash, logError, guarded, hookErrors, errorsLog, domainsFor, sessionReach, toPosix, inVaultFolder, isVaultOnly,
 } from './vault.mjs';
 
 const DAY = 86400e3;
@@ -71,42 +71,71 @@ export function proposeDomains(entry) {
   return [...new Set(doms)].filter(d => Object.hasOwn(config().domains, d) && !isVaultOnly(d));
 }
 
-const marker = (kind, sid, key) => vaultPath('.state', kind, safeId(sid), shortHash(key));
+// A session's markers of one kind are the lines of one file, one JSON string each, so a hook call adds all it marks with
+// one append and reads them back with one read. Older tools wrote one file per marker, named by its key's hash and
+// holding the key; those still count, looked up by name.
+const BATCH = 'keys.jsonl';
+const markerDir = (kind, sid) => vaultPath('.state', kind, safeId(sid));
+const loaded = new Map();
 
-export const marked = (kind, sid, key) => fs.existsSync(marker(kind, sid, key));
-
-function create(file, text) {
-  try {
-    fs.writeFileSync(file, text, { flag: 'wx' });
-  } catch (e) {
-    if (e.code !== 'ENOENT') throw e;
-    fs.mkdirSync(path.dirname(file), { recursive: true });
-    fs.writeFileSync(file, text, { flag: 'wx' });
+function readKeys(dir) {
+  const keys = new Set();
+  let text = '';
+  try { text = fs.readFileSync(path.join(dir, BATCH), 'utf8'); } catch (e) { if (!stray(e)) throw e; }
+  // A line another hook is still appending reads as cut off, and counts once it is whole.
+  for (const line of text.split('\n')) {
+    if (!line) continue;
+    try { keys.add(String(JSON.parse(line))); } catch { continue; }
   }
+  return keys;
 }
 
-// True only for the call that made the marker, so two hooks racing deliver a rule once.
-export function mark(kind, sid, key) {
-  try {
-    create(marker(kind, sid, key), key);
-    return true;
-  } catch (e) {
-    if (e.code === 'EEXIST') return false;
-    throw e;
+function markers(kind, sid) {
+  const dir = markerDir(kind, sid);
+  let m = loaded.get(dir);
+  if (!m) {
+    let names = [];
+    try { names = fs.readdirSync(dir); } catch (e) { if (!stray(e)) throw e; }
+    m = { keys: readKeys(dir), legacy: new Set(names.filter(n => n !== BATCH)) };
+    loaded.set(dir, m);
   }
+  return m;
 }
 
-// Kept with the excerpt markers, so clearMarkers resets both.
-export const markAlways = (sid, key, r) => mark('excerpts', sid, `always|${key}|${r.hash}`);
+export function marked(kind, sid, key) {
+  const m = markers(kind, sid);
+  return m.keys.has(key) || (m.legacy.size > 0 && m.legacy.has(shortHash(key)));
+}
 
-// mark() is the check as well, so two hooks racing deliver each one once.
+// Marks the keys not yet marked, in one append, and returns them. Two hooks racing on one key can both see it unmarked,
+// so each may deliver it; parallel tool calls in one agent are the only race, and they cost a repeat, not a miss.
+export function markMany(kind, sid, keys) {
+  const m = markers(kind, sid);
+  const fresh = [...new Set(keys)].filter(k => !marked(kind, sid, k));
+  if (!fresh.length) return [];
+  appendJsonl(path.join(markerDir(kind, sid), BATCH), fresh);
+  for (const k of fresh) m.keys.add(k);
+  return fresh;
+}
+
+export const mark = (kind, sid, key) => markMany(kind, sid, [key]).length > 0;
+
+// Kept with the excerpt markers, so clearMarkers resets both. Returns the [key, rule] entries not marked before.
+export function markAlways(sid, entries) {
+  const id = ([k, r]) => `always|${k}|${r.hash}`;
+  const fresh = new Set(markMany('excerpts', sid, entries.map(id)));
+  return entries.filter(e => fresh.has(id(e)));
+}
+
+// The first `max` items not yet marked, marked in one batch.
 export function markFirst(kind, sid, items, max, keyOf) {
   const due = [];
   for (const x of items) {
     if (due.length >= max) break;
-    if (mark(kind, sid, keyOf(x))) due.push(x);
+    if (!marked(kind, sid, keyOf(x)) && !due.some(d => keyOf(d) === keyOf(x))) due.push(x);
   }
-  return due;
+  const fresh = new Set(markMany(kind, sid, due.map(keyOf)));
+  return due.filter(x => fresh.has(keyOf(x)));
 }
 
 // A subagent's context is its own, so what it was shown is marked apart from the agent that started it. The agent goes
@@ -120,9 +149,10 @@ export const markPages = (input, ranked, max = config().delivery.maxPages) => ma
 // kept through compaction, so /lint can tell a rule a session was shown from one nothing brought up; the excerpt one
 // goes with compaction, so propose.mjs calls a rule shown only while it may still be in context. A failed write costs
 // the bookkeeping, not the delivery it records.
-export const markShown = (sid, key) => guarded('mark shown', () => {
-  mark('delivered', sid, key);
-  mark('excerpts', sid, `shown|${key}`);
+export const markShown = (sid, keys) => guarded('mark shown', () => {
+  const all = [].concat(keys);
+  markMany('delivered', sid, all);
+  markMany('excerpts', sid, all.map(k => `shown|${k}`));
 });
 export const wasShown = (sid, key) => marked('excerpts', sid, `shown|${key}`);
 
@@ -144,30 +174,30 @@ export function transcriptFor(prefix) {
 // tidy() may prune a session mid-read, and other tools drop files like desktop.ini into folders.
 const stray = e => ['ENOENT', 'ENOTDIR', 'EISDIR'].includes(e.code);
 
-function shownKeys(id) {
-  const dir = vaultPath('.state', 'delivered', id);
-  const keys = new Set();
+function allKeys(kind, id) {
+  const dir = vaultPath('.state', kind, id);
+  const keys = readKeys(dir);
   let files = [];
   try { files = fs.readdirSync(dir); } catch (e) { if (!stray(e)) throw e; }
-  for (const f of files) {
+  for (const f of files.filter(n => n !== BATCH)) {
     try { keys.add(fs.readFileSync(path.join(dir, f), 'utf8')); } catch (e) { if (!stray(e)) throw e; }
   }
   return keys;
 }
 
+const shownKeys = id => allKeys('delivered', id);
+
 // A marker holds its id, in which a rule's wording hash follows its key. The session whose evidence changed a rule's
 // wording already has it in mind, so its markers move to the new hash and only other sessions get the rule again.
 export const carryMarkers = (sid, key, from, to) => guarded('carry markers', () => {
   for (const kind of ['gate', 'excerpts']) {
-    const dir = vaultPath('.state', kind, safeId(sid));
-    let files = [];
-    try { files = fs.readdirSync(dir); } catch (e) { if (!stray(e)) throw e; }
-    for (const f of files) {
-      let parts;
-      try { parts = fs.readFileSync(path.join(dir, f), 'utf8').split('|'); } catch (e) { if (stray(e)) continue; throw e; }
+    const moved = [];
+    for (const id of allKeys(kind, safeId(sid))) {
+      const parts = id.split('|');
       const i = parts.indexOf(key);
-      if (i >= 0 && parts[i + 1] === from) mark(kind, sid, parts.with(i + 1, to).join('|'));
+      if (i >= 0 && parts[i + 1] === from) moved.push(parts.with(i + 1, to).join('|'));
     }
+    markMany(kind, sid, moved);
   }
 });
 
@@ -181,7 +211,10 @@ export function trackedSessions() {
 }
 
 export function clearMarkers(sid) {
-  for (const kind of ['gate', 'notes', 'excerpts', 'pages']) fs.rmSync(vaultPath('.state', kind, safeId(sid)), { recursive: true, force: true });
+  for (const kind of ['gate', 'notes', 'excerpts', 'pages']) {
+    fs.rmSync(markerDir(kind, sid), { recursive: true, force: true });
+    loaded.delete(markerDir(kind, sid));
+  }
 }
 
 const lastLint = () => readJsonSafe(vaultPath('.state', 'lint.json')) ?? {};
@@ -232,7 +265,9 @@ function prune(id, room) {
   return { removed, done: true };
 }
 
-const markersChanged = id => Math.max(...KINDS.map(kind => fs.statSync(vaultPath('.state', kind, id), { throwIfNoEntry: false })?.mtimeMs ?? 0));
+// An append leaves its folder's mtime as it was, so the batch file's own counts too.
+const changedAt = file => fs.statSync(file, { throwIfNoEntry: false })?.mtimeMs ?? 0;
+const markersChanged = id => Math.max(...KINDS.flatMap(kind => [changedAt(vaultPath('.state', kind, id)), changedAt(vaultPath('.state', kind, id, BATCH))]));
 
 // Nothing marks a session's end, so each day's first session start clears sessions idle for 30 days:
 // by last_seen when registered, otherwise by when their markers last changed. Session start removes at most

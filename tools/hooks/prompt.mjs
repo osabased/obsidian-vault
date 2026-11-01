@@ -5,7 +5,7 @@ import { touchSession, sessionDomains, markAlways, markShown, markFirst, markPag
 // Session start marks the always rules it loads, so these are the ones written, reworded or settled since,
 // or the ones of a domain the session moved into. A section's keys are the rules its items show.
 function late(sid, scope, rules) {
-  const due = alwaysIn(rules, scope).filter(([k, r]) => markAlways(sid, k, r));
+  const due = markAlways(sid, alwaysIn(rules, scope));
   return { noun: 'rule', head: 'Taste rules that apply for the rest of this session:', items: due.map(([k, r]) => ruleLine(k, r)), keys: due.map(([k]) => k) };
 }
 
@@ -42,6 +42,6 @@ runHook('prompt', input => {
   ];
   const { text: context, kept } = fitContext(sections);
   // A rule cut for room isn't counted as shown.
-  sections.forEach((s, i) => s?.keys?.slice(0, kept[i]).forEach(k => markShown(sid, k)));
+  markShown(sid, sections.flatMap((s, i) => s?.keys?.slice(0, kept[i]) ?? []));
   return context ? { hookSpecificOutput: { hookEventName: 'UserPromptSubmit', additionalContext: context } } : null;
 });
