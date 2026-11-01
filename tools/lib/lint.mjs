@@ -2,7 +2,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { isBuiltin } from 'node:module';
 import {
-  config, vaultPath, plural, today, datedFiles, filesIn, pickRows, rewriteText, lf, readJson, readJsonSafe, toPosix, memo, isVaultOnly, isMarkerName, clock, FILE_TOOLS, EDIT_HOOK_MATCHER,
+  config, vaultPath, plural, today, datedFiles, filesIn, pickRows, rewriteText, lf, readJson, readJsonSafe, toPosix, memo, statePath, isVaultOnly, isMarkerName, clock, FILE_TOOLS, EDIT_HOOK_MATCHER,
 } from './vault.mjs';
 import {
   vaultFile, loadNotes, noteErrors, ruleText, ruleTextParts, liveRules, knownDomain, alwaysSize, isUrl, validDay, normTopic, topicNotes, rawFile, toKey, resolver, linksUnder, noteLinks, byTopic, isTopicPage, isSourcePage, PAGE_KINDS, joinList,
@@ -17,6 +17,7 @@ import { transcriptFor } from './sessions.mjs';
 import { typedMessages, saidIn, sourceTexts, userPageTexts } from './quotes.mjs';
 import {
   KINDS, LOCATORS, hashFile, lineCount, clockTime, parseLocator, anchorsIn, derivedAnchors, manifestLine, sourceProblems, refSources,
+  sourceChains, noteCitations, knowledgeDays,
 } from './sources.mjs';
 
 export const tally = found => {
@@ -27,7 +28,16 @@ export const tally = found => {
 export function lint(notes = loadNotes()) {
   const found = [];
   const add = (level, file, msg, fix) => found.push({ level, file, msg, fix });
-  const { domains, delivery, knowledge } = config();
+  const { domains, delivery } = config();
+  const chains = sourceChains();
+  const citesOf = noteCitations(notes, chains);
+  const checks = readJsonSafe(statePath('derived.json'))?.sources ?? {};
+  // A source re-checked unchanged keeps its notes fresh, so the age counts from the day every source the note cites was
+  // last checked, when that is later than as_of.
+  const lastChecked = n => {
+    const days = [...citesOf(n).ids].map(id => checks[id]?.checked);
+    return days.length && days.every(validDay) ? days.sort()[0] : null;
+  };
   const keys = new Set(notes.map(n => n.key));
   const named = new Map();
   for (const n of notes) named.set(n.slug, [...(named.get(n.slug) ?? []), n]);
@@ -95,8 +105,14 @@ export function lint(notes = loadNotes()) {
       add('warn', n.rel, `always: true loads this rule at every session start, and its ${ruleTextParts(n)} come to ${ruleText(n).length} characters, over the ${delivery.maxRuleChars} a taste rule may have. Shorten it, or give it keywords instead`);
     }
     if (n.kind === 'knowledge' && !n.superseded_by && validDay(n.as_of)) {
-      const days = Math.round((Date.parse(today()) - Date.parse(n.as_of)) / 864e5);
-      if (days > knowledge.staleAfterDays) add('warn', n.rel, `as_of is ${days} days old. If it still holds, set as_of to the day you checked; if not, delete the note`);
+      const checked = lastChecked(n);
+      const from = checked && checked > n.as_of ? checked : n.as_of;
+      const days = Math.round((Date.parse(today()) - Date.parse(from)) / 864e5);
+      if (days > knowledgeDays(n.domain).staleAfterDays) {
+        add('warn', n.rel, from === n.as_of
+          ? `as_of is ${days} days old. If it still holds, set as_of to the day you checked; if not, delete the note`
+          : `the sources it cites were last checked ${days} days ago, on ${checked}. Run /lint to refresh them, or set as_of to the day you checked the fact; if it no longer holds, delete the note`);
+      }
     }
   }
 
@@ -105,7 +121,7 @@ export function lint(notes = loadNotes()) {
   lintTopicPages(notes, add);
   lintOrphans(notes, resolve, add);
   lintPicks(add);
-  lintSources(add);
+  lintSources(add, chains);
   lintBundles(add, hashOf);
   lintDerived(add, hashOf);
   lintReach(add);
@@ -232,6 +248,9 @@ export function lintConfig(add) {
       else if (!hasExtension('aliases', name)) bad(`${at}.${ns} names ${name}, and ${extensionRel('aliases', name)} doesn't exist`);
     }
   }
+  for (const [d, x] of Object.entries(isMap(c.domains) ? c.domains : {})) {
+    if (x?.feeds !== undefined) add('warn', 'vault.config.json', `${d}.feeds does nothing yet: no feed parser ships, so refresh reads no feeds`);
+  }
   const editTools = c.editTools ?? {};
   if (!isMap(editTools)) return bad('editTools must be an object of { namespace, path, after } by tool name');
   const FIELD = /^tool_input\.\S+$/;
@@ -312,13 +331,15 @@ function lintFootnotes(n, { lines, anchors }, add) {
 
 // Raw files are append-only, so a saved source's fields are warnings: a fix is a new file, not an edit. A parse
 // error, such as a quote that never closes, is a warning too: as an error it would block every commit.
-function lintSources(add) {
-  for (const f of refSources().loose.filter(x => x.endsWith('.md'))) {
+// A doc set's pages and manifest copies are checked as loose files are, though the set is listed as one source.
+function lintSources(add, chains) {
+  const inSets = [...chains.files].filter(([, e]) => e.set).map(([rel]) => rel);
+  for (const f of [...new Set([...refSources().loose.filter(x => x.endsWith('.md')), ...inSets])].sort()) {
     const parsed = parsedFile(f);
     if (!parsed?.ok) continue;
     for (const msg of parsed.errors) add('warn', f, msg);
     if (parsed.data.url == null && parsed.data.repo == null) continue;
-    for (const msg of sourceProblems(parsed.data, { body: parsed.body })) add('warn', f, msg);
+    for (const msg of sourceProblems(parsed.data, { body: parsed.body, rel: f, chains })) add('warn', f, msg);
   }
 }
 
@@ -624,7 +645,8 @@ function codeErrors(rel, src) {
   const { code, comments, strings } = scanned;
   const errors = [];
   const inHooks = rel.startsWith('hooks/');
-  const quiet = inHooks || rel.startsWith('lib/');
+  // Readers and aliases in ext/ run inside hooks, so they stay off the network as lib/ does.
+  const quiet = inHooks || rel.startsWith('lib/') || rel.startsWith('ext/');
 
   const specs = [...code.matchAll(/(?<![\w$.])(?:from|import|require)\s*\(?\s*(?=['"`])/g)]
     .map(m => strings.get(m.index + m[0].length))
@@ -634,10 +656,18 @@ function codeErrors(rel, src) {
     if (!relative && !spec.startsWith('node:') && isBuiltin(spec)) errors.push(`imports '${spec}'; name built-ins with node:, as in 'node:${spec}'`);
     else if (!relative && !(spec.startsWith('node:') && isBuiltin(spec))) errors.push(`imports '${spec}'; tools/ uses only Node's built-in modules`);
     const mod = spec.replace(/^node:/, '');
-    if (mod === 'child_process' && rel !== 'lib/git.mjs') errors.push("imports node:child_process; only lib/git.mjs runs another program, git status");
-    if (quiet && NETWORK.includes(mod)) errors.push(`imports node:${mod}; hooks and lib/ stay off the network`);
+    if (mod === 'child_process' && rel !== 'lib/git.mjs') errors.push('imports node:child_process; only lib/git.mjs runs another program, git, and hooks call only changedFiles from it');
+    if (quiet && NETWORK.includes(mod)) errors.push(`imports node:${mod}; hooks, lib/ and ext/ stay off the network`);
   }
-  if (quiet && /(?<![\w$.])fetch\s*\(/.test(code)) errors.push('calls fetch(); hooks and lib/ stay off the network');
+  if (inHooks) {
+    for (const m of code.matchAll(/(?<![\w$.])import\s+([^'"`;]*?)\s+from\s*(?=['"])/g)) {
+      if (!/(?:^|\/)lib\/git\.mjs$/.test(strings.get(m.index + m[0].length) ?? '')) continue;
+      const { names, named } = bindings(m[1]);
+      const others = [...names, ...named.map(([orig]) => orig).filter(x => x !== 'changedFiles')];
+      if (others.length) errors.push(`imports ${others.join(', ')} from lib/git.mjs; hooks call only changedFiles from it`);
+    }
+  }
+  if (quiet && /(?<![\w$.])fetch\s*\(/.test(code)) errors.push('calls fetch(); hooks, lib/ and ext/ stay off the network');
 
   if (inHooks && !/(?<![\w$.])runHook\s*\(/.test(code)) errors.push("doesn't go through runHook");
   if (quiet && rel !== 'lib/vault.mjs') {

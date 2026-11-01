@@ -11,7 +11,7 @@ These keep the hooks safe to run in every session. Follow them when you change a
 ## Hooks
 
 - Every hook goes through `runHook`. It skips safe mode and prints JSON only when there is something to deliver. A hook that throws logs the error to `.state/errors.log`, prints one line, `vault <hook> failed: <message>; see .state/errors.log`, and exits 1, so the user sees a hook error and the call goes ahead. Any code may throw to trigger this.
-- Hooks finish fast: no network, and no child process but the one `git status` that `lib/git.mjs` runs with a timeout. A loop over the notes calls `checkDeadline()` from `lib/deadline.mjs`, which throws once the hook nears the `VAULT_HOOK_TIMEOUT` its command passes (10 seconds when unset).
+- Hooks finish fast: no network, and no child process but the one `git status` that `changedFiles` in `lib/git.mjs` runs with a timeout. `lib/git.mjs` is the one place `tools/` runs another program, git, and hooks call only `changedFiles` from it; refresh runs the rest. A loop over the notes calls `checkDeadline()` from `lib/deadline.mjs`, which throws once the hook nears the `VAULT_HOOK_TIMEOUT` its command passes (10 seconds when unset).
 - Hook messages are copy the user and the agent read. Keep their wording unless the user agrees to a change.
 
 ## State
@@ -35,9 +35,9 @@ These keep the hooks safe to run in every session. Follow them when you change a
 
 - Imports, whether `import … from`, `import()` or `require()`, are `node:` built-ins or relative paths.
 - Every file in `hooks/` calls `runHook`.
-- Nothing in `hooks/` or `lib/` prints (`console.*`, `process.stdout.write`, `process.stderr.write`) except `lib/vault.mjs`, where `runHook` prints. Scripts directly in `tools/` may print.
+- Nothing in `hooks/`, `lib/` or `ext/` prints (`console.*`, `process.stdout.write`, `process.stderr.write`) except `lib/vault.mjs`, where `runHook` prints. Scripts directly in `tools/` may print.
 - Only `lib/vault.mjs` and `lib/sessions.mjs` call fs functions that change files: write, append, rename, remove, make folders, copy, open for writing or write streams, sync or async, as `fs.x(` or imported by name. Anywhere else, use or add a helper in `lib/vault.mjs`.
-- Nothing but `lib/git.mjs` imports `node:child_process`. Nothing in `hooks/` or `lib/` imports `node:http`, `node:https`, `node:http2`, `node:net`, `node:tls` or `node:dgram`, or calls `fetch(`.
+- Nothing but `lib/git.mjs` imports `node:child_process`, and nothing in `hooks/` imports anything but `changedFiles` from it. Nothing in `hooks/`, `lib/` or `ext/` imports `node:http`, `node:https`, `node:http2`, `node:net`, `node:tls` or `node:dgram`, or calls `fetch(`.
 - `process.cwd()` appears only in `lib/vault.mjs`.
 - No TODO, FIXME, XXX or HACK comments, no `/**` docstrings, and no banner comments such as `// ===`, `// ---`, `// Step 1` or `// Note:`.
 

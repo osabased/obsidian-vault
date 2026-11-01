@@ -112,7 +112,19 @@ test('lint refuses node:child_process anywhere but lib/git.mjs', async t => {
   v.write('tools/lib/runner.mjs', "import { execFileSync } from 'node:child_process';\nexport const run = () => execFileSync('ls');\n");
   const { lint } = await v.import('lib/lint.mjs');
   const found = lint().filter(f => f.file.startsWith('tools/') && /child_process/.test(f.msg));
-  assert.deepEqual(found.map(f => [f.file, f.msg]), [['tools/lib/runner.mjs', 'imports node:child_process; only lib/git.mjs runs another program, git status']]);
+  assert.deepEqual(found.map(f => [f.file, f.msg]), [['tools/lib/runner.mjs', 'imports node:child_process; only lib/git.mjs runs another program, git, and hooks call only changedFiles from it']]);
+});
+
+test('lint refuses a hook that imports anything but changedFiles from lib/git.mjs, and network modules in ext/', async t => {
+  const v = makeVault(t);
+  v.write('tools/hooks/cloner.mjs', "import { runHook } from '../lib/vault.mjs';\nimport { changedFiles, clone } from '../lib/git.mjs';\nrunHook('cloner', () => changedFiles('.') && clone);\n");
+  v.write('tools/ext/readers/remote.mjs', "import https from 'node:https';\nexport const read = () => https;\n");
+  const { lint } = await v.import('lib/lint.mjs');
+  const found = lint().filter(f => ['tools/hooks/cloner.mjs', 'tools/ext/readers/remote.mjs'].includes(f.file)).map(f => [f.file, f.msg]);
+  assert.deepEqual(found, [
+    ['tools/ext/readers/remote.mjs', 'imports node:https; hooks, lib/ and ext/ stay off the network'],
+    ['tools/hooks/cloner.mjs', 'imports clone from lib/git.mjs; hooks call only changedFiles from it'],
+  ].sort());
 });
 
 test('guarded rethrows a deadline error, and git stops at the time left', async t => {
