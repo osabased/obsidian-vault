@@ -17,7 +17,7 @@ export const vaultPath = (...xs) => path.join(ROOT, ...xs);
 // The tools/ this code runs from, so a script a hook names is from the same commit as the hook.
 export const toolsPath = (...xs) => path.join(import.meta.dirname, '..', ...xs);
 
-const DEFAULTS = {
+export const DEFAULTS = {
   delivery: { maxRulesPerEdit: 3, maxRuleChars: 300, maxKnowledgeRuleChars: 600, maxBlockChars: 1200, maxPromptExcerpts: 3, maxPages: 3, maxContextChars: 8000, activeMaxLines: 60, activeMaxBytes: 4096, settleSeconds: 60, tidyMaxMarkers: 2000 },
   knowledge: { staleAfterDays: 180, checkAfterDays: 14 },
   refresh: { timeoutSeconds: 20, maxBytes: 5_000_000 },
