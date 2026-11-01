@@ -4,7 +4,7 @@ import {
   rankPair, sourceItem,
 } from './lib/rules.mjs';
 import { lint, tally } from './lib/lint.mjs';
-import { lintRan, lintDone, trackedSessions, sessionDomains } from './lib/sessions.mjs';
+import { lintRan, lintDone, tidy, trackedSessions, sessionDomains } from './lib/sessions.mjs';
 import { subjectRows, liveRows, newestFirst, projectName } from './lib/picks.mjs';
 import { UsageError } from './lib/input.mjs';
 import { refSources, sourceVersion } from './lib/sources.mjs';
@@ -184,6 +184,8 @@ function runStatus() {
   // /lint runs status first, so this is what quiets the session-start error line and reminder. A failed stamp is
   // logged, and session start reports it.
   guarded('lint stamp', lintRan);
+  // Session start clears old sessions a few at a time; /lint clears the rest.
+  guarded('tidy', () => tidy({ full: true }));
 }
 
 const COMMANDS = {

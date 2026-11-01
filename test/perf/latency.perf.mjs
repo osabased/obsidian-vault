@@ -45,7 +45,7 @@ test('a gated edit takes under 300 ms at 3,000 notes', { ...perf, todo: '6.2c' }
   assert.ok(ms < 300, `${Math.round(ms)} ms`);
 });
 
-test('three parallel proposes at 3,000 notes all succeed', { ...perf, todo: '6.6f' }, async t => {
+test('three parallel proposes at 3,000 notes all succeed', perf, async t => {
   const v = shared(3000);
   const start = performance.now();
   const results = await proposeAtOnce(v, unrelatedRules('ui', `parallel-${Date.now()}`), { timeout: 120e3 });

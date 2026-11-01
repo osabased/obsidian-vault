@@ -10,7 +10,7 @@ These keep the hooks safe to run in every session. Follow them when you change a
 
 ## Hooks
 
-- Every hook goes through `runHook`. It skips safe mode, fails open (errors go to `.state/errors.log`, nothing is printed), and prints JSON only when there is something to deliver.
+- Every hook goes through `runHook`. It skips safe mode and prints JSON only when there is something to deliver. A hook that throws logs the error to `.state/errors.log`, prints one line, `vault <hook> failed: <message>; see .state/errors.log`, and exits 1, so the user sees a hook error and the call goes ahead. Any code may throw to trigger this.
 - Hooks finish fast: no network and no child processes.
 - Hook messages are copy the user and the agent read. Keep their wording unless the user agrees to a change.
 

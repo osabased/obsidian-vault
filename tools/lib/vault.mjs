@@ -17,7 +17,7 @@ export const vaultPath = (...xs) => path.join(ROOT, ...xs);
 export const toolsPath = (...xs) => path.join(import.meta.dirname, '..', ...xs);
 
 const DEFAULTS = {
-  delivery: { maxRulesPerEdit: 3, maxRuleChars: 300, maxKnowledgeRuleChars: 600, maxBlockChars: 1200, maxPromptExcerpts: 3, maxPages: 3, activeMaxLines: 60, activeMaxBytes: 4096, settleSeconds: 60 },
+  delivery: { maxRulesPerEdit: 3, maxRuleChars: 300, maxKnowledgeRuleChars: 600, maxBlockChars: 1200, maxPromptExcerpts: 3, maxPages: 3, activeMaxLines: 60, activeMaxBytes: 4096, settleSeconds: 60, tidyMaxMarkers: 2000 },
   knowledge: { staleAfterDays: 180 },
   lint: { remindAfterDays: 14, remindAfterNotes: 10 },
   picks: { maxSheetBytes: 3_000_000 },
@@ -41,8 +41,11 @@ export function config() {
   return loaded;
 }
 
-// Git Bash hands out /c/Users/... paths; Node on Windows needs c:/Users/...
-const native = p => (process.platform === 'win32' ? String(p).replace(/\\/g, '/').replace(/^\/([a-z])(?=\/|$)/i, '$1:') : String(p));
+// Git Bash hands out /c/Users/... paths; Node on Windows needs c:/Users/... The \\?\ and \\.\ prefixes only lift the
+// length limit, so they come off before paths are compared.
+const native = p => (process.platform === 'win32'
+  ? String(p).replace(/\\/g, '/').replace(/^\/\/[?.]\/UNC\//i, '//').replace(/^\/\/[?.]\/(?=[a-z]:)/i, '').replace(/^\/([a-z])(?=\/|$)/i, '$1:')
+  : String(p));
 
 export function toPosix(p, base = process.cwd()) {
   const s = path.resolve(native(base), native(p)).replace(/\\/g, '/');
@@ -355,7 +358,7 @@ export function logError(name, e) {
     // A hook that saw the full log may wait while another rotates it, so it checks the size again under
     // the lock rather than rotate the fresh log over the full one. No log yet, a busy lock or a failed
     // rename: this error still gets logged.
-    try { if (big()) withLock(`${file}.lock`, () => { if (big()) fs.renameSync(file, `${file}.1`); }); } catch {}
+    try { if (big()) withLock(`${file}.lock`, () => { if (big()) fs.renameSync(file, `${file}.1`); }, { waitMs: 3000 }); } catch {}
     fs.appendFileSync(file, `${new Date().toISOString()} ${name}: ${e?.stack ?? e}\n`);
   } catch {}
 }
@@ -388,7 +391,7 @@ export const cwdOf = input => input.cwd || process.cwd();
 export const FILE_TOOLS = ['Edit', 'Write', 'MultiEdit', 'NotebookEdit'];
 export const toolFile = (name, input) => (name === 'NotebookEdit' ? input.notebook_path : input.file_path);
 
-// Hooks fail open: a broken vault must never block the user's session.
+// A failed hook exits 1 with one line, so the user sees a hook error and the call goes ahead; exit 2 would block it.
 export function runHook(name, fn) {
   if (process.env.CLAUDE_CODE_SAFE_MODE === '1') return;
   try {
@@ -396,31 +399,65 @@ export function runHook(name, fn) {
     if (out) process.stdout.write(JSON.stringify(out));
   } catch (e) {
     logError(name, e);
+    const why = String(e?.message ?? e).replace(/\s+/g, ' ').trim();
+    process.stderr.write(`vault ${name} failed: ${why}; see .state/errors.log\n`);
+    process.exitCode = 1;
   }
 }
 
 export const shortHash = s => crypto.createHash('sha256').update(String(s)).digest('hex').slice(0, 16);
 export const safeId = s => (/^[A-Za-z0-9_-]{1,100}$/.test(String(s)) ? String(s) : shortHash(s));
 
-function tryLock(file, staleMs) {
-  for (let i = 0; i < 2; i++) {
-    try {
-      fs.writeFileSync(file, String(process.pid), { flag: 'wx' });
-      return true;
-    } catch (e) {
-      if (e.code !== 'EEXIST') throw e;
-      if (Date.now() - mtime(file) <= staleMs) return false;
-      fs.rmSync(file, { force: true });
-    }
+// A lock file holds its owner's token, "<pid>:<random>". Release and stealing both go by the token, so a process
+// never removes a lock someone else now holds.
+const alive = pid => {
+  try { process.kill(pid, 0); return true; } catch (e) { return e.code === 'EPERM'; }
+};
+
+const LOCK_UNOWNED_MS = 10_000;
+
+// A dead owner's lock is stale at once. A live owner keeps it until staleMs, which only guards against a recycled pid, so
+// a slow propose is never robbed. A file with no token yet is being written, or was cut short.
+function stale(token, ageMs, staleMs) {
+  const pid = Number(/^(\d+)/.exec(token)?.[1]);
+  if (!pid) return ageMs > LOCK_UNOWNED_MS;
+  return alive(pid) ? ageMs > staleMs : true;
+}
+
+const readToken = file => { try { return fs.readFileSync(file, 'utf8'); } catch { return null; } };
+
+// Moving the file aside is atomic, so of several waiters that judge one lock stale only one gets it. If the lock moved was
+// a fresh one taken meanwhile, it goes back.
+function steal(file, seen, token) {
+  const aside = `${file}.${token.replace(':', '-')}.stale`;
+  try { fs.renameSync(file, aside); } catch { return; }
+  if (readToken(aside) !== seen) {
+    try { fs.linkSync(aside, file); } catch {}
   }
+  fs.rmSync(aside, { force: true });
+}
+
+function tryLock(file, token, staleMs) {
+  try {
+    fs.writeFileSync(file, token, { flag: 'wx' });
+    return true;
+  } catch (e) {
+    if (e.code !== 'EEXIST') throw e;
+  }
+  const seen = readToken(file);
+  if (seen !== null && stale(seen, Date.now() - mtime(file), staleMs)) steal(file, seen, token);
   return false;
 }
 
-export function withLock(file, fn, staleMs = 10000) {
-  const giveUp = Date.now() + 3000;
-  while (!tryLock(file, staleMs)) {
+// A propose holds the lock for about 6 s at 3,000 notes, and three at once run one after another, so a waiter gives up
+// only after a minute.
+export function withLock(file, fn, { waitMs = 60_000, staleMs = 300_000 } = {}) {
+  const token = `${process.pid}:${crypto.randomBytes(6).toString('hex')}`;
+  fs.mkdirSync(path.dirname(file), { recursive: true });
+  const giveUp = Date.now() + waitMs;
+  while (!tryLock(file, token, staleMs)) {
     if (Date.now() > giveUp) throw new Error(`${path.basename(file)} is held by another process`);
     sleep(50);
   }
-  try { return fn(); } finally { fs.rmSync(file, { force: true }); }
+  try { return fn(); } finally { if (readToken(file) === token) fs.rmSync(file, { force: true }); }
 }

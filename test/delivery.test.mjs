@@ -260,7 +260,7 @@ test('a trigger with nested wildcards does not hold the edit hook up on a long l
   assert.equal(edit(v, sid, 'src/b.txt', { text: `make(${'1,'.repeat(407)}1`, timeout: deadline }), null);
 });
 
-test('a file path with the long-path prefix is gated by the rules of its project', { todo: '6.6h', skip: process.platform !== 'win32' && 'the prefix is a Windows spelling' }, t => {
+test('a file path with the long-path prefix is gated by the rules of its project', { skip: process.platform !== 'win32' && 'the prefix is a Windows spelling' }, t => {
   const v = makeVault(t);
   v.write('wiki/demo/rules/ui-rule.md', ruleNote({ applies_to: ['src/**/*.txt'] }));
   const file = path.join(v.project, 'src', 'a.txt');

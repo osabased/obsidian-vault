@@ -205,27 +205,48 @@ export function errorsSinceLint() {
 
 const KINDS = ['gate', 'notes', 'excerpts', 'pages', 'repeats', 'delivered'];
 
-// The registry goes last, so a session whose markers can't be removed yet is tried again next time.
-function prune(id) {
-  for (const kind of KINDS) fs.rmSync(vaultPath('.state', kind, id), { recursive: true, force: true });
+// Removes up to `room` marker files of a session, then its folders, and returns how many files it removed. The registry
+// goes last, and only once every folder is gone, so a session left half pruned is tried again next time.
+function prune(id, room) {
+  let removed = 0;
+  for (const kind of KINDS) {
+    const dir = vaultPath('.state', kind, id);
+    let files = [];
+    try { files = fs.readdirSync(dir); } catch (e) { if (!stray(e)) throw e; }
+    for (const f of files.slice(0, room - removed)) {
+      fs.rmSync(path.join(dir, f), { recursive: true, force: true });
+      removed++;
+    }
+    if (files.length > room - removed) return { removed, done: false };
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
   fs.rmSync(registry(id), { force: true });
+  return { removed, done: true };
 }
 
 const markersChanged = id => Math.max(...KINDS.map(kind => fs.statSync(vaultPath('.state', kind, id), { throwIfNoEntry: false })?.mtimeMs ?? 0));
 
 // Nothing marks a session's end, so each day's first session start clears sessions idle for 30 days:
-// by last_seen when registered, otherwise by when their markers last changed.
-export function tidy() {
+// by last_seen when registered, otherwise by when their markers last changed. Session start removes at most
+// delivery.tidyMaxMarkers marker files a run and tries again at the next, so a long backlog can't hold it up; /lint
+// passes full and clears the lot.
+export function tidy({ full = false } = {}) {
   const stampFile = statePath('tidy.json');
-  if (Date.now() - Date.parse(readJsonSafe(stampFile)?.at) < DAY) return;
-  writeJson(stampFile, { at: new Date().toISOString() });
+  if (!full && Date.now() - Date.parse(readJsonSafe(stampFile)?.at) < DAY) return;
+  let room = full ? Infinity : Math.max(0, Number(config().delivery.tidyMaxMarkers) || 0);
+  let finished = true;
   const registered = new Set(registeredIds());
   for (const id of new Set([...registered, ...KINDS.flatMap(kind => fs.readdirSync(stateDir(kind)))])) {
     try {
       const seen = registered.has(id) ? Date.parse(readJsonSafe(registry(id))?.last_seen) : markersChanged(id);
-      if (!(Date.now() - seen <= 30 * DAY)) prune(id);
+      if (Date.now() - seen <= 30 * DAY) continue;
+      if (room <= 0) { finished = false; break; }
+      const r = prune(id, room);
+      room -= r.removed;
+      if (!r.done) { finished = false; break; }
     } catch (e) {
       logError('tidy', e);
     }
   }
+  if (finished) writeJson(stampFile, { at: new Date().toISOString() });
 }

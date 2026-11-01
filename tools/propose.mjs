@@ -324,7 +324,6 @@ function addEvidence(f, e, scope, rules, same, row, notes) {
   writeSettled(file, after);
   appendJsonl(inboxFile(f.sid), [row(target)]);
   appendLog([`added evidence to ${target} · session ${f.sid.slice(0, 8)}`]);
-  guarded('build', build);
   const [was, is] = [n, now].map(x => shortHash(ruleText(x)));
   if (was !== is) carryMarkers(f.sid, target, was, is);
   const moved = now.as_of !== n.as_of;
@@ -377,7 +376,7 @@ function propose(sid, p) {
   const cap = maxChars(n.kind);
   if (ruleText(n).length > cap) refuse(`${ruleTextParts(n)} come to ${ruleText(n).length} characters; keep them under ${cap} together.`);
 
-  return withLock(statePath('propose.lock'), () => {
+  const out = withLock(statePath('propose.lock'), () => {
     const rows = proposalRows();
     // Any later session can re-propose a recorded answer, so each one backs a single rule.
     const earlier = e.pick && rows.find(r => r.pick === e.pick);
@@ -400,8 +399,6 @@ function propose(sid, p) {
     writeSettled(file, text);
     appendJsonl(inboxFile(sid), [row(key)]);
     appendLog([`wrote ${key} · session ${sid.slice(0, 8)}`]);
-    // The note is written by now, so a failed build costs the generated files, not the reply that names the rule.
-    guarded('build', build);
     const reply = [
       `**New ${f.kind === 'knowledge' ? 'knowledge rule' : 'rule'}** ${key}: ${ruleText(n)}`,
       ...(overlaps.length ? [`It may overlap ${joinList(overlaps, 'and')}.`] : []),
@@ -409,6 +406,10 @@ function propose(sid, p) {
     ];
     return [`Wrote ${rel}. ${sameFiles(f, n, notes, rules)}End your reply with these ${['two', 'three'][reply.length - 2]} lines as they are:`, '', ...reply].join('\n');
   });
+  // The rebuild takes seconds at thousands of notes, so it runs after the lock is released rather than hold up the other
+  // proposes. The note is written by now, so a failed build costs the generated files, not the reply that names the rule.
+  guarded('build', build);
+  return out;
 }
 
 const [sid, ...rest] = process.argv.slice(2);
