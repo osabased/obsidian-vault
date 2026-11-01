@@ -3,16 +3,16 @@ import assert from 'node:assert/strict';
 import { makeVault, ruleNote, denied } from './fixture.mjs';
 
 const SID = '9f8e7d6c-0000-4000-8000-000000000002';
-const PAGE_REL = 'wiki/demo/source-shop.md';
+const PAGE_REL = 'wiki/glim/source-shop.md';
 const SAID = '- 2026-10-01 · session 1a2b3c4d · "the cards breathe, the tabs feel cramped"';
 const READING = 'Cards sit on a 12px grid with roomy padding; the tab bar packs six tabs into the top strip.';
 
 const PAGE = [
-  '---', 'type: page', 'domain: demo', 'kind: source', 'topic: layout', 'summary: Shop screens where the tabs feel cramped.', 'source: raw/refs/shop.png',
+  '---', 'type: page', 'domain: glim', 'kind: source', 'topic: layout', 'summary: Shop screens where the tabs feel cramped.', 'source: raw/refs/shop.png',
   'created: 2026-10-01', 'updated: 2026-10-01', '---', '',
   '## You said', SAID, '- 2026-10-02 · session 1a2b3c4d · "more room between tabs"', '',
   "## Agent's reading", READING, 'The shop header uses the same accent as the buy buttons, and the prices sit right-aligned.', '',
-  '## Rules', '- [[wiki/demo/roomy-cards|roomy-cards]]', '',
+  '## Rules', '- [[wiki/glim/roomy-cards|roomy-cards]]', '',
 ].join('\n');
 
 function vault(t, files = { [PAGE_REL]: PAGE }) {
@@ -39,8 +39,8 @@ test('a different edit that still removes the words is refused again', t => {
 test('an Evidence line removed from a rule note by Write is refused', t => {
   const evidence = ['- 2026-10-01 · stated · session 1a2b3c4d · "do the thing" (a-00000001)', '- 2026-10-03 · correction · session 5e6f7a8b · "no, do the thing" (a-00000002)'];
   const rule = ruleNote({ evidence });
-  const v = vault(t, { 'wiki/demo/the-thing.md': rule });
-  const out = edit(v, 'Write', 'wiki/demo/the-thing.md', { content: rule.replace(`${evidence[1]}\n`, '') });
+  const v = vault(t, { 'wiki/glim/the-thing.md': rule });
+  const out = edit(v, 'Write', 'wiki/glim/the-thing.md', { content: rule.replace(`${evidence[1]}\n`, '') });
   assert.match(denied(out) ?? '', /no, do the thing/);
 });
 
@@ -72,7 +72,7 @@ test('a page cut below 70% of its length is refused once', t => {
   const v = vault(t);
   const reading = PAGE.slice(PAGE.indexOf("## Agent's reading"), PAGE.indexOf('## Rules'));
   const cut = { old_string: reading, new_string: "## Agent's reading\nCards.\n\n" };
-  assert.match(denied(edit(v, 'Edit', PAGE_REL, cut)) ?? '', /cuts wiki\/demo\/source-shop\.md to \d+%/);
+  assert.match(denied(edit(v, 'Edit', PAGE_REL, cut)) ?? '', /cuts wiki\/glim\/source-shop\.md to \d+%/);
   assert.equal(denied(edit(v, 'Edit', PAGE_REL, cut)), null);
 });
 
@@ -83,13 +83,13 @@ test('a page trimmed by less than 30% is allowed', t => {
 
 test('a rule note may shrink', t => {
   const long = ruleNote({ because: 'A long reason that takes up most of the note, repeated for length. '.repeat(6) });
-  const v = vault(t, { 'wiki/demo/long.md': long });
-  assert.equal(denied(edit(v, 'Write', 'wiki/demo/long.md', { content: ruleNote({ because: 'Short.' }) })), null);
+  const v = vault(t, { 'wiki/glim/long.md': long });
+  assert.equal(denied(edit(v, 'Write', 'wiki/glim/long.md', { content: ruleNote({ because: 'Short.' }) })), null);
 });
 
 test('a new page, an edit that would not apply and files outside wiki/ are not checked', t => {
   const v = vault(t, { [PAGE_REL]: PAGE, 'notes/scratch.md': PAGE });
-  assert.equal(denied(edit(v, 'Write', 'wiki/demo/source-new.md', { content: PAGE })), null);
+  assert.equal(denied(edit(v, 'Write', 'wiki/glim/source-new.md', { content: PAGE })), null);
   assert.equal(denied(edit(v, 'Edit', PAGE_REL, { old_string: 'not in the page', new_string: '' })), null);
   assert.equal(denied(edit(v, 'Write', 'notes/scratch.md', { content: '' })), null);
 });

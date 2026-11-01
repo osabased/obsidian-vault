@@ -46,7 +46,7 @@ test('a session with one domain records it, its project root, and a file of its 
   assert.match(r.stdout, new RegExp(`^Recorded q-[0-9a-f]{8} in raw/picks/${file.replace('.', '\\.')}\\.`));
   assert.deepEqual(fs.readdirSync(v.at('raw', 'picks')), [file]);
   const [row] = rowsIn(v, 'picks');
-  assert.equal(row.domain, 'demo');
+  assert.equal(row.domain, 'glim');
   assert.equal(lower(row.project), lower(v.project));
 });
 
@@ -66,9 +66,9 @@ test('a session at a monorepo root picks for a package\'s domain, and must name 
   const none = pick(v, sid, comment());
   assert.equal(none.code, 1);
   assert.equal(none.stderr, 'Not recorded: this session is in more than one domain: alpha and beta. Add domain with the one this is for.\n');
-  const wrong = pick(v, sid, comment({ domain: 'demo' }));
+  const wrong = pick(v, sid, comment({ domain: 'glim' }));
   assert.equal(wrong.code, 1);
-  assert.equal(wrong.stderr, "Not recorded: demo isn't a domain of this session. It has: alpha and beta.\n");
+  assert.equal(wrong.stderr, "Not recorded: glim isn't a domain of this session. It has: alpha and beta.\n");
   assert.equal(pick(v, sid, comment({ domain: 'alpha' })).code, 0);
   assert.equal(pick(v, sid, comment({ domain: 'beta', comment: 'beta words' })).code, 0);
   const rows = rowsIn(v, 'picks');
@@ -80,8 +80,8 @@ test('a session with one domain refuses another and lists the one it has', t => 
   const { v, sid } = setup(t);
   const r = pick(v, sid, comment({ domain: 'beta' }));
   assert.equal(r.code, 1);
-  assert.equal(r.stderr, "Not recorded: beta isn't a domain of this session. It has: demo.\n");
-  assert.equal(pick(v, sid, comment({ domain: 'demo' })).code, 0);
+  assert.equal(r.stderr, "Not recorded: beta isn't a domain of this session. It has: glim.\n");
+  assert.equal(pick(v, sid, comment({ domain: 'glim' })).code, 0);
 });
 
 test('a confirmation takes the domain of the pick it confirms, and a pick in one domain is not replaced from another', t => {
@@ -127,7 +127,7 @@ test('propose cites a pick in its own domain, and a row with no domain in any', 
 
 test('the readers take the old per-day files and the per-session ones, and nothing else, in the order of the rows', async t => {
   const v = makeVault(t);
-  const row = (id, at, extra = {}) => `${JSON.stringify({ id, at, source: 'pick', domain: 'demo', subject: 'cards', text: id, status: 'user', ...extra })}\n`;
+  const row = (id, at, extra = {}) => `${JSON.stringify({ id, at, source: 'pick', domain: 'glim', subject: 'cards', text: id, status: 'user', ...extra })}\n`;
   v.write('raw/picks/2026-10-01.jsonl', row('q-00000002', '2026-10-01T12:00:00.000Z'));
   v.write('raw/picks/2026-10-01-a1b2c3d4.jsonl', row('q-00000003', '2026-10-01T13:00:00.000Z') + row('q-00000001', '2026-10-01T09:00:00.000Z'));
   v.write('raw/picks/2026-10-01-cards.png', 'not rows');
@@ -156,27 +156,27 @@ test('show leaves out the picks of another domain in the same folder', t => {
   const sid = sessionId();
   v.startSession(sid);
   assert.equal(pick(v, sid, comment({ domain: 'other', comment: 'words for the other domain' })).code, 0);
-  assert.equal(pick(v, sid, comment({ domain: 'demo', comment: 'words for demo' })).code, 0);
-  const demo = v.run('pick.mjs', ['show', sid, 'cards', 'demo']).stdout;
-  assert.match(demo, /words for demo/);
-  assert.doesNotMatch(demo, /words for the other domain/);
+  assert.equal(pick(v, sid, comment({ domain: 'glim', comment: 'words for glim' })).code, 0);
+  const glim = v.run('pick.mjs', ['show', sid, 'cards', 'glim']).stdout;
+  assert.match(glim, /words for glim/);
+  assert.doesNotMatch(glim, /words for the other domain/);
   assert.match(v.run('pick.mjs', ['show', sid, 'cards', 'other']).stdout, /words for the other domain/);
 });
 
 test("show lists the taste and knowledge rules of every domain in the project's folder", t => {
   const v = makeVault(t, { domains: { other: { title: 'Other', topics: ['code', 'naming'], markers: ['other.marker'], showSkipTopics: ['naming'] } } });
   fs.writeFileSync(path.join(v.project, 'other.marker'), '');
-  v.write('wiki/demo/demo-taste.md', ruleNote({ keywords: ['x'], doLine: 'Demo taste.' }));
+  v.write('wiki/glim/glim-taste.md', ruleNote({ keywords: ['x'], doLine: 'Glim taste.' }));
   v.write('wiki/other/other-taste.md', ruleNote({ domain: 'other', keywords: ['x'], doLine: 'Other taste.' }));
   v.write('wiki/other/other-fact.md', ruleNote({ domain: 'other', kind: 'knowledge', extra: ['as_of: 2026-10-01'], keywords: ['x'], doLine: 'Other fact.' }));
   v.write('wiki/other/other-name.md', ruleNote({ domain: 'other', topic: 'naming', keywords: ['x'], doLine: 'Other naming.' }));
   const sid = sessionId();
   v.startSession(sid);
-  const out = v.run('pick.mjs', ['show', sid, 'cards', 'demo']).stdout;
-  assert.match(out, /\ndemo rules:\n- demo\/demo-taste: Do: Demo taste\./);
+  const out = v.run('pick.mjs', ['show', sid, 'cards', 'glim']).stdout;
+  assert.match(out, /\nglim rules:\n- glim\/glim-taste: Do: Glim taste\./);
   assert.match(out, /\nother rules, leaving out naming:\n- other\/other-fact: Do: Other fact\.[^\n]*\n- other\/other-taste: Do: Other taste\./);
   assert.doesNotMatch(out, /other-name/);
-  assert.ok(out.indexOf('demo rules') < out.indexOf('other rules'), 'the chosen domain comes first');
+  assert.ok(out.indexOf('glim rules') < out.indexOf('other rules'), 'the chosen domain comes first');
 });
 
 // Two packages that hold one domain's marker, under a root outside every configured path.
@@ -212,7 +212,7 @@ test('a project is refused when it is not one of the domain\'s, even when the do
   const { v, sid } = setup(t);
   const r = pick(v, sid, comment({ project: 'elsewhere' }));
   assert.equal(r.code, 1);
-  assert.match(r.stderr, /^Not recorded: elsewhere isn't a project of this session in demo\. It has: /);
+  assert.match(r.stderr, /^Not recorded: elsewhere isn't a project of this session in glim\. It has: /);
   assert.equal(pick(v, sid, comment({ project: v.project })).code, 0);
 });
 

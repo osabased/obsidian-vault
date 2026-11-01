@@ -48,9 +48,9 @@ test('the sha256 of a saved source covers its body whatever the line endings', a
 
 test('a git source gives repo, path and commit', async t => {
   const v = makeVault(t);
-  v.write('raw/refs/ok.md', saved({ repo: 'https://example.com/demo/lib.git', path: 'src/main.c', commit: 'a1b2c3d' }));
-  v.write('raw/refs/partial.md', saved({ repo: 'demo/lib', commit: 'zzz' }));
-  v.write('raw/refs/escape.md', saved({ repo: 'demo/lib', path: '../secret', commit: 'a1b2c3d4e5f6' }));
+  v.write('raw/refs/ok.md', saved({ repo: 'https://example.com/glim/lib.git', path: 'src/main.c', commit: 'a1b2c3d' }));
+  v.write('raw/refs/partial.md', saved({ repo: 'glim/lib', commit: 'zzz' }));
+  v.write('raw/refs/escape.md', saved({ repo: 'glim/lib', path: '../secret', commit: 'a1b2c3d4e5f6' }));
   const all = (await found(v)).filter(f => f.file.startsWith('raw/refs/'));
   const of = file => all.filter(f => f.file === file).map(f => f.msg).sort();
   assert.deepEqual(of('raw/refs/ok.md'), []);
@@ -61,14 +61,14 @@ test('a git source gives repo, path and commit', async t => {
 test('a footnote may end its source with a page, time or line locator, and lint checks the syntax', async t => {
   const v = makeVault(t);
   for (const f of ['doc.pdf', 'talk.mp4', 'code.js']) v.write(`raw/refs/${f}`, 'a\nb\nc\n');
-  v.write('wiki/demo/ok.md', cite(
+  v.write('wiki/glim/ok.md', cite(
     'raw/refs/doc.pdf#page=3', 'raw/refs/talk.mp4#t=00:12:31', 'raw/refs/talk.mp4#t=90', 'raw/refs/talk.mp4#t=npt:1:02,1:30', 'raw/refs/talk.mp4#t=,20',
     'raw/refs/talk.mp4#t=clock:2026-10-01T11:19:01Z,2026-10-01T11:20:01Z', 'raw/refs/code.js#L2', 'raw/refs/code.js#L1-L3', '`raw/refs/doc.pdf#page=3` · dated 2026-10-01',
     'https://example.com/doc.pdf#page=3', 'https://example.com/guide#install', 'https://example.com/lib.js#L10-L20',
   ));
   assert.deepEqual(await footnoteMsgs(v), []);
 
-  v.write('wiki/demo/ok.md', cite(
+  v.write('wiki/glim/ok.md', cite(
     'raw/refs/doc.pdf#page=0', 'raw/refs/doc.pdf#page=two', 'raw/refs/talk.mp4#t=12:99', 'raw/refs/talk.mp4#t=30,10', 'raw/refs/code.js#L3-L1', 'raw/refs/code.js#L0',
     'raw/refs/code.js#L1-3', 'raw/refs/doc.pdf#intro', 'raw/refs/doc.pdf#', 'https://example.com/doc.pdf#page=x',
   ));
@@ -91,7 +91,7 @@ test('a line range must exist in a text source, and a bundle file is located by 
   const v = makeVault(t);
   v.write('raw/refs/code.js', 'one\ntwo\nthree\n');
   v.write('raw/refs/blob.bin', Buffer.from([0xff, 0xfe, 0x00, 0x01]));
-  v.write('wiki/demo/lines.md', cite('raw/refs/code.js#L3', 'raw/refs/code.js#L2-L4', 'raw/refs/code.js#L4', 'raw/refs/blob.bin#L9999'));
+  v.write('wiki/glim/lines.md', cite('raw/refs/code.js#L3', 'raw/refs/code.js#L2-L4', 'raw/refs/code.js#L4', 'raw/refs/blob.bin#L9999'));
   assert.deepEqual(await footnoteMsgs(v), [
     'footnote [^2] cites lines 2-4 of raw/refs/code.js, which has 3 lines',
     'footnote [^3] cites line 4 of raw/refs/code.js, which has 3 lines',
@@ -105,9 +105,9 @@ test('a page or time anchor must exist in the derived text of its source, and a 
   v.write('raw/refs/doc.pdf', pdf);
   v.write('raw/refs/talk.mp4', mp4);
   v.write('raw/refs/other.pdf', 'other bytes');
-  v.write(`derived/${sha(pdf)}.md`, derived({ kind: 'pdf', extractor: 'demo-extract', extractor_version: '1.0', source: 'raw/refs/doc.pdf' }, '[p. 1]\nFirst.\n[p. 2]\nSecond.\n'));
-  v.write(`derived/${sha(mp4)}.md`, derived({ kind: 'video', extractor: 'demo-transcribe', extractor_version: '2', source: 'raw/refs/talk.mp4' }, '[t=00:00:05]\nHello.\n[t=00:12:31]\nWorld.\n'));
-  v.write('wiki/demo/anchors.md', cite(
+  v.write(`derived/${sha(pdf)}.md`, derived({ kind: 'pdf', extractor: 'glim-extract', extractor_version: '1.0', source: 'raw/refs/doc.pdf' }, '[p. 1]\nFirst.\n[p. 2]\nSecond.\n'));
+  v.write(`derived/${sha(mp4)}.md`, derived({ kind: 'video', extractor: 'glim-transcribe', extractor_version: '2', source: 'raw/refs/talk.mp4' }, '[t=00:00:05]\nHello.\n[t=00:12:31]\nWorld.\n'));
+  v.write('wiki/glim/anchors.md', cite(
     'raw/refs/doc.pdf#page=2', 'raw/refs/doc.pdf#page=7', 'raw/refs/talk.mp4#t=00:12:31', 'raw/refs/talk.mp4#t=751', 'raw/refs/talk.mp4#t=00:12:31,00:12:45',
     'raw/refs/talk.mp4#t=00:13:00', 'raw/refs/other.pdf#page=99',
   ));
@@ -122,7 +122,7 @@ test('derived text is named by the hash of its binary, with a valid kind, its ex
   const v = makeVault(t);
   const pdf = 'pdf bytes';
   v.write('raw/refs/doc.pdf', pdf);
-  const meta = { kind: 'pdf', extractor: 'demo-extract', extractor_version: '1.0', source: 'raw/refs/doc.pdf' };
+  const meta = { kind: 'pdf', extractor: 'glim-extract', extractor_version: '1.0', source: 'raw/refs/doc.pdf' };
   v.write(`derived/${sha(pdf)}.md`, derived(meta, '[p. 1]\nA.\n[t=00:00:05]\nB.\n'));
   assert.deepEqual(await msgsFor(v, 'derived/'), []);
 
@@ -174,12 +174,12 @@ test('a folder under raw/refs/ with a source.md is a source, and its manifest is
   const lib = 'int main() {}\n';
   v.write('raw/refs/lib/src/main.c', lib);
   v.write('raw/refs/lib/README', 'Readme.\n');
-  v.write('raw/refs/lib/source.md', manifest({ url: 'https://example.com/demo/lib', fetched: '2026-10-01', sha256: [`${sha(lib)}  src/main.c`, `${sha('Readme.\n')}  ./README`] }));
+  v.write('raw/refs/lib/source.md', manifest({ url: 'https://example.com/glim/lib', fetched: '2026-10-01', sha256: [`${sha(lib)}  src/main.c`, `${sha('Readme.\n')}  ./README`] }));
   v.write('raw/refs/pinned/a.txt', 'a');
-  v.write('raw/refs/pinned/source.md', manifest({ url: 'https://example.com/demo/pinned', commit: 'a1b2c3d4e5f6' }));
-  v.write('wiki/demo/source-lib.md', sourcePage({ source: 'raw/refs/lib' }));
-  v.write('wiki/demo/source-pinned.md', sourcePage({ source: 'raw/refs/pinned' }));
-  v.write('wiki/demo/cites.md', cite('raw/refs/lib', 'raw/refs/lib/src/main.c#L1', 'raw/refs/pinned/a.txt#L1'));
+  v.write('raw/refs/pinned/source.md', manifest({ url: 'https://example.com/glim/pinned', commit: 'a1b2c3d4e5f6' }));
+  v.write('wiki/glim/source-lib.md', sourcePage({ source: 'raw/refs/lib' }));
+  v.write('wiki/glim/source-pinned.md', sourcePage({ source: 'raw/refs/pinned' }));
+  v.write('wiki/glim/cites.md', cite('raw/refs/lib', 'raw/refs/lib/src/main.c#L1', 'raw/refs/pinned/a.txt#L1'));
   const all = await found(v);
   assert.deepEqual(all.filter(f => f.file.startsWith('raw/') || (f.level === 'error' && f.file.startsWith('wiki/'))).map(f => `${f.file}: ${f.msg}`), []);
   assert.deepEqual(await footnoteMsgs(v), []);
@@ -188,14 +188,14 @@ test('a folder under raw/refs/ with a source.md is a source, and its manifest is
 test('a bundle manifest that pins nothing, lists a bad line or a hash that does not match its file is warned about', async t => {
   const v = makeVault(t);
   v.write('raw/refs/loose/a.txt', 'a');
-  v.write('raw/refs/loose/source.md', manifest({ url: 'https://example.com/demo/loose' }));
+  v.write('raw/refs/loose/source.md', manifest({ url: 'https://example.com/glim/loose' }));
   v.write('raw/refs/nocommit/a.txt', 'a');
   v.write('raw/refs/nocommit/source.md', manifest({ commit: 'a1b2c3d4e5f6' }));
   v.write('raw/refs/hashes/a.txt', 'a');
   v.write('raw/refs/hashes/b.txt', 'b');
-  v.write('raw/refs/hashes/source.md', manifest({ url: 'https://example.com/demo/hashes', sha256: [`${sha('a')}  a.txt`, `${sha('not b')}  b.txt`, `${sha('c')}  c.txt`, 'abc  d.txt', `${sha('a')} a.txt`] }));
+  v.write('raw/refs/hashes/source.md', manifest({ url: 'https://example.com/glim/hashes', sha256: [`${sha('a')}  a.txt`, `${sha('not b')}  b.txt`, `${sha('c')}  c.txt`, 'abc  d.txt', `${sha('a')} a.txt`] }));
   v.write('raw/refs/scalar/a.txt', 'a');
-  v.write('raw/refs/scalar/source.md', manifest({ url: 'https://example.com/demo/scalar', sha256: sha('a') }));
+  v.write('raw/refs/scalar/source.md', manifest({ url: 'https://example.com/glim/scalar', sha256: sha('a') }));
   const all = (await found(v)).filter(f => f.file.startsWith('raw/refs/'));
   const of = dir => all.filter(f => f.file === `raw/refs/${dir}/source.md`).map(f => f.msg).sort();
   assert.deepEqual(of('loose'), ["no commit or sha256. A bundle's source.md pins the folder with a commit, or a sha256 line for each file"]);
@@ -212,8 +212,8 @@ test('a bundle manifest that pins nothing, lists a bad line or a hash that does 
 test('a footnote may cite a line range inside a bundle by its path', async t => {
   const v = makeVault(t);
   v.write('raw/refs/lib/src/main.c', 'a\nb\nc\n');
-  v.write('raw/refs/lib/source.md', manifest({ url: 'https://example.com/demo/lib', commit: 'a1b2c3d4e5f6' }));
-  v.write('wiki/demo/lines.md', cite('raw/refs/lib/src/main.c#L1-L3', 'raw/refs/lib/src/main.c#L2-L9', 'raw/refs/lib/src/gone.c#L1'));
+  v.write('raw/refs/lib/source.md', manifest({ url: 'https://example.com/glim/lib', commit: 'a1b2c3d4e5f6' }));
+  v.write('wiki/glim/lines.md', cite('raw/refs/lib/src/main.c#L1-L3', 'raw/refs/lib/src/main.c#L2-L9', 'raw/refs/lib/src/gone.c#L1'));
   assert.deepEqual(await footnoteMsgs(v), [
     'footnote [^2] cites lines 2-9 of raw/refs/lib/src/main.c, which has 3 lines',
     'footnote [^3] names raw/refs/lib/src/gone.c#L1. Cite a URL or a file under raw/ that exists',
@@ -223,16 +223,16 @@ test('a footnote may cite a line range inside a bundle by its path', async t => 
 test('a source page names a bundle by its folder, written as the disk spells it', async t => {
   const v = makeVault(t);
   v.write('raw/refs/lib/a.txt', 'a');
-  v.write('raw/refs/lib/source.md', manifest({ url: 'https://example.com/demo/lib', commit: 'a1b2c3d4e5f6' }));
+  v.write('raw/refs/lib/source.md', manifest({ url: 'https://example.com/glim/lib', commit: 'a1b2c3d4e5f6' }));
   v.write('raw/refs/plain/a.txt', 'a');
-  v.write('wiki/demo/source-slash.md', sourcePage({ source: 'raw/refs/lib/' }));
-  v.write('wiki/demo/source-plain.md', sourcePage({ source: 'raw/refs/plain' }));
-  v.write('wiki/demo/source-inside.md', sourcePage({ source: 'raw/refs/lib/a.txt' }));
+  v.write('wiki/glim/source-slash.md', sourcePage({ source: 'raw/refs/lib/' }));
+  v.write('wiki/glim/source-plain.md', sourcePage({ source: 'raw/refs/plain' }));
+  v.write('wiki/glim/source-inside.md', sourcePage({ source: 'raw/refs/lib/a.txt' }));
   const errors = (await found(v)).filter(f => f.level === 'error' && f.file.startsWith('wiki/'));
   assert.deepEqual(errors.map(f => `${f.file}: ${f.msg}`).sort(), [
-    'wiki/demo/source-inside.md: write source as raw/refs/lib, the bundle it is in',
-    'wiki/demo/source-plain.md: source must be a URL, a file under raw/ that exists, or a folder under raw/refs/ with a source.md',
-    'wiki/demo/source-slash.md: write source as raw/refs/lib, the path from the vault root',
+    'wiki/glim/source-inside.md: write source as raw/refs/lib, the bundle it is in',
+    'wiki/glim/source-plain.md: source must be a URL, a file under raw/ that exists, or a folder under raw/refs/ with a source.md',
+    'wiki/glim/source-slash.md: write source as raw/refs/lib, the path from the vault root',
   ]);
 });
 
@@ -240,21 +240,21 @@ test('a footnote with a locator, or inside a bundle, cites the source page of it
   const v = makeVault(t);
   v.write('raw/refs/doc.pdf', 'pdf bytes');
   v.write('raw/refs/lib/src/main.c', 'a\n');
-  v.write('raw/refs/lib/source.md', manifest({ url: 'https://example.com/demo/lib', commit: 'a1b2c3d4e5f6' }));
-  v.write('wiki/demo/source-doc.md', sourcePage({ source: 'raw/refs/doc.pdf' }));
-  v.write('wiki/demo/source-lib.md', sourcePage({ source: 'raw/refs/lib' }));
-  v.write('wiki/demo/guide.md', cite('raw/refs/doc.pdf#page=3', 'raw/refs/lib/src/main.c#L1'));
+  v.write('raw/refs/lib/source.md', manifest({ url: 'https://example.com/glim/lib', commit: 'a1b2c3d4e5f6' }));
+  v.write('wiki/glim/source-doc.md', sourcePage({ source: 'raw/refs/doc.pdf' }));
+  v.write('wiki/glim/source-lib.md', sourcePage({ source: 'raw/refs/lib' }));
+  v.write('wiki/glim/guide.md', cite('raw/refs/doc.pdf#page=3', 'raw/refs/lib/src/main.c#L1'));
   const { loadNotes, citedSources, resolver } = await v.import('lib/rules.mjs');
   const notes = loadNotes();
-  const { pages } = citedSources(notes, resolver(notes))(notes.find(n => n.key === 'demo/guide'));
-  assert.deepEqual([...pages].sort(), ['demo/source-doc', 'demo/source-lib']);
+  const { pages } = citedSources(notes, resolver(notes))(notes.find(n => n.key === 'glim/guide'));
+  assert.deepEqual([...pages].sort(), ['glim/source-doc', 'glim/source-lib']);
 });
 
 test('a sha256 line YAML reads as a key and value is warned about, and lint checks the rest', async t => {
   const v = makeVault(t);
   const line = `${sha('a')}  Notes: draft.txt`;
   v.write('raw/refs/lib/a.txt', 'a');
-  v.write('raw/refs/lib/source.md', `---\nurl: https://example.com/demo/lib\nsha256:\n  - ${line}\n  - true\n---\n`);
+  v.write('raw/refs/lib/source.md', `---\nurl: https://example.com/glim/lib\nsha256:\n  - ${line}\n  - true\n---\n`);
   assert.deepEqual(await msgsFor(v, 'raw/refs/lib/'), [
     `sha256 item ${line} reads as a key and value, not text. Single-quote an item that holds ": ", as in '${line}'`,
     "sha256 item true isn't text. Single-quote it, as in 'true'",
@@ -278,7 +278,7 @@ test("a source lint can't read is skipped, not reported as changed", async t => 
   v.write('raw/refs/doc.txt', 'hello source');
   v.write(`derived/${sha('hello source')}.md`, derived({ kind: 'pdf', extractor: 'x', extractor_version: "'1'", source: 'raw/refs/doc.txt' }, '[p. 1] hi\n'));
   v.write('raw/refs/lib/a.txt', 'a');
-  v.write('raw/refs/lib/source.md', `---\nurl: https://example.com/demo/lib\nsha256:\n  - '${sha('a')}  a.txt'\n---\n`);
+  v.write('raw/refs/lib/source.md', `---\nurl: https://example.com/glim/lib\nsha256:\n  - '${sha('a')}  a.txt'\n---\n`);
   unreadable(t, v.at('raw', 'refs', 'doc.txt'));
   unreadable(t, v.at('raw', 'refs', 'lib', 'a.txt'));
   assert.deepEqual((await found(v)).filter(f => /has changed|doesn't match/.test(f.msg)), []);
