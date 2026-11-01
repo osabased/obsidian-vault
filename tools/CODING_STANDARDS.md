@@ -24,6 +24,7 @@ These keep the hooks safe to run in every session. Follow them when you change a
 ## Code
 
 - Code that two entry points share goes in `tools/lib/`; the rest stays in its entry point.
+- Nothing outside `adapters/` names an agent, its tools or its hook fields. An adapter maps its agent's hook input to the core's events and the results back to its output, and holds no delivery logic. `test/neutral-core.test.mjs` checks the first half against the names each adapter lists in `identifiers`.
 - Command-line scripts: usage errors and runs that can't finish exit 2, failures exit 1.
 - Comments only for a non-obvious why. No docstrings, banner comments or TODOs.
 - No test-only code. Tests change behavior through `vault.config.json`.
@@ -34,10 +35,10 @@ These keep the hooks safe to run in every session. Follow them when you change a
 `node tools/lint.mjs` checks every `.mjs` file under `tools/` and reports each break as an error:
 
 - Imports, whether `import … from`, `import()` or `require()`, are `node:` built-ins or relative paths.
-- Every file in `hooks/` calls `runHook`.
-- Nothing in `hooks/`, `lib/` or `ext/` prints (`console.*`, `process.stdout.write`, `process.stderr.write`) except `lib/vault.mjs`, where `runHook` prints. Scripts directly in `tools/` may print.
+- Every file in `adapters/<agent>/hooks/` calls `runHook`. Each file in `hooks/` is one import of its entry in `adapters/`, kept while installed launchers still run it.
+- Nothing in `adapters/`, `hooks/`, `lib/` or `ext/` prints (`console.*`, `process.stdout.write`, `process.stderr.write`) except `lib/vault.mjs`, where `runHook` prints. Scripts directly in `tools/` may print.
 - Only `lib/vault.mjs` and `lib/sessions.mjs` call fs functions that change files: write, append, rename, remove, make folders, copy, open for writing or write streams, sync or async, as `fs.x(` or imported by name. Anywhere else, use or add a helper in `lib/vault.mjs`.
-- Nothing but `lib/git.mjs` imports `node:child_process`, and nothing in `hooks/`, `lib/` or `ext/` imports or re-exports anything but `changedFiles` from it, or imports it with `import()`. Nothing in `hooks/`, `lib/` or `ext/` imports `node:http`, `node:https`, `node:http2`, `node:net`, `node:tls` or `node:dgram`, or calls `fetch(`.
+- Nothing but `lib/git.mjs` imports `node:child_process`, and nothing in `adapters/`, `hooks/`, `lib/` or `ext/` imports or re-exports anything but `changedFiles` from it, or imports it with `import()`. Nothing in `adapters/`, `hooks/`, `lib/` or `ext/` imports `node:http`, `node:https`, `node:http2`, `node:net`, `node:tls` or `node:dgram`, or calls `fetch(`.
 - `process.cwd()` appears only in `lib/vault.mjs`.
 - No TODO, FIXME, XXX or HACK comments, no `/**` docstrings, and no banner comments such as `// ===`, `// ---`, `// Step 1` or `// Note:`.
 

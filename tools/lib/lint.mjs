@@ -2,8 +2,9 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { isBuiltin } from 'node:module';
 import {
-  config, vaultPath, plural, today, daysBetween, datedFiles, filesIn, pickRows, proposalRows, rewriteText, lf, readJson, readJsonSafe, toPosix, memo, statePath, isVaultOnly, isMarkerName, clock, FILE_TOOLS, EDIT_HOOK_MATCHER, hookedTool,
+  config, vaultPath, plural, today, daysBetween, datedFiles, filesIn, pickRows, proposalRows, rewriteText, lf, readJson, readJsonSafe, toPosix, memo, statePath, isVaultOnly, isMarkerName, clock,
 } from './vault.mjs';
+import { editsFile, sentToHook, hookMatchers, typedFor, hasAgent, AGENT_NAME } from './agents.mjs';
 import {
   vaultFile, loadNotes, noteErrors, ruleText, ruleTextParts, liveRules, knownDomain, alwaysSize, isUrl, validDay, normTopic, topicNotes, rawFile, toKey, resolver, linksUnder, noteLinks, byTopic, isTopicPage, isSourcePage, PAGE_KINDS, joinList,
   hasSection, footnotes, youSaid, linkedKeys, clip, citedSources, evidenceQuotes, keyOf, kindFolder, kindLabel, linkTo, parseNote, noteLinkSpans, maxChars, bundleOf, locate,
@@ -15,7 +16,7 @@ import { EXTENSION_NAME, hasExtension, extensionRel, extension } from './ext.mjs
 import { SCHEMES } from './versions.mjs';
 import { build } from './build.mjs';
 import { transcriptFor } from './sessions.mjs';
-import { typedMessages, saidIn, quoteTexts, userPageTexts } from './quotes.mjs';
+import { saidIn, quoteTexts, userPageTexts } from './quotes.mjs';
 import { loadExtractor } from './extractors.mjs';
 import {
   KINDS, LOCATORS, hashFile, lineCount, clockTime, parseLocator, anchorsIn, derivedAnchors, manifestLine, sourceProblems, refSources,
@@ -63,8 +64,8 @@ export function lint(notes = loadNotes(), chains = sourceChains()) {
     ];
   };
   const typedIn = memo(prefix => {
-    const file = transcriptFor(prefix);
-    return file ? typedMessages(file) : null;
+    const entry = transcriptFor(prefix);
+    return entry ? typedFor(entry) : null;
   });
   // A file that can't be hashed for now is skipped, not reported as changed.
   const hashOf = memo(rel => { try { return hashFile(rel); } catch { return null; } });
@@ -233,6 +234,11 @@ function lintPicks(add) {
 export function lintConfig(add) {
   const c = readJson(vaultPath('vault.config.json'), {}) ?? {};
   const bad = msg => add('error', 'vault.config.json', msg);
+  if (c.agents !== undefined && !Array.isArray(c.agents)) bad('agents must be a list of adapter names');
+  for (const name of Array.isArray(c.agents) ? c.agents : []) {
+    if (typeof name !== 'string' || !AGENT_NAME.test(name)) bad(`agents names ${name}, which isn't an adapter name: lowercase letters, digits, - or _`);
+    else if (!hasAgent(name)) bad(`agents names ${name}, and tools/adapters/${name}/adapter.mjs doesn't exist`);
+  }
   const namespaces = c.namespaces ?? {};
   if (!isMap(namespaces)) bad('namespaces must be an object of { separator, escape } by namespace name');
   else {
@@ -273,8 +279,8 @@ export function lintConfig(add) {
   for (const [tool, t] of Object.entries(editTools)) {
     const at = `editTools.${tool}`;
     if (!/^\S+$/.test(tool)) bad(`${at}: a tool name has no spaces`);
-    else if (FILE_TOOLS.includes(tool)) bad(`${at}: ${tool} edits a file, which the edit hook reads from the call itself; take it out of editTools`);
-    else if (!hookedTool(tool)) bad(`${at}: the edit hook's matcher, ${EDIT_HOOK_MATCHER}, never sends ${tool} to the hook, so it would never be gated`);
+    else if (editsFile(tool)) bad(`${at}: ${tool} edits a file, which the edit hook reads from the call itself; take it out of editTools`);
+    else if (!sentToHook(tool)) bad(`${at}: the edit hook's matcher, ${hookMatchers()}, never sends ${tool} to the hook, so it would never be gated`);
     if (!isMap(t)) {
       bad(`${at} must be an object with namespace, path and after`);
       continue;
@@ -780,9 +786,11 @@ function codeErrors(rel, src) {
   const scanned = scan(src);
   const { code, comments, strings } = scanned;
   const errors = [];
-  const inHooks = rel.startsWith('hooks/');
-  // Readers and aliases in ext/ run inside hooks, so they stay off the network as lib/ does.
-  const quiet = inHooks || rel.startsWith('lib/') || rel.startsWith('ext/');
+  const inHooks = rel.startsWith('hooks/') || /^adapters\/[^/]+\/hooks\//.test(rel);
+  // An installed launcher from before the adapters still runs hooks/<hook>.mjs, so each stays as one import of its entry.
+  const shim = /^hooks\/[^/]+\.mjs$/.test(rel) && /^import '\.\.\/adapters\/[a-z0-9_-]+\/hooks\/[a-z0-9_-]+\.mjs';\r?\n?$/.test(src);
+  // Readers and aliases in ext/ and the adapters run inside hooks, so they stay off the network as lib/ does.
+  const quiet = inHooks || rel.startsWith('lib/') || rel.startsWith('ext/') || rel.startsWith('adapters/');
 
   const specs = [...code.matchAll(/(?<![\w$.])(?:from|import|require)\s*\(?\s*(?=['"`])/g)]
     .map(m => strings.get(m.index + m[0].length))
@@ -813,7 +821,7 @@ function codeErrors(rel, src) {
   }
   if (quiet && /(?<![\w$.])fetch\s*\(/.test(code)) errors.push('calls fetch(); hooks, lib/ and ext/ stay off the network');
 
-  if (inHooks && !/(?<![\w$.])runHook\s*\(/.test(code)) errors.push("doesn't go through runHook");
+  if (inHooks && !shim && !/(?<![\w$.])runHook\s*\(/.test(code)) errors.push("doesn't go through runHook");
   if (quiet && rel !== 'lib/vault.mjs') {
     for (const m of code.matchAll(/(?<![\w$.])(console\.[\w$]+|process\.(?:stdout|stderr)\.write)\s*\(/g)) {
       errors.push(`prints with ${m[1]}; hooks print only through runHook`);

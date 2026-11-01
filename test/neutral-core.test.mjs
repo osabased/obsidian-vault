@@ -2,6 +2,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { pathToFileURL } from 'node:url';
 import { escapeRegExp } from '../tools/lib/rules.mjs';
 
 const ROOT = path.resolve(import.meta.dirname, '..');
@@ -37,4 +38,26 @@ test('no configured domain\'s key or multi-word title appears in the core, skill
     }
   }
   assert.deepEqual(hits, [], `${hits.length} lines name a configured domain:\n${hits.join('\n')}`);
+});
+
+const ADAPTERS = path.join(ROOT, 'tools', 'adapters');
+
+test('nothing in tools/ outside tools/adapters/ names an agent, its tools or its hook fields', async () => {
+  const names = fs.existsSync(ADAPTERS) ? fs.readdirSync(ADAPTERS).filter(n => fs.existsSync(path.join(ADAPTERS, n, 'adapter.mjs'))) : [];
+  assert.ok(names.length > 0, 'no adapter in tools/adapters/');
+  const ids = [];
+  for (const name of names) {
+    const { identifiers } = await import(pathToFileURL(path.join(ADAPTERS, name, 'adapter.mjs')).href);
+    assert.ok(Array.isArray(identifiers) && identifiers.length, `tools/adapters/${name}/adapter.mjs exports no identifiers`);
+    ids.push(...identifiers.map(id => ({ id, name })));
+  }
+  const hits = [];
+  for (const file of filesUnder(path.join(ROOT, 'tools')).filter(f => path.relative(ADAPTERS, f).startsWith('..'))) {
+    const text = fs.readFileSync(file, 'utf8');
+    if (text.includes('\0')) continue;
+    text.split('\n').forEach((line, i) => {
+      for (const { id, name } of ids) if (line.includes(id)) hits.push(`${path.relative(ROOT, file).replace(/\\/g, '/')}:${i + 1}: ${id} (${name})`);
+    });
+  }
+  assert.deepEqual(hits, [], `${hits.length} lines outside tools/adapters/ name an agent:\n${hits.join('\n')}`);
 });

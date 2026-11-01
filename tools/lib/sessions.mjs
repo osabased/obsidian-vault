@@ -4,6 +4,7 @@ import {
   config, vaultPath, statePath, stateDir, readJsonSafe, writeJson, appendJsonl, safeId, shortHash, logError, guarded, hookErrors, errorsLog, domainsFor, sessionReach, toPosix, inVaultFolder, isVaultOnly,
 } from './vault.mjs';
 import { noteTimes } from './cache.mjs';
+import { currentSession } from './agents.mjs';
 
 const DAY = 86400e3;
 
@@ -11,7 +12,7 @@ export const registry = id => statePath('sessions', `${id}.json`);
 
 // Scripts take the session id as an argument, so one session can't write under another's.
 export function ownEntry(sid) {
-  const own = process.env.CLAUDE_CODE_SESSION_ID;
+  const own = currentSession()?.id;
   if (own && own !== sid) return { entry: null, notOwn: `${sid} isn't this session, which is ${own}.` };
   return { entry: readJsonSafe(registry(safeId(sid))), notOwn: null };
 }
@@ -19,17 +20,18 @@ export function ownEntry(sid) {
 // `cwd` stays where the session registered, so a move into the vault folder doesn't let it propose for every domain.
 // Session start passes what sessionReach found for its folder, markers below it among them, so prompts, pick.mjs and
 // propose.mjs read the domains and their project roots here rather than scan the tree again.
-export function touchSession(input, hits) {
-  const id = safeId(input.session_id);
+export function touchSession(event, hits, agent) {
+  const id = safeId(event.session);
   const file = registry(id);
   const prev = readJsonSafe(file) ?? {};
   const entry = {
-    session: String(input.session_id),
-    transcript: input.transcript_path ?? prev.transcript ?? null,
-    cwd: prev.cwd ?? input.cwd ?? null,
+    session: String(event.session),
+    agent: agent ?? prev.agent ?? null,
+    transcript: event.transcript ?? prev.transcript ?? null,
+    cwd: prev.cwd ?? event.cwd ?? null,
     last_seen: new Date().toISOString(),
     ...(hits
-      ? { reach: { cwd: input.cwd ?? null, domains: [...new Set(hits.map(h => h.domain))], roots: hits.map(({ domain, root }) => ({ domain, root })) } }
+      ? { reach: { cwd: event.cwd ?? null, domains: [...new Set(hits.map(h => h.domain))], roots: hits.map(({ domain, root }) => ({ domain, root })) } }
       : prev.reach ? { reach: prev.reach } : {}),
   };
   writeJson(file, entry);
@@ -142,13 +144,13 @@ export function markFirst(kind, sid, items, max, keyOf) {
 
 // A subagent's context is its own, so what it was shown is marked apart from the agent that started it. The agent goes
 // first, so carryMarkers still finds a rule's key and the hash after it.
-export const agentKey = (input, key) => (input.agent_id ? `${input.agent_id}|${key}` : key);
+export const agentKey = (event, key) => (event.agent ? `${event.agent}|${key}` : key);
 
 // Both hooks mark a page under one kind, so an agent hears of each page once, whichever hook brings it up.
 // Only a labelled page has a hash, the one deliverable gave it, so a page comes up again when its labels change.
 export const keyHash = (key, hash) => (hash ? `${key}|${hash}` : key);
-const pageMark = (input, h) => agentKey(input, keyHash(h.key, h.note?.hash));
-export const markPages = (input, ranked, max = config().delivery.maxPages) => markFirst('pages', input.session_id, ranked, max, h => pageMark(input, h));
+const pageMark = (event, h) => agentKey(event, keyHash(h.key, h.note?.hash));
+export const markPages = (event, ranked, max = config().delivery.maxPages) => markFirst('pages', event.session, ranked, max, h => pageMark(event, h));
 
 // The first `max` items not yet marked, left unmarked, for a hook that marks only what its output budget keeps.
 export function unmarked(kind, sid, items, keyOf, max = Infinity) {
@@ -165,7 +167,7 @@ export function unmarked(kind, sid, items, keyOf, max = Infinity) {
 
 // The [key, rule] entries markAlways would mark, left unmarked.
 export const dueAlways = (sid, entries) => unmarked('excerpts', sid, entries, ([k, r]) => `always|${k}|${r.hash}`);
-export const duePages = (input, ranked, max = config().delivery.maxPages) => unmarked('pages', input.session_id, ranked, h => pageMark(input, h), max);
+export const duePages = (event, ranked, max = config().delivery.maxPages) => unmarked('pages', event.session, ranked, h => pageMark(event, h), max);
 
 // Two markers, both keyed by the rule alone, so a rule reworded since still counts as shown. The delivered one is
 // kept through compaction, so /lint can tell a rule a session was shown from one nothing brought up; the excerpt one
@@ -194,12 +196,12 @@ function registeredIds() {
   return names.filter(n => n.endsWith('.json')).map(n => n.slice(0, -'.json'.length));
 }
 
-// Pages name a session by the first 8 characters of its id. Null when no registered session, or more than one, has
-// them, or when its transcript is gone; tidy() drops old sessions from the registry.
+// Pages name a session by the first 8 characters of its id. Returns its registry entry, or null when no registered
+// session, or more than one, has them, or when its transcript is gone; tidy() drops old sessions from the registry.
 export function transcriptFor(prefix) {
   const ids = registeredIds().filter(id => id.startsWith(prefix));
-  const file = ids.length === 1 ? readJsonSafe(registry(ids[0]))?.transcript : null;
-  return typeof file === 'string' && fs.existsSync(file) ? file : null;
+  const entry = ids.length === 1 ? readJsonSafe(registry(ids[0])) : null;
+  return typeof entry?.transcript === 'string' && fs.existsSync(entry.transcript) ? entry : null;
 }
 
 // tidy() may prune a session mid-read, and other tools drop files like desktop.ini into folders.

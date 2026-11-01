@@ -4,7 +4,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { makeVault, cleanEnv, sessionId } from './fixture.mjs';
-import { EDIT_HOOK_MATCHER } from '../tools/lib/vault.mjs';
+import { matcher as EDIT_HOOK_MATCHER } from '../tools/adapters/claude-code/adapter.mjs';
 
 const ROOT = path.resolve(import.meta.dirname, '..');
 const LAUNCHER = path.join(ROOT, 'hooks', 'launch.mjs');
@@ -23,8 +23,8 @@ test('hooks.json starts each hook through the launcher in exec form, with its ti
     assert.equal(c.args[2], String(c.timeout), `${c.event}: the arg and the timeout agree`);
   }
   assert.deepEqual(commands.map(c => c.args[1]).sort(), ['edit', 'prompt', 'session-start', 'stop', 'subagent-start']);
-  const tools = fs.readdirSync(path.join(ROOT, 'tools', 'hooks')).map(f => f.replace(/\.mjs$/, ''));
-  for (const name of tools) assert.ok(commands.some(c => c.args[1] === name), `tools/hooks/${name}.mjs has an event`);
+  const tools = fs.readdirSync(path.join(ROOT, 'tools', 'adapters', 'claude-code', 'hooks')).map(f => f.replace(/\.mjs$/, ''));
+  for (const name of tools) assert.ok(commands.some(c => c.args[1] === name), `tools/adapters/claude-code/hooks/${name}.mjs has an event`);
 });
 
 test('hooks.json gives only the edit hook a matcher, the one it ships with', () => {
@@ -87,7 +87,7 @@ test('the launcher fails loudly: one stderr line, exit 1', t => {
     assert.equal(r.stdout, '', what);
     assert.match(r.stderr, line, what);
   }
-  fs.mkdirSync(v.at('.live', 'tools', 'hooks'), { recursive: true });
+  fs.mkdirSync(v.at('.live', 'tools', 'adapters', 'claude-code', 'hooks'), { recursive: true });
   const missing = launch('edit', { vault: v.root });
   assert.equal(missing.code, 1);
   assert.match(missing.stderr, /^vault edit failed: .*edit\.mjs does not exist; commit the vault's tools\/ so post-commit copies it\n$/);
@@ -95,7 +95,7 @@ test('the launcher fails loudly: one stderr line, exit 1', t => {
 
 test('the launcher reports a hook that cannot load', t => {
   const v = makeVault(t);
-  v.write('.live/tools/hooks/prompt.mjs', 'export const = ;\n');
+  v.write('.live/tools/adapters/claude-code/hooks/prompt.mjs', 'export const = ;\n');
   const r = launch('prompt', { vault: v.root });
   assert.equal(r.code, 1);
   assert.match(r.stderr, /^vault prompt failed: .+\n$/);

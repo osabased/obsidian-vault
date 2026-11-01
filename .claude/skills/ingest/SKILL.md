@@ -22,7 +22,7 @@ Work in the vault root. AGENTS.md has the page and rule formats. With `batch`, f
    - Ask what they like and dislike in it and why, and wait for the answer.
    - How-tos (steps, setup, API usage) belong in the project's skills, such as an `example-ui-*` skill for `example-ui`: tell the user so.
 4. **Write the source page** `wiki/<domain>/sources/source-<slug>.md`, `kind: source`, with `source` the file in `raw/refs/`, `source_date` the day it was published or last updated, the topic it's mostly about and a one-line summary. Put their words verbatim under `## You said`, and your reading under `## Agent's reading`, quoting each new fact in the source's words. `## You said` stays an empty heading if they said nothing about it, and `## Rules` until step 7.
-5. **Propose rules**, the clearest first, with `tools/propose.mjs` (`--help` lists the fields). Pipe the JSON from the Bash tool with a quoted heredoc to `node tools/propose.mjs "$CLAUDE_CODE_SESSION_ID"`.
+5. **Propose rules**, the clearest first, with `tools/propose.mjs` (`--help` lists the fields). Pipe the JSON from the Bash tool with a quoted heredoc to `node tools/propose.mjs`.
    - Taste rules come from the user's words: basis `stated` or `inferred`, quoting what they typed, or `reading` for something you saw in the source that they asked you to make a rule of.
    - Knowledge rules come from the new facts the user kept: `kind: knowledge`, basis `source`, with `source` and `source_date` as on the source page, and the source's words as the quote. A source with no date backs none.
    - Quote a binary source from its derived text, leaving out the `[p. 3]` and `[t=00:12:31]` anchor lines; a quote may run across one. What an image shows is your reading, so an image backs only basis `reading`.
