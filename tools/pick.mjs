@@ -36,9 +36,9 @@ const help = () => [
   '  status       "user" when the user picked it, "provisional" when you picked alone',
   "  notes        optional, the user's own words about the pick, verbatim; a provisional pick has none",
   '  reason       optional, your own reasons, in one line',
-  '  sheet        optional, the image the options were picked from (.png, .jpg, .jpeg or .webp), as a full path or one from',
-  '               the folder you run pick.mjs in;',
-  '               it is copied into raw/picks/',
+  '  sheet        optional, the file the options were picked from, as a full path or one from the folder you run pick.mjs in:',
+  '               an image (.png, .jpg, .jpeg or .webp), or a file whose text node tools/extract.mjs has extracted, which',
+  '               needs a copy in raw/refs/. It is copied into raw/picks/',
   '  replaces     optional, the id of the live pick on the same subject this one reverses',
   '',
   'A confirmation, when the user agrees with a provisional pick:',
@@ -128,10 +128,14 @@ function sheetOf(p) {
   const file = toPosix(given);
   const stat = fs.statSync(file, { throwIfNoEntry: false });
   if (!stat?.isFile()) refuse(`there's no file at ${given}.`);
-  if (!IMAGE.test(file) && !derivedText(hashPath(file))) refuse('sheet must be a .png, .jpg, .jpeg or .webp image, or a file with derived text (node tools/extract.mjs).');
   const { maxSheetBytes } = config().picks;
   const { size } = stat;
   if (size > maxSheetBytes) refuse(`sheet is ${mb(size)} MB; keep it under ${mb(maxSheetBytes)} MB (the contact sheet's --max-size, or JPEG).`);
+  if (!IMAGE.test(file)) {
+    let derived;
+    try { derived = derivedText(hashPath(file)); } catch (e) { refuse(`sheet can't be read just now (${e.code ?? e.message}). Close whatever holds it open and try again.`); }
+    if (!derived) refuse('sheet must be a .png, .jpg, .jpeg or .webp image, or a file with derived text. Save the file in raw/refs/ and run node tools/extract.mjs on it.');
+  }
   return file;
 }
 

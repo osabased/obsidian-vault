@@ -2,7 +2,7 @@ import { EXTENSION_NAME, hasExtension, extensionRel, extension } from './ext.mjs
 import { KINDS } from './sources.mjs';
 import { joinList } from './rules.mjs';
 
-const EXTENSION = /^\.[a-z0-9][a-z0-9._-]*$/;
+const EXTENSION = /^\.[a-z0-9_-]+$/;
 
 // An extractor as extract.mjs runs it, loaded as a hook loads an extension, or the problems that keep it from running,
 // each as lint reports it.

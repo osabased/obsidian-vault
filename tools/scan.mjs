@@ -1,23 +1,18 @@
 import fs from 'node:fs';
 import path from 'node:path';
-import { vaultPath, vaultRel, plural } from './lib/vault.mjs';
-import { filesIn } from './lib/vault.mjs';
-import { vaultFile } from './lib/rules.mjs';
-import { bundleOf } from './lib/rules.mjs';
-import { hashPath } from './lib/sources.mjs';
-import { utf8Text } from './lib/quotes.mjs';
+import { vaultPath, plural, fromRoot, filesIn } from './lib/vault.mjs';
+import { vaultFile, bundleOf } from './lib/rules.mjs';
+import { hashPath, fileText } from './lib/sources.mjs';
 import { unallowedSecrets, secretLine } from './lib/secrets.mjs';
 
 const USAGE = `usage: node tools/scan.mjs <file or bundle folder>...
 Lists the key- and token-shaped values in each file in the vault, or in a bundle, reading a binary through its derived
 text. Exits 1 when it finds one that privacy.allow in vault.config.json doesn't allow.`;
 
-const fromRoot = ref => (path.isAbsolute(ref) && vaultRel(ref)) || ref;
-
 // The text a file's quotes come from: its own, or a binary's derived text, whose lines the line numbers count.
 function textOf(rel) {
   const file = vaultPath(...rel.split('/'));
-  const own = utf8Text(fs.readFileSync(file));
+  const own = fileText(file);
   if (own !== null) return { text: own, derived: false };
   try { return { text: fs.readFileSync(vaultPath('derived', `${hashPath(file)}.md`), 'utf8'), derived: true }; } catch { return { text: null }; }
 }
