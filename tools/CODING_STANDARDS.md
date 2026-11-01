@@ -11,7 +11,7 @@ These keep the hooks safe to run in every session. Follow them when you change a
 ## Hooks
 
 - Every hook goes through `runHook`. It skips safe mode, fails open (errors go to `.state/errors.log`, nothing is printed), and prints JSON only when there is something to deliver.
-- Hooks finish fast: no network and no child processes.
+- Hooks finish fast: no network, and no child process but the one `git status` that `lib/git.mjs` runs with a timeout. A loop over the notes calls `checkDeadline()` from `lib/deadline.mjs`, which throws once the hook nears the `VAULT_HOOK_TIMEOUT` its command passes (10 seconds when unset).
 - Hook messages are copy the user and the agent read. Keep their wording unless the user agrees to a change.
 
 ## State
@@ -19,7 +19,7 @@ These keep the hooks safe to run in every session. Follow them when you change a
 - Write files with `writeText` or `writeJson` (temp file, then rename), or with `rewriteText` for a change that leaves what a note says as it was, which keeps the day the note was saved. Append rows with `appendJsonl`, one call per batch.
 - Proposals go in the session's file in `raw/inbox/` (`inboxFile(sid)`, named `<date>-<first 8 characters of the session id>.jsonl`) with an `a-` id, and `propose.mjs` adds a line to `log.md` (`appendLog()`) for each note it writes. `log.mjs` adds one for each operation an agent logs, naming every page it wrote, `review.mjs status` one with each lint tally, and `lint.mjs --fix` one naming the notes it fixed. `pick.mjs` appends picks to the session's file in `raw/picks/` (`picksFile(sid)`, named the same way) with a `q-` id. Readers also take the older `<date>.jsonl`, and order rows by `at`. Rows are never edited. Readers treat a missing folder as empty.
 - `raw/` is append-only. `.state/` belongs to the hooks: use the helpers in `lib/sessions.mjs` for sessions, markers and the stamps behind the session-start hook-error line and `/lint` reminder.
-- The hooks read the notes as they are now, through `settledNotes()` in `lib/rules.mjs`, which leaves out notes saved in the last `delivery.settleSeconds`, and then `liveRules()` and `livePages()` on what it keeps, or through `settledRules()`, which does both for rules; `propose.mjs` writes its note with `writeSettled()` so it applies at once. `build()`, lint and the repeat check use `liveRules()`, which has every rule. A rule's hash covers only its delivered text, and the markers carry it, so a reworded rule reaches each session once more.
+- `loadNotes()` in `lib/rules.mjs` reads the notes through the cache in `.state/cache/`, which reads a note again only when its size or mtime changes; hooks pass it the domains they serve, so they walk only those folders and `wiki/global/`. The hooks read the notes as they are now, through `settledNotes()`, which keeps a note once git finds it unchanged from HEAD, its text has held for `delivery.settleSeconds`, or its file was saved that long ago and not in the future, and then `liveRules()` and `livePages()` on what it keeps, or through `settledRules()`, which does both for rules; `propose.mjs` writes its note with `writeSettled()` so it applies at once. Session start builds only when `changedSinceBuild()` in `lib/cache.mjs` finds a note changed since the last build. `build()`, lint and the repeat check use `liveRules()`, which has every rule. A rule's hash covers only its delivered text, and the markers carry it, so a reworded rule reaches each session once more.
 
 ## Code
 
@@ -37,7 +37,7 @@ These keep the hooks safe to run in every session. Follow them when you change a
 - Every file in `hooks/` calls `runHook`.
 - Nothing in `hooks/` or `lib/` prints (`console.*`, `process.stdout.write`, `process.stderr.write`) except `lib/vault.mjs`, where `runHook` prints. Scripts directly in `tools/` may print.
 - Only `lib/vault.mjs` and `lib/sessions.mjs` call fs functions that change files: write, append, rename, remove, make folders, copy, open for writing or write streams, sync or async, as `fs.x(` or imported by name. Anywhere else, use or add a helper in `lib/vault.mjs`.
-- Nothing imports `node:child_process`. Nothing in `hooks/` or `lib/` imports `node:http`, `node:https`, `node:http2`, `node:net`, `node:tls` or `node:dgram`, or calls `fetch(`.
+- Nothing but `lib/git.mjs` imports `node:child_process`. Nothing in `hooks/` or `lib/` imports `node:http`, `node:https`, `node:http2`, `node:net`, `node:tls` or `node:dgram`, or calls `fetch(`.
 - `process.cwd()` appears only in `lib/vault.mjs`.
 - No TODO, FIXME, XXX or HACK comments, no `/**` docstrings, and no banner comments such as `// ===`, `// ---`, `// Step 1` or `// Note:`.
 

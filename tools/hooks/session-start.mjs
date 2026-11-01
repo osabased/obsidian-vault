@@ -1,6 +1,7 @@
 import { runHook, sessionReach, inVaultFolder, readableDomains, vaultPath, toolsPath, toPosix, guarded, config, plural, clock } from '../lib/vault.mjs';
 import { alwaysContext, alwaysIn, loadNotes, settledNotes, liveRules, domainTopics, joinList, clip, undelivered, knownDomain } from '../lib/rules.mjs';
 import { build } from '../lib/build.mjs';
+import { changedSinceBuild, markBuilt } from '../lib/cache.mjs';
 import { touchSession, clearMarkers, markAlways, markShown, tidy, errorsSinceLint, sinceLint } from '../lib/sessions.mjs';
 
 function proposeNote(sid) {
@@ -79,9 +80,16 @@ runHook('session-start', input => {
   // Compaction can drop the rules the gate and excerpts already showed, so they show them again.
   if (input.session_id && (input.source === 'compact' || input.source === 'clear')) clearMarkers(input.session_id);
   const scope = [...doms, 'global'];
-  const notes = loadNotes();
+  // A session in this folder hears of notes outside any domain too.
+  const walked = vaultFolder ? null : readable;
+  const notes = loadNotes(walked);
   // Notes edited in Obsidian go live without a build, and the always rules that don't fit point to active.md.
-  guarded('build', () => build({ notes }));
+  guarded('build', () => {
+    if (!changedSinceBuild(notes, walked)) return;
+    const all = loadNotes();
+    build({ notes: all });
+    markBuilt(all);
+  });
   const ready = settledNotes(notes);
   const rules = liveRules(ready);
   const always = alwaysContext(scope, rules);
