@@ -156,10 +156,12 @@ function markedBelow(cwd) {
   return hits;
 }
 
-// A session's domains: its folder's, and those of the markers below it.
+// A session's domains with every project root each has: its folder's, and those of the markers below it. The vault
+// folder holds copies of other projects under raw/refs/, whose markers put the session in no domain.
 export function sessionReach(cwd) {
-  const hits = [...domainsFor(cwd), ...markedBelow(cwd)];
-  return hits.filter((h, i) => hits.findIndex(x => x.domain === h.domain) === i);
+  const hits = [...domainsFor(cwd), ...(inVaultFolder(cwd) ? [] : markedBelow(cwd))];
+  const keys = hits.map(h => `${h.domain}|${fold(toPosix(h.root))}`);
+  return hits.filter((h, i) => keys.indexOf(keys[i]) === i);
 }
 
 export const inVaultFolder = cwd => Boolean(cwd) && vaultRel(cwd) !== null;

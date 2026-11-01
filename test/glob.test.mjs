@@ -282,3 +282,17 @@ test('matchTarget: a file target keeps the file rules', () => {
   assert.equal(matchTarget(['SRC/**', '!src/gen/**'], { namespace: 'file', path: 'src/A.ts' }, NS), 'SRC/**');
   assert.equal(matchTarget(['SRC/**', '!src/gen/**'], { namespace: 'file', path: 'src/gen/A.ts' }, NS), null);
 });
+
+test('a positive entry a later ! entry removes is not the best match', () => {
+  const list = ['src/ui/**', '!src/ui/x/**', 'src/**/*.luau'];
+  assert.equal(bestMatch(list, 'src/ui/x/a.luau'), 'src/**/*.luau');
+  assert.equal(bestMatch(list, 'src/ui/a.luau'), 'src/ui/**');
+  assert.equal(bestMatch(['src/ui/**', '!src/ui/x/**'], 'src/ui/x/a.luau'), null);
+});
+
+test('overlapping reads a folder name as it is spelled, not as glob syntax', () => {
+  assert.deepEqual(overlapping(['*.ts'], ['**/*.ts'], ['pkg{1}', '']), ['*.ts', '**/*.ts']);
+  assert.equal(overlapping(['*.ts'], ['pkg1/*.ts'], ['pkg{1}', '']), null);
+  assert.deepEqual(overlapping(['*.ts'], ['a*b/*.ts'], ['a*b', '']), ['*.ts', 'a*b/*.ts']);
+  assert.equal(overlapping(['*.ts'], ['axb/*.ts'], ['a*b', '']), null);
+});
