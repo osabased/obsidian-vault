@@ -29,3 +29,22 @@ git config core.hooksPath .githooks
 ```
 
 `pre-commit` runs the tests, rebuilds the generated files and lints. `post-commit` refreshes `.live/tools/` after each commit, and the other hooks run it after a checkout, merge or rebase. A domain reaches projects by the `markers` in `vault.config.json`, or by this machine's folders, which go in the untracked `vault.local.json` as `{ "domains": { "<domain>": { "paths": ["<absolute folder>"] } } }`.
+
+## Codex
+
+The same hooks run in Codex through `tools/adapters/codex/`. Codex is opt-in: add it to `agents` in `vault.config.json`, as `"agents": ["claude-code", "codex"]`, so lint checks `editTools` and `tools` names against what Codex's hooks see and scripts run from a Codex shell find their session. Then print the hooks and merge them into `~/.codex/hooks.json` yourself:
+
+```
+node tools/agents.mjs codex
+```
+
+The command writes nothing. Open `/hooks` in Codex and trust the five vault hooks; Codex skips a hook until you do, and again after its command changes. The commands run the vault's `.live/tools/`, so trust holds across vault commits. Codex reads the vault's `AGENTS.md` natively, and its skills from `.agents/skills/`, which holds byte copies of `.claude/skills/` that `node tools/lint.mjs --fix` keeps.
+
+What Codex doesn't give the vault, and the vault doesn't work around:
+
+- **Edits** arrive as `apply_patch` patches, one refusal naming every covered file in the patch. Shell writes, a patch run through the shell included, are checked at the end of the turn, in git projects only.
+- **Tools.** Codex's PreToolUse sees `apply_patch`, `Bash` and MCP tools, so a `tools` rule can name only an MCP tool. Answers to Codex's question tool are left out of your typed words.
+- **The end-of-turn check** reaches the model as a new prompt, not as context. The vault keeps that prompt out of your typed words.
+- **Failures.** A hook that fails is marked failed and the call goes on. The vault logs it in `.state/errors.log` and names it at the next session start.
+- **Context size.** `additionalContextLimit` counts tokens by Codex's own estimate, and Codex saves longer context to a file with a preview.
+- **Untrusted hooks** don't run, and the vault can't tell.
