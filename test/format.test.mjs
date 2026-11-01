@@ -200,10 +200,10 @@ test('applies_to takes globs over a declared namespace, and file matching never 
   assert.deepEqual(rules.livePages()['glim/tree-page'].applies_to, ['glim-tree:Shop.**', 'docs/**']);
   const sid = sessionId();
   const gated = rel => editFile(v, sid, rel)?.hookSpecificOutput?.permissionDecisionReason ?? '';
-  const first = gated('src/a.lua');
+  const first = gated('src/a.zq');
   assert.match(first, /glim\/both/);
   assert.doesNotMatch(first, /glim\/tree-only/);
-  assert.equal(gated('src/gen/b.lua'), '', 'the ! file entry still excludes');
+  assert.equal(gated('src/gen/b.zq'), '', 'the ! file entry still excludes');
 });
 
 test('a file glob is the file namespace, with or without file:, and a drive letter is no namespace', async t => {
@@ -214,8 +214,8 @@ test('a file glob is the file namespace, with or without file:, and a drive lett
   assert.deepEqual(errs(['C:/x/**', 'c:/y']), []);
   v.write('wiki/glim/rules/prefixed.md', ruleNote({ applies_to: ['file:src/**', '!file:src/gen/**'] }));
   const sid = sessionId();
-  assert.match(editFile(v, sid, 'src/a.lua')?.hookSpecificOutput?.permissionDecisionReason ?? '', /glim\/prefixed/);
-  assert.equal(editFile(v, sid, 'src/gen/b.lua'), null);
+  assert.match(editFile(v, sid, 'src/a.zq')?.hookSpecificOutput?.permissionDecisionReason ?? '', /glim\/prefixed/);
+  assert.equal(editFile(v, sid, 'src/gen/b.zq'), null);
 });
 
 test('lint reports an undeclared namespace and an exclusion that comes first', async t => {

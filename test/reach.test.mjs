@@ -25,46 +25,39 @@ const writeLocal = (v, domains) => v.write('vault.local.json', `${JSON.stringify
 const reachFound = async v => (await v.import('lib/lint.mjs')).lint()
   .filter(f => /^vault\.(?:config|local)\.json$/.test(f.file)).map(f => [f.level, f.file, f.msg]);
 
-test('a session in an unlisted folder holding a domain\'s marker gets its rules and can propose', t => {
-  const v = makeVault(t, { domains: { alpha: ALPHA } });
-  v.write('wiki/alpha/rules/always-a.md', ruleNote({ domain: 'alpha', always: true, doLine: 'Alpha always.' }));
-  v.write('wiki/alpha/rules/gate-a.md', ruleNote({ domain: 'alpha', applies_to: ['src/**'], doLine: 'Alpha gate.' }));
-  const dir = folder(t, ['alpha.project', 'src/x.txt']);
+test('6.1a: a session in an unlisted folder holding a domain\'s marker gets its rules and can propose', t => {
+  const v = makeVault(t, { presets: ['glim'], domains: { glim: { topics: ['layout', 'code', 'naming'] } } });
+  const dir = folder(t, ['glim.project', 'src/x.zq']);
   const sid = sessionId();
   const start = context(v.startSession(sid, { cwd: dir }));
-  assert.match(start, /alpha\/always-a: Do: Alpha always\./);
+  assert.match(start, /glim\/always-rule: Do: Open each glim file with a purpose line\./);
   assert.match(start, /propose\.mjs/);
-  assert.match(denied(edit(v, sid, '', { abs: path.join(dir, 'src', 'x.txt'), cwd: dir })) ?? '', /alpha\/gate-a/);
+  assert.match(denied(edit(v, sid, '', { abs: path.join(dir, 'src', 'x.zq'), cwd: dir })) ?? '', /glim\/zq-trigger/);
   const r = v.propose(sid, {
-    domain: 'alpha', slug: 'name-widgets', topic: 'naming', basis: 'reading', reading: 'The user renamed the widgets.',
-    do: 'Name widgets after their screen.', not: 'Leave widget names bare.', applies_to: ['src/**/*.txt'],
+    domain: v.domain, slug: 'name-steps', topic: 'naming', basis: 'reading', reading: 'The user renamed the steps.',
+    do: 'Name steps after their screen.', not: 'Leave step names bare.', applies_to: ['docs/**/*.md'],
   });
   assert.equal(r.code, 0, r.stderr);
-  assert.ok(v.exists('wiki/alpha/rules/name-widgets.md'));
+  assert.ok(v.exists('wiki/glim/rules/name-steps.md'));
 });
 
-test('in a monorepo each package\'s edits get its own domain, and a session at the root hears both', t => {
-  const v = makeVault(t, { domains: { alpha: ALPHA, beta: BETA } });
-  v.write('wiki/alpha/rules/gate-a.md', ruleNote({ domain: 'alpha', applies_to: ['src/**'], doLine: 'Alpha gate.' }));
-  v.write('wiki/beta/rules/gate-b.md', ruleNote({ domain: 'beta', applies_to: ['src/**'], doLine: 'Beta gate.' }));
-  v.write('wiki/alpha/rules/always-a.md', ruleNote({ domain: 'alpha', always: true, doLine: 'Alpha always.' }));
-  v.write('wiki/beta/rules/always-b.md', ruleNote({ domain: 'beta', always: true, doLine: 'Beta always.' }));
-  v.write('wiki/alpha/rules/word-a.md', ruleNote({ domain: 'alpha', keywords: ['spacing'], doLine: 'Alpha word.' }));
-  v.write('wiki/beta/rules/word-b.md', ruleNote({ domain: 'beta', keywords: ['spacing'], doLine: 'Beta word.' }));
-  const root = folder(t, ['packages/a/alpha.project', 'packages/b/beta.project']);
+test('6.1a: in a monorepo each package\'s edits get its own domain, and a session at the root hears both', t => {
+  const v = makeVault(t, { presets: ['glim', 'almanac'] });
+  v.write('wiki/almanac/rules/always-a.md', ruleNote({ domain: 'almanac', topic: 'ledger', always: true, doLine: 'Almanac always.' }));
+  const root = folder(t, ['packages/a/glim.project', 'packages/b/almanac.project']);
   const sid = sessionId();
   const start = context(v.startSession(sid, { cwd: root }));
-  assert.match(start, /alpha\/always-a/);
-  assert.match(start, /beta\/always-b/);
-  const said = context(prompt(v, sid, 'fix the spacing', { cwd: root }));
-  assert.match(said, /alpha\/word-a/);
-  assert.match(said, /beta\/word-b/);
-  const a = denied(edit(v, sid, '', { abs: path.join(root, 'packages', 'a', 'src', 'x.txt'), cwd: root })) ?? '';
-  assert.match(a, /alpha\/gate-a/);
-  assert.doesNotMatch(a, /beta\//);
-  const b = denied(edit(v, sid, '', { abs: path.join(root, 'packages', 'b', 'src', 'x.txt'), cwd: root })) ?? '';
-  assert.match(b, /beta\/gate-b/);
-  assert.doesNotMatch(b, /alpha\//);
+  assert.match(start, /glim\/always-rule/);
+  assert.match(start, /almanac\/always-a/);
+  const said = context(prompt(v, sid, 'make the shimmer call openLedger', { cwd: root }));
+  assert.match(said, /glim\/keyword-rule/);
+  assert.match(said, /almanac\/ledger-v2/);
+  const a = denied(edit(v, sid, '', { abs: path.join(root, 'packages', 'a', 'src', 'x.zq'), cwd: root })) ?? '';
+  assert.match(a, /glim\/zq-trigger/);
+  assert.doesNotMatch(a, /almanac\//);
+  const b = denied(edit(v, sid, '', { abs: path.join(root, 'packages', 'b', 'src', 'x.zq'), cwd: root })) ?? '';
+  assert.match(b, /almanac\/ledger-v2/);
+  assert.doesNotMatch(b, /glim\//);
 });
 
 test('session start looks below its folder only to reach.markerDepth, past dot-folders and ignored folders', t => {
@@ -79,30 +72,27 @@ test('session start looks below its folder only to reach.markerDepth, past dot-f
 });
 
 test('a domain\'s paths in vault.local.json put a folder in it, and edits there get its rules', t => {
-  const v = makeVault(t, { domains: { alpha: { title: 'Alpha', topics: ['code'] } } });
-  const dir = folder(t, ['src/x.txt']);
-  writeLocal(v, { glim: { paths: [v.project.replace(/\\/g, '/')] }, alpha: { paths: [dir.replace(/\\/g, '/')] } });
-  v.write('wiki/alpha/rules/gate-a.md', ruleNote({ domain: 'alpha', applies_to: ['src/**'] }));
-  assert.match(denied(edit(v, sessionId(), '', { abs: path.join(dir, 'src', 'x.txt'), cwd: dir })) ?? '', /alpha\/gate-a/);
+  const v = makeVault(t, { presets: ['journal'] });
+  v.write('wiki/journal/rules/gate-j.md', ruleNote({ domain: 'journal', topic: 'days', applies_to: ['src/**'] }));
+  const dir = v.projects.journal;
+  assert.match(denied(edit(v, sessionId(), '', { abs: path.join(dir, 'src', 'x.txt'), cwd: dir })) ?? '', /journal\/gate-j/);
 });
 
-test('an everywhere domain\'s pages and keyword rules reach any folder, and its glob and always rules do not', t => {
-  const v = makeVault(t, { domains: { notes: { title: 'Notes', everywhere: true, topics: ['code'] } } });
-  v.write('wiki/notes/concepts/solvers.md', pageNote({ domain: 'notes', kind: 'concept', keywords: ['solver'] }));
-  v.write('wiki/notes/concepts/files.md', pageNote({ domain: 'notes', kind: 'concept', applies_to: ['**/*.txt'] }));
-  v.write('wiki/notes/rules/word.md', ruleNote({ domain: 'notes', keywords: ['solver'], doLine: 'Word rule.' }));
-  v.write('wiki/notes/rules/gate.md', ruleNote({ domain: 'notes', applies_to: ['**/*.txt'], doLine: 'Gate rule.' }));
-  v.write('wiki/notes/rules/always.md', ruleNote({ domain: 'notes', always: true, doLine: 'Always rule.' }));
+test('6.1a: an everywhere domain\'s pages and keyword rules reach any folder, and its glob and always rules do not', t => {
+  const v = makeVault(t, { presets: ['commons'] });
+  v.write('wiki/commons/concepts/files.md', pageNote({ domain: 'commons', kind: 'concept', topic: 'words', applies_to: ['**/*.txt'] }));
+  v.write('wiki/commons/rules/gate.md', ruleNote({ domain: 'commons', topic: 'words', applies_to: ['**/*.txt'], doLine: 'Gate rule.' }));
+  v.write('wiki/commons/rules/always.md', ruleNote({ domain: 'commons', topic: 'words', always: true, doLine: 'Always rule.' }));
   const dir = folder(t);
   const sid = sessionId();
-  assert.doesNotMatch(context(v.startSession(sid, { cwd: dir })), /notes\/always/);
-  const said = context(prompt(v, sid, 'which solver?', { cwd: dir }));
-  assert.match(said, /notes\/solvers/);
-  assert.match(said, /notes\/word/);
-  assert.doesNotMatch(said, /notes\/always/);
+  assert.doesNotMatch(context(v.startSession(sid, { cwd: dir })), /commons\/always/);
+  const said = context(prompt(v, sid, 'speak in plainspeak', { cwd: dir }));
+  assert.match(said, /commons\/plain-words/);
+  assert.match(said, /commons\/plain-rule/);
+  assert.doesNotMatch(said, /commons\/always/);
   const out = edit(v, sid, '', { abs: path.join(dir, 'a.txt'), cwd: dir });
-  assert.match(denied(out), /notes\/files/);
-  assert.doesNotMatch(denied(out), /notes\/gate/);
+  assert.match(denied(out), /commons\/files/);
+  assert.doesNotMatch(denied(out), /commons\/gate/);
 });
 
 test('lint reports a missing path as an error and a domain that reaches no project as a warning', async t => {
