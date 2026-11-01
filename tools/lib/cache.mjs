@@ -158,6 +158,13 @@ export function cleanFromGit(notes, stamp) {
 const BUILT = () => vaultPath(...CACHE, '.built.json');
 const CONFIG = '.config';
 const REFS = '.refs';
+const CODE = '.derive';
+
+// derived.json is a product of the code that derives it too: a commit that changes how derive reads the chains or the
+// notes must not keep the file the old code wrote. This names that code, as the note cache's stamp names its reader.
+let deriveStamp;
+const codeStamp = () => (deriveStamp ??= shortHash(['sources.mjs', 'rules.mjs', 'frontmatter.mjs']
+  .map(f => fs.readFileSync(path.join(import.meta.dirname, f), 'utf8')).join('\0')));
 
 // The path, size and mtime of each file in raw/refs/, hashed. Derive reads every copy there, and a copy pulled from
 // another machine changes no note, so a build skips derive only while this holds too.
@@ -172,8 +179,8 @@ export function refStats() {
   return shortHash(lines.sort().join('\n'));
 }
 
-// What each folder of wiki/ held, as one hash per folder of its notes' paths and texts, the config a build reads, and
-// raw/refs/ as refStats gives it. A domain's paths differ per machine and shape no generated file.
+// What each folder of wiki/ held, as one hash per folder of its notes' paths and texts, the config a build reads,
+// raw/refs/ as refStats gives it, and the code that derives from them. A domain's paths differ per machine and shape no generated file.
 function fingerprints(notes, refs) {
   const c = config();
   const domains = Object.fromEntries(Object.entries(c.domains).map(([d, { paths, ...x }]) => [d, x]));
@@ -181,16 +188,17 @@ function fingerprints(notes, refs) {
   return new Map([
     [CONFIG, shortHash(JSON.stringify({ ...c, domains }))],
     [REFS, refs],
+    [CODE, codeStamp()],
     ...[...by].map(([b, ns]) => [b, shortHash(ns.map(n => `${n.rel}\0${n.contentHash}`).sort().join('\n'))]),
   ]);
 }
 
-// Whether the config, raw/refs/, or a note in the folders walked, changed since the last build that markBuilt recorded.
+// Whether the config, raw/refs/, the derive code, or a note in the folders walked, changed since the last build that markBuilt recorded.
 export function changedSinceBuild(notes, buckets, refs = refStats()) {
   const built = readJsonSafe(BUILT());
   if (!built || typeof built !== 'object') return true;
   const now = fingerprints(notes, refs);
-  const names = buckets ? new Set([CONFIG, REFS, ...buckets.map(nfc)]) : new Set([...Object.keys(built), ...now.keys()]);
+  const names = buckets ? new Set([CONFIG, REFS, CODE, ...buckets.map(nfc)]) : new Set([...Object.keys(built), ...now.keys()]);
   return [...names].some(b => (built[b] ?? '') !== (now.get(b) ?? ''));
 }
 
