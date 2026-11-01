@@ -103,11 +103,10 @@ test('6.1a: an everywhere domain\'s pages and keyword rules reach any folder, an
   assert.doesNotMatch(denied(out), /commons\/gate/);
 });
 
-test('lint reports a missing path as an error and a domain that reaches no project as a warning', async t => {
-  const v = makeVault(t, { domains: { alpha: { title: 'Alpha', topics: [] }, beta: { title: 'Beta', topics: [] } } });
-  writeLocal(v, { glim: { paths: [v.project.replace(/\\/g, '/')] }, beta: { paths: ['C:/nowhere/beta'] } });
+test('6.1a: lint reports a missing path as an error and a domain that reaches no project as a warning', async t => {
+  const v = makeVault(t, { presets: ['glim'], domains: { alpha: { title: 'Alpha', topics: [] } }, local: { glim: { paths: ['C:/nowhere/glim'] } } });
   assert.deepEqual(await reachFound(v), [
-    ['error', 'vault.local.json', "beta's path C:/nowhere/beta doesn't exist on this machine. Fix it or remove it"],
+    ['error', 'vault.local.json', "glim's path C:/nowhere/glim doesn't exist on this machine. Fix it or remove it"],
     ['warn', 'vault.config.json', "alpha reaches no project on this machine. Add its folders to vault.local.json as paths, give it markers, or set vaultOnly: true if it holds only pages"],
   ]);
 });
@@ -145,6 +144,8 @@ test('lint checks the shape of markers, everywhere, vaultOnly and vault.local.js
 
 test('a missing vault.local.json gives a paths-only domain a warning, not an error', async t => {
   const v = makeVault(t, { domains: { glim: { markers: [] } } });
+  writeLocal(v, { glim: { paths: [v.project.replace(/\\/g, '/')] } });
+  assert.deepEqual(await reachFound(v), []);
   fs.rmSync(v.at('vault.local.json'));
   assert.deepEqual(await reachFound(v), [
     ['warn', 'vault.config.json', "glim reaches no project on this machine. Add its folders to vault.local.json as paths, give it markers, or set vaultOnly: true if it holds only pages"],

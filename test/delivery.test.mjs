@@ -113,7 +113,10 @@ test('prompt keywords match whole words only and the prompt outside a domain get
   v.write('wiki/glim/kw-rule.md', ruleNote({ keywords: ['strict'] }));
   assert.equal(prompt(v, sessionId(), 'a strictly worded prompt'), null);
   v.write('wiki/global/g-rule.md', ruleNote({ domain: 'global', keywords: ['strict'] }));
-  const elsewhere = { session_id: sessionId(), cwd: os.tmpdir(), prompt: 'strict' };
+  // Not os.tmpdir() itself: every test vault's project, with its marker, sits one folder below it.
+  const outside = fs.mkdtempSync(path.join(os.tmpdir(), 'vault-outside-'));
+  t.after(() => fs.rmSync(outside, { recursive: true, force: true }));
+  const elsewhere = { session_id: sessionId(), cwd: outside, prompt: 'strict' };
   const out = v.hook('prompt', elsewhere);
   assert.match(out.hookSpecificOutput.additionalContext, /global\/g-rule/);
   assert.ok(!out.hookSpecificOutput.additionalContext.includes('glim/kw-rule'));
