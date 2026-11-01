@@ -392,22 +392,22 @@ Phase-3 notes then need no migration, even where the tooling lands later.
     - `title`: a short phrase on one line.
     - `topics`: the domain's topic list, so the domain's first rule on a topic gets no lint warning that the topic is unlisted.
     - `marker`: a file name with no folder in it (`isMarkerName`, `vault.mjs:90`), present in the session's folder or a folder above it. The nearest folder holding it is the project root, through `mainCheckout` for a worktree, as `markedAbove` (`vault.mjs:110`) finds it.
-    - `path: true`, for a project with no file that marks its kind: the session's project folder goes in `vault.local.json`, and stays on this machine. The folder is the git top level of the session's folder, through `mainCheckout`, or the session's folder itself outside git.
+    - `path: true`, for a project with no file that marks its kind: the session's project folder goes in `vault.local.json`, and stays on this machine. The folder is the work tree of the main checkout, which `mainWorktree` in `git.mjs`, the one module that runs git (6.6d), gives for the session's folder and for any worktree of it. Outside git it is the session's folder itself.
     - `vaultOnly: true`, only from a session in the vault folder, for a domain that holds pages only.
     - `approved`: the user's words agreeing to this domain, checked as `propose.mjs` checks a quote (`typedFor`, `saidIn`), but against the user's latest typed message only. Refused when the words aren't there, and when the session has no transcript to check them in. A picked option's label is the agent's words, not the user's (`transcript.mjs:7`), so the agent asks in its reply.
     - Exactly one of `marker`, `path` and `vaultOnly` is given. From the vault folder, which is in no project, `marker` is taken without looking for the file, and the output says so; `path` is refused there.
     - A marker another domain already lists is accepted, and the output names that domain: a monorepo's packages can share a manifest name and be in two domains.
   - **What it writes.** It checks everything first, then takes `withLock` on `vault.config.json`, reads the file again, and refuses a key another run added meanwhile.
-    - The new entry, as the last key of `domains`, in the file's own indent. Every other byte of the file stays as it was: line ends, a BOM if there is one, and the other entries.
+    - The new entry, as the last key of `domains`, in the file's own indent and line ends. Every byte outside the entry and the comma before it stays as it was, a BOM if there is one and the other entries included.
     - With `path`, the folder under the new domain in `vault.local.json`, which it creates when missing.
-    - In the session's registry entry (`touchSession`), the recorded reach gains `{ domain, root }`, the root being the marker folder or the path. It adds the pair rather than finding the reach again, since `config()` is cached per process (`vault.mjs:39`) and still holds the config from before the write. Prompts, subagents, `pick.mjs` and `propose.mjs` read that reach, so the domain reaches the rest of the session. The edit hook reads config afresh on each call (`pre-tool.mjs:178`). A vault-folder session has no reach to change, since `propose.mjs` offers it every domain.
+    - In the session's registry entry, the recorded reach gains `{ domain, root }`, the root being the marker folder or the path. Its `cwd` stays the folder session start recorded, since prompts and subagents read the reach only for that folder (`sessions.mjs:42`). It adds the pair rather than finding the reach again, since `config()` is cached per process (`vault.mjs:39`) and still holds the config from before the write. Prompts, subagents, `pick.mjs` and `propose.mjs` read that reach, so the domain reaches the rest of the session. The edit hook reads config afresh on each call (`pre-tool.mjs:178`). A vault-folder session has no reach to change, since `propose.mjs` offers it every domain.
     - One `log.md` line through `appendLog`: `added domain <name> · session <short name>`.
   - **What it prints.**
     - For the user: the lines it added, and that `vault.config.json` and `vault.local.json` are theirs to edit or delete. Other machines get a marker domain once the user commits the vault and pulls it there; a path stays on this machine.
     - For the agent: the note on proposing and the note on picks that a session start in the domain sends (`start.mjs:9-33`), since this session's start sent neither. Both notes move to a module the start handler and the tool share.
   - It commits nothing, and writes nothing in the project.
   - **`/ingest`.** A source that fits no domain gets an offer of a new one, `vaultOnly: true` when it holds pages only. Batch mode keeps such a source for the end, where the user is asked about the knowledge rules, and offers the domain there.
-- *Check.* In a session in a folder no domain reaches, the start sends the line, and a `global` rule is written. `domain.mjs` refuses until the user's latest typed message holds `approved`, then writes a marker domain and keeps every other byte of `vault.config.json`. In the same session, a rule proposed for the new domain is written, and the next edit to a file it covers is refused once with it.
+- *Check.* In a session in a folder no domain reaches, the start sends the line, and a `global` rule is written. `domain.mjs` refuses until the user's latest typed message holds `approved`, then writes a marker domain and keeps every byte of `vault.config.json` outside the entry and the comma before it. In the same session, a rule proposed for the new domain is written, and the next edit to a file it covers is refused once with it.
 
 ### 6.4 Sources and evidence
 
@@ -1384,7 +1384,7 @@ The phases build mechanism only. Adding real knowledge and taste is the user's c
        - a marker with a folder in it, or one not found at or above the session's folder;
        - two of `marker`, `path` and `vaultOnly`, or none;
        - `vaultOnly` outside the vault folder, and `path` in it.
-     - **A marker write.** Every other byte of `vault.config.json` stays, in a CRLF fixture with a BOM and in an LF one. `log.md` gains one line. The registry's reach gains the domain and the marker folder. Then, in the same session:
+     - **A marker write.** Every byte of `vault.config.json` outside the entry and the comma before it stays, in a CRLF fixture with a BOM and in an LF one. `log.md` gains one line. The registry's reach gains the domain and the marker folder. Then, in the same session:
        - a rule proposed for the domain is written;
        - the next prompt delivers an `always` rule a fixture note gives the domain;
        - the first edit to a file a proposed rule covers is refused once with it.
@@ -1407,7 +1407,7 @@ The phases build mechanism only. Adding real knowledge and taste is the user's c
    - **Open questions.** The recommended choice comes first, and is what this design says.
      - `approved` must be in the user's latest typed message, the one the agent acts on. The alternative is any typed message in the session, as for quotes, which lets an earlier "yes" to something else pass.
      - `vault.config.json` stays unguarded: AGENTS.md says to start a domain only through `domain.mjs`, and the hooks guard against mistakes, not workarounds. The alternative is an edit guard on it, which would also refuse the config edits the user asks for in the vault folder, such as a feed or a delivery setting.
-     - Copy: the line, each refusal, the output's lines for the user and for the agent, the guard message, and the skill's offer.
+     - Copy: the line, each refusal, the output's lines for the user and for the agent, the guard message, and the skill's offer. The draft line's "no domain covers this project" is loose where an `everywhere` domain's pages and keyword rules reach the session; what it means is that no domain is this project's.
    - **Done** when the phase 7 check in §9 passes: the phase 6 check, with the new tests in the suite and none of them `todo`.
 
 ## 9. Checks
@@ -1557,6 +1557,7 @@ The design changes these parts of AGENTS.md. Each change lands with the phase th
 10. For phase 7, with no model run:
    - Not verified: that agents act on the one line, proposing a preference that holds everywhere to `global` and suggesting a domain for one that holds only for a kind of project, rather than dropping it.
    - Not verified: that agents ask in their reply rather than with a question tool. A picked option's label doesn't count as the user's words, so a refusal there costs the user a typed answer.
+   - Not verified: that a reply the user sends by clicking a suggested answer in the desktop app is recorded as typed (`origin.kind` `human`), so that it counts for `approved`.
 
 ## 12. Not doing
 
