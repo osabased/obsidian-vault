@@ -1,6 +1,6 @@
 # All-rounder vault: design draft
 
-Status: draft, 2026-11-01. Phase 0 (checks), phase 1 (format) and phase 2 (delivery) are built and merged into main. Phase 3 (neutral fixtures) is built, reviewed and landed on `phase-3-delivery`, not yet merged into main. Phase 4 (knowledge mechanisms) is built, reviewed and fixed on `phase-4-integration`, not yet merged into main. Phase 5 (media and tool triggers) is built, reviewed and fixed on `phase-5-delivery`, with phase 4's perf pass (`p4-perf`) merged in, not yet merged into main.
+Status: draft, 2026-11-01. Phase 0 (checks), phase 1 (format) and phase 2 (delivery) are built and merged into main. Phase 3 (neutral fixtures) is built, reviewed and landed on `phase-3-delivery`, not yet merged into main. Phase 4 (knowledge mechanisms) is built, reviewed and fixed on `phase-4-integration`, not yet merged into main. Phase 5 (media and tool triggers) is built, reviewed and fixed on `phase-5-delivery`, with phase 4's perf pass (`p4-perf`) merged in, not yet merged into main. Phase 6 (second adapter) is designed in §8 item 6, not built.
 
 Scope: structure, design and architecture only. This design adds no knowledge to the vault. It names no domain, platform, package ecosystem or site as built in. Where it needs an example, it uses a placeholder.
 
@@ -489,31 +489,30 @@ Phase-3 notes then need no migration, even where the tooling lands later.
 
 ### 6.7 Adapter boundary
 
-**a. Core events.** The core takes plain events and returns `{ context?, deny?, block?, notice? }`:
-- `start { session, cwd, reason }`, where `reason` is `new`, `resume`, `compact` or `clear`;
-- `prompt { session, cwd, text }`;
-- `preTool { session, agent?, cwd, tool, target?, before?, after?, added? }`, where `target` is `{ namespace, path }`;
+**a. Core events.** The core takes plain events and returns `{ context?, deny? }` (§8 item 6, Events):
+- `start { session, cwd, transcript, reason }`, where `reason` is `new`, `resume`, `compact` or `clear`;
+- `prompt { session, agent?, cwd, transcript, text }`;
+- `preTool { session, agent?, cwd, tool, args, target?, added?, after? }`, where `target` is `{ namespace, path }` and `after` is a function from the file's text to its text after the call;
 - `subagentStart { session, agent, cwd }`;
-- `stop { session, agent?, cwd }`;
-- `answer { session, question, options, picked, notes }`, optional.
+- `stop { session, agent?, cwd }`.
+
+An `answer` event and `block` and `notice` results wait for an agent that needs them. Claude Code and Codex both reach the typed-text provider through their transcripts, and neither needs the others.
 
 The result has no `allow`. A PreToolUse `allow` skips the permission prompt the user's mode would show (6.7g trial: "Hook approved tool use for Edit, bypassing permission prompt"). So an adapter maps "no objection" to no output, never to `allow`.
 
-The Claude Code adapter maps hook I/O (`hookSpecificOutput`, `permissionDecision`, `additionalContext`, which on Stop continues the turn), tool names and `CLAUDE_CODE_SESSION_ID` to these. The coupling sits today in:
-- `vault.mjs:257-269`;
-- `edit.mjs:24-42,123-142`;
-- `prompt.mjs`, `session-start.mjs` and `sessions.mjs:11`;
-- the transcript reader in `quotes.mjs:5-28`.
+The Claude Code adapter maps hook I/O (`hookSpecificOutput`, `permissionDecision`, `additionalContext`, which on Stop continues the turn), tool names and `CLAUDE_CODE_SESSION_ID` to these. §8 item 6 (Inventory) lists where the coupling sits today, by line.
 
 **b. Capabilities.**
 - Each adapter declares what it can do: deliver at start, deliver per prompt, deny, block a stop, the subagent event, its session-id variable and its typed-text provider.
 - Where one is missing, the core falls back. Keyword rules move into the start block.
 - An agent with no typed-text provider can propose with `reading`, `source`, `failure` and `pick` only, as `propose.mjs:118-121` already does.
+- Claude Code and Codex have every event, so phase 6 declares the capabilities and builds no fallback (§8 item 6).
 
 **c. Typed-text provider.**
 - The provider takes a session and returns what the user typed.
 - Claude Code's provider reads the transcript and keeps turns whose `origin.kind` is `human` (`quotes.mjs:11`).
 - A test pins the transcript fields it reads, so a format change fails a test instead of silently passing or refusing quotes. *(unverified: the `origin` field is observed in transcripts, not documented.)*
+- The test has two halves (§8 item 6, Tests). A fixture half pins each adapter's provider in the default run. A live half checks the same fields in this machine's newest transcript.
 
 **d. Packaging.**
 - The plugin ships `hooks/hooks.json` and a `userConfig` option `vault` of type `directory`.
@@ -522,18 +521,22 @@ The Claude Code adapter maps hook I/O (`hookSpecificOutput`, `permissionDecision
 - On Windows the launcher reads a Git Bash spelling, `/c/...`, as `C:/...`. It refuses a relative path with a hook error, since one would name a different folder in each session.
 - The plugin reference confirms each part: `userConfig` takes type `directory`, hook processes get `CLAUDE_PLUGIN_OPTION_VAULT`, and `${CLAUDE_PLUGIN_ROOT}` resolves in exec-form `args`. On Windows, exec form needs `command` to resolve to a real executable, which `node.exe` is.
 
-**e. Codex.**
-- Codex has the same event names, deny and `additionalContext`.
-- Its edits arrive as `apply_patch` text in `tool_input.command`, so its adapter parses the patch into `preTool` events.
-- It loads `AGENTS.md` from the root down, with no globs.
-- Its transcript format is documented as unstable for hooks.
+**e. Codex.** Codex CLI 0.153.4, from its docs (https://learn.chatgpt.com/docs/hooks) and source (https://github.com/openai/codex, tag `rust-v0.153.4`); §8 item 6 lists what each fact rests on.
+- Its hook config has Claude Code's shape and event names, and the same PreToolUse deny.
+- SessionStart, UserPromptSubmit and SubagentStart take `additionalContext`. Stop doesn't: `decision: "block"` with a `reason` continues the turn, and the reason arrives as a new prompt.
+- A hook runs only once the user trusts it in `/hooks`, and Codex plugins have no `userConfig`. So the user merges the hooks into `~/.codex/hooks.json` from what `node tools/agents.mjs codex` prints.
+- An exit code other than 0 or 2 marks the hook failed and doesn't block, as decision 1 needs.
+- Its edits arrive as `apply_patch` text in `tool_input.command`, so its adapter parses the patch into `preTool` events, one per file.
+- It loads `AGENTS.md` from the git root down, with no globs.
+- Its docs call the format behind `transcript_path` "not a stable interface". So its provider returns null on a field it doesn't find, and quotes are refused rather than counted wrongly.
 
 **f. Agents without hooks.**
-- `node tools/compile.mjs <project>` (decision 4) compiles rules for the project's agents:
+- `node tools/compile.mjs <project>` (decision 4) compiles rules for the agents that the project's domains list under `domains.<d>.compile` in `vault.config.json`.
+- Each format is an adapter's `compile.mjs`, so the core names no format (§8 item 6, Compiled files). Phase 6 ships one, a marked section of the project's `AGENTS.md`. Others would each be one more adapter folder:
   - Cursor `.mdc` files: `alwaysApply` from `always`, `globs` from `applies_to`, and keywords as `description`;
-  - Copilot `.instructions.md` files, with `applyTo`;
-  - or a marked section of `AGENTS.md`.
+  - Copilot `.instructions.md` files, with `applyTo`.
 - It writes only into projects that `vault.config.json` opts in. The user decides whether the project commits them.
+- It runs only when the user runs it. Lint warns on a section that is missing, edited by hand or stale.
 - Only `file` namespace globs compile, since those formats know only files.
 - These agents lose deny-then-retry, `triggers`, once-per-session delivery and proposing, and the copy is stale until compiled again.
 
@@ -560,6 +563,13 @@ These are limits of the agent, not features the vault is missing. The adapter de
 - **Code-execution tools.** An MCP tool that runs arbitrary code inside an app has no target to map, and a Stop-time check can't see what it changed.
 - **Hookless agents** get advice, not enforcement (6.7f).
 - **Failures inside a subagent.** Claude Code records them in the subagent's transcript, not the parent's (6.6a). A SubagentStart failure is the exception and reaches the parent's stream.
+- **Codex** (6.7e, §8 item 6):
+  - **Hooks it hasn't been told to trust.** Codex skips a hook the user hasn't trusted in `/hooks`, and one whose command changed, and the vault can't tell. A project can opt in to the compiled section as advice (6.7f), which then shows twice in a session whose hooks do run.
+  - **How loud a failure is.** A hook that exits 1 is marked failed and the call goes on (decision 1). Where the user sees that isn't verified (§11). What the vault itself shows is `.state/errors.log` and the error line at the next session start.
+  - **The Stop continuation** reaches the model as a new prompt, not as context. The adapter keeps it out of the user's typed words.
+  - **Shell writes.** As for Claude Code, they are caught at Stop, in git projects only. A patch the agent runs through the shell is a shell write.
+  - **Tools beyond the three PreToolUse sees.** The hooks docs name `apply_patch`, `Bash` and MCP tools. A phase 5 `tools` rule can name nothing else in Codex, and answers to Codex's question tool are left out of typed text.
+  - **Context size.** `additionalContextLimit` counts tokens by Codex's own estimate, and longer context is saved to a file with a preview.
 
 ## 8. Phases
 
@@ -927,7 +937,376 @@ The phases build mechanism only. Adding real knowledge and taste is the user's c
      - `source-formats.test.mjs`: an anchor inside a line isn't an anchor, so a footnote's `#page=` needing it is warned.
      - The perf group gains the AskUserQuestion test.
    - **Done** when the phase 5 check in §9 passes: the suite passes with 0 `todo` tests, lint reports 0 errors, the grep finds nothing, and the perf group passes, AskUserQuestion test included.
-6. **Second adapter.** The core and adapter split (6.7a–c), the Codex adapter (6.7e) and compiled files (6.7f), built together so a real second agent shapes the split.
+6. **Second adapter.** Designed, not built. Phase 6 splits `tools/hooks/` into the neutral core and `tools/adapters/claude-code/` (6.7a–c). It adds `tools/adapters/codex/` (6.7e) and compiled files (6.7f), and builds the transcript provider test (6.7c). The split is mechanical: the Claude Code adapter turns today's hook input into core events and the core's results back into today's output, so the existing suite pins the behavior through `v.hook` unchanged. Phases 4 and 5 land first and are cited by their item bullets. The line numbers below are this branch's, from before phases 4 and 5, so the builder runs the inventory grep (Neutral core) again before the move.
+   - **What this settles in §6.**
+     - `preTool` carries `after` as a function and no `before` (6.7a);
+     - Codex's Stop continues the turn through `decision: "block"`, not `additionalContext` (6.7e);
+     - Codex's exit 1 doesn't block, so decision 1 holds there (6.7e);
+     - compiled formats live in adapter folders, and phase 6 ships only the AGENTS.md section (6.7f);
+     - the transcript provider test has a fixture half and a live half (6.7c);
+     - 6.7a's `answer` event and `block` and `notice` results, and 6.7b's fallbacks, aren't built: neither adapter needs them;
+     - Codex has no `userConfig` (6.7d), so its launcher finds the vault from its own folder.
+   - **What Codex supports.** These facts come from three places:
+     - Codex CLI 0.153.4, installed: `codex --version` and `codex features list`;
+     - its source at tag `rust-v0.153.4` (https://github.com/openai/codex). The `.rs` files cited below are under `codex-rs/hooks/src/` and `codex-rs/apply-patch/src/`;
+     - the docs that https://developers.openai.com/codex redirects to: https://learn.chatgpt.com/docs/hooks, `/docs/plugins`, `/docs/agent-configuration/agents-md`, `/docs/config-file/config-reference` and `/docs/build-skills`.
+
+     No Codex model run was made.
+     - **Hooks** are on by default (`features list`: `hooks stable true`).
+       - They are read from `~/.codex/hooks.json`, `[hooks]` in `~/.codex/config.toml`, and a repo's `.codex/hooks.json` and `.codex/config.toml`. The repo's two load only in a trusted project. Every source runs.
+       - The JSON has Claude Code's shape: `{ "hooks": { "<Event>": [{ "matcher", "hooks": [{ "type": "command", "command", "timeout" }] }] } }`.
+       - A hook runs only once the user trusts it in `/hooks`. Trust is keyed to the hook's definition, so a changed command is skipped until it is trusted again.
+     - **Events the vault uses.** The schemas are `codex-rs/hooks/schema/generated/<event>.command.input.json`.
+       - Every input has `session_id`, `transcript_path` (nullable), `cwd`, `hook_event_name`, `model` and `permission_mode`. Every event but SessionStart also has `turn_id`.
+       - SessionStart has `source`: `startup`, `resume`, `clear` or `compact`.
+       - UserPromptSubmit has `prompt`.
+       - PreToolUse has `tool_name`, `tool_input`, `tool_use_id`, and `agent_id` inside a subagent.
+       - SubagentStart has `agent_id` and `agent_type`.
+       - Stop has `stop_hook_active` and `last_assistant_message`, and no `agent_id`.
+     - **Tools.**
+       - A file edit is `tool_name: "apply_patch"`, with the patch text in `tool_input.command`.
+       - A shell call is `Bash`, with `tool_input.command`.
+       - An MCP tool is `mcp__<server>__<tool>`, with its arguments as `tool_input`.
+       - Matchers on UserPromptSubmit and Stop are ignored (hooks docs).
+     - **Output.**
+       - SessionStart, UserPromptSubmit and SubagentStart take `hookSpecificOutput.additionalContext`, or plain stdout, as model context.
+       - A PreToolUse deny has Claude Code's shape: `permissionDecision: "deny"` with a non-empty `permissionDecisionReason`. An `ask` fails the hook, and the call goes on.
+       - Stop has no `hookSpecificOutput`. `{ "decision": "block", "reason": "…" }` continues the turn, with the reason as a new prompt. Other JSON fails the hook (`stop.rs:282-329`).
+       - Context longer than `additionalContextLimit` (2,500 tokens by default, `output_spill.rs:12`) is saved to a file, and the model gets a preview.
+     - **Failure.**
+       - An exit code other than 0 or 2 marks the hook failed, with the entry "hook exited with code 1", and doesn't block the call (`pre_tool_use.rs:278-284`, `stop.rs:370-375`, `session_start.rs:312-317`).
+       - Exit 2 blocks the call.
+     - **Commands.**
+       - Every command runs through a shell: `%COMSPEC% /C`, which is `cmd.exe`, on Windows, and `$SHELL -lc` elsewhere. There is no exec form (`command_runner.rs:428-433`).
+       - `commandWindows` replaces `command` on Windows (`discovery.rs:514`).
+       - The timeout defaults to 600 s.
+     - **Plugins.**
+       - A plugin has no `userConfig`.
+       - Plugin hooks are "supported only for manually installed Codex desktop plugins" (plugins docs).
+     - **AGENTS.md** is read from the git root down to the cwd, one file per folder, joined, up to `project_doc_max_bytes` (32 KiB). The chain is built once per session, and it has no globs.
+     - **Skills** are read from `.agents/skills` in the cwd and each parent up to the repo root, and from `~/.agents/skills`. Codex doesn't read `.claude/skills`.
+     - **Session files** are `~/.codex/sessions/YYYY/MM/DD/rollout-<time>-<id>.jsonl`. The docs say only that the format behind `transcript_path` "is not a stable interface".
+     - **Session id.** The shell tool's environment has `CODEX_THREAD_ID`. This comes from the binary's strings and openai/codex issues 19937 and 22124, not from the docs.
+   - **Inventory.** This is what is Claude Code's today, and where each piece goes.
+     - **Hook output** moves to each adapter's `output()`:
+       - the deny (`edit.mjs:243`);
+       - the context returns (`session-start.mjs:117`, `prompt.mjs:63`, `subagent-start.mjs:20`);
+       - Stop's `additionalContext` (`stop.mjs:61`), with the comment on `stop_hook_active` (`stop.mjs:30-33`).
+     - **Hook input fields** (`session_id`, `cwd`, `agent_id`, `transcript_path`, `source`, `prompt`, `tool_name`, `tool_input`) become event fields. They are read in:
+       - `cwdOf` (`vault.mjs:402`), `touchSession` (`sessions.mjs:22-36`), `agentKey` (`sessions.mjs:145`), and `markPages` and `duePages` (`sessions.mjs:148`, `:165`);
+       - `dueRules` (`scope.mjs:31-43`);
+       - `session-start.mjs:68-115`, `prompt.mjs:41-49`, `stop.mjs:23-35` and `subagent-start.mjs:9-15`;
+       - `edit.mjs:118`, `:137`, `:155-176`, `:198`, `:222` and `:245-271`.
+     - **`runHook`** (`vault.mjs:410-422`) stays in the core. Its `CLAUDE_CODE_SAFE_MODE` check (`vault.mjs:411`) moves to the adapter's `disabled()`.
+     - **Tool names and edit semantics** move to the adapter:
+       - `FILE_TOOLS`, `EDIT_HOOK_MATCHER` and `toolFile` (`vault.mjs:404-407`);
+       - `matchIn`, `replaced` and `textAfter` (`edit.mjs:29-54`);
+       - the file-tool branches of `target` and `newText` (`edit.mjs:158-161`, `:172-175`).
+
+       Lint's `editTools` checks (`lint.mjs:238-243`) ask the adapters instead.
+     - **The session id variable** goes through `currentSession()`. It is read in `ownEntry` (`sessions.mjs:13-17`), `lint.mjs:24` and `log.mjs:55`, and named in the refusal at `propose.mjs:85`.
+     - **The transcript reader** (`quotes.mjs:5-28`) becomes `tools/adapters/claude-code/transcript.mjs`. Its callers are `propose.mjs:146` and lint's `typedIn` (`lint.mjs:48-51`).
+     - **Registration** stays at the repo root, where the plugin layout needs it: `hooks/hooks.json`, `hooks/launch.mjs` and `.claude-plugin/`. Only the launcher's import path changes (`launch.mjs:33`).
+     - **Copy that names Claude Code's tools:** the shell line in `proposeNote` (`session-start.mjs:19`) and `.claude/skills/ingest/SKILL.md:23`.
+     - **Comments that name Claude Code** are reworded, or move with their code: `deadline.mjs:1`, `rules.mjs:407`, `quotes.mjs:5-7`, `edit.mjs:39`, `:119` and `stop.mjs:30-33`.
+     - **What stays core:** the `tool_input.<field>` syntax of `editTools` (`edit.mjs:149`, `lint.mjs:237`, `:251-252`). It is config's own syntax, and both agents call an MCP tool's arguments `tool_input`.
+   - **Layout after the move.**
+
+     ```
+     tools/lib/agents.mjs                    the adapter registry and currentSession()
+     tools/lib/handlers/start.mjs            session-start.mjs's body
+     tools/lib/handlers/prompt.mjs           prompt.mjs's body
+     tools/lib/handlers/pre-tool.mjs         edit.mjs's body, less the Claude Code parts
+     tools/lib/handlers/subagent-start.mjs
+     tools/lib/handlers/stop.mjs
+     tools/adapters/claude-code/adapter.mjs
+     tools/adapters/claude-code/transcript.mjs
+     tools/adapters/claude-code/hooks/{session-start,prompt,edit,stop,subagent-start}.mjs
+     tools/adapters/codex/adapter.mjs
+     tools/adapters/codex/patch.mjs
+     tools/adapters/codex/transcript.mjs
+     tools/adapters/codex/compile.mjs
+     tools/adapters/codex/launch.mjs
+     tools/adapters/codex/hooks/{the same five}.mjs
+     tools/agents.mjs                        prints an adapter's registration
+     tools/compile.mjs
+     ```
+
+     Each hook entry holds three lines, for example `tools/adapters/codex/hooks/edit.mjs`:
+
+     ```js
+     import { runHook } from '../../../lib/vault.mjs';
+     import * as agent from '../adapter.mjs';
+     import { preTool } from '../../../lib/handlers/pre-tool.mjs';
+     runHook('edit', agent, preTool);
+     ```
+
+   - **Events (6.7a).** These are plain objects, and the core never sees an agent's input.
+     - `start { session, cwd, transcript, reason }`, where `reason` is `new`, `resume`, `compact` or `clear`.
+     - `prompt { session, agent?, cwd, transcript, text }`.
+     - `preTool { session, agent?, cwd, tool, args, target?, added?, after? }`:
+       - `target` is `{ namespace: 'file', path }`, set only for the adapter's own file tools. The path is absolute or from `cwd`.
+       - `added` is the text the call adds, which triggers are tested on.
+       - `after` is a function. The core calls it only for a wiki note, with the file's text (`''` for a new file). It returns the whole text after the call, or null when the adapter can't follow the call. `noteGuard` already handles null (`edit.mjs:119-120`).
+       - The core reads the file itself (`edit.mjs:114-116`), so `before` isn't passed.
+       - A call with no `target` is a tool call. The core maps it through `editTools` (`edit.mjs:143-167`) and checks phase 5's `tools` rules on `tool` and `args` (item 5, Tool triggers). `asText(args)` stands where phase 5 has `asText(tool_input)`.
+     - `subagentStart { session, agent, cwd }` and `stop { session, agent?, cwd }`.
+     - A handler returns `{ context? }` or `{ deny? }`. Neither adapter needs 6.7a's `block` or `notice`, or the `answer` event, so they aren't built. Each agent's answers reach the typed-text provider through its transcript.
+   - **`runHook(name, agent, handler)`** replaces `runHook(name, fn)`:
+     1. It returns at once when `agent.disabled(process.env)`.
+     2. It arms the deadline and parses stdin, as today.
+     3. `agent.events(name, input)` returns a list of events. Every hook gives one event, except a Codex patch, which gives one per file.
+     4. The handler runs on each event, and `agent.output(name, results)` turns the results into what the hook writes to stdout.
+     5. The catch is unchanged: it logs, writes one stderr line, and sets exit 1. Both agents treat exit 1 as a failure that doesn't block.
+   - **Adapter interface.** `tools/adapters/<agent>/adapter.mjs` exports:
+     - `name`, the folder's name;
+     - `capabilities` (6.7b): `{ start, prompt, deny, stopContext, subagentStart, typedText }`, each true or false. Both adapters declare every one. The 6.7b fallbacks, such as keyword rules moving into the start block, wait for an agent that lacks an event, so phase 6 doesn't build them;
+     - `sessionVar`: the variable a script reads the session id from;
+     - `disabled(env)`;
+     - `events(hook, input)` and `output(hook, results)`. A result list with no `context` and no `deny` gives no output, never an `allow` (6.7a);
+     - `fileTools` and `sends(tool)`, which lint reads for `editTools` and for phase 5's `tools` names;
+     - `typedMessages(transcript)`, from its `transcript.mjs`, which returns null when the file can't be read;
+     - `transcriptCheck(file)` and `newestTranscript(home)`, for the live provider test;
+     - `identifiers`: the names only this agent uses, for the neutral-core test;
+     - `registration(vaultRoot)`: `{ where, text }`, which `tools/agents.mjs` prints.
+   - **Registry** (`tools/lib/agents.mjs`).
+     - `agent(name)` loads `tools/adapters/<name>/adapter.mjs` through `createRequire`, as `extension()` loads extensions (`ext.mjs:15-20`). It throws on an unknown name.
+     - `config().agents` lists the adapters that lint checks tool names against. `DEFAULTS` (`vault.mjs:20-28`) gains `agents: ['claude-code']`. Lint errors on a name with no adapter folder.
+     - `currentSession(env)` returns `{ agent, id }` for the first adapter, in the order of `agents`, whose `sessionVar` is set, or null.
+     - `touchSession(event, hits, agentName)` writes `agent` into the registry entry. An entry with no `agent`, which is every entry today, reads as `claude-code`.
+     - `typedFor(entry)` calls that adapter's `typedMessages(entry.transcript)`. It replaces the call at `propose.mjs:146`. `transcriptFor` (`sessions.mjs:196-200`) returns the entry, so lint's `typedIn` (`lint.mjs:48-51`) calls `typedFor` too.
+     - `ownEntry` compares with `currentSession()`. `lint.mjs:24` and `log.mjs:55` take the id from it.
+     - `propose.mjs` and `pick.mjs` make the session id argument optional. With none, they use `currentSession()`, and with neither they refuse. The refusal at `propose.mjs:85` becomes: "Pass the session id from the taste vault's note at session start, or run this from the agent's own shell, which sets its session id." (open question).
+   - **The Claude Code adapter.** Code moves here, and none of it is rewritten.
+     - `events`:
+       - `session_id`, `agent_id`, `cwd` (through `cwdOf`) and `transcript_path` become `session`, `agent`, `cwd` and `transcript`;
+       - SessionStart's `source: startup` becomes `reason: 'new'`, and its other values are kept;
+       - `prompt` becomes `text`;
+       - a `FILE_TOOLS` call gets `target` from `toolFile`, `added` from `newText`'s file branches, and `after` from `textAfter`;
+       - any other tool gets `args: tool_input` and no `target`.
+     - `output` writes today's JSON byte for byte, Stop's `additionalContext` included.
+     - `sends(tool)` tests `^(?:EDIT_HOOK_MATCHER)$`, and `hooks/hooks.json:11` still equals the matcher (`plugin.test.mjs:30-33`).
+     - `sessionVar` is `CLAUDE_CODE_SESSION_ID`, and `disabled` checks `CLAUDE_CODE_SAFE_MODE === '1'`.
+     - `transcript.mjs` is `quotes.mjs:5-28` as it stands.
+     - `identifiers`: `CLAUDE_CODE_`, `CLAUDE_PLUGIN_`, `hookSpecificOutput`, `permissionDecision`, `additionalContext`, `AskUserQuestion`, `MultiEdit`, `NotebookEdit`, `toolUseResult`, `isCompactSummary`, `system-reminder`, `session_id`, `agent_id`, `tool_name`, `transcript_path` and `Claude Code`.
+     - `registration` prints the two install commands in README.md:14-15.
+     - **Launcher.** `launch.mjs:33` imports `.live/tools/adapters/claude-code/hooks/<hook>.mjs`, and its messages are unchanged. An installed plugin whose launcher predates phase 6 still looks for `.live/tools/hooks/<hook>.mjs`. So `tools/hooks/<hook>.mjs` stays for one release as a one-line import of the new entry, and a later phase removes it (open question).
+   - **The Codex adapter.**
+     - **Registration.** `node tools/agents.mjs codex` prints the hooks for `~/.codex/hooks.json`, with the main checkout's path (`mainCheckout`, `vault.mjs:97`). Without the path's real value, it prints:
+
+       ```json
+       {
+         "hooks": {
+           "SessionStart": [{ "hooks": [{ "type": "command", "command": "node \"<vault>/.live/tools/adapters/codex/launch.mjs\" session-start 10", "timeout": 10, "additionalContextLimit": 4000 }] }],
+           "UserPromptSubmit": [{ "hooks": [{ "type": "command", "command": "node \"<vault>/.live/tools/adapters/codex/launch.mjs\" prompt 10", "timeout": 10, "additionalContextLimit": 4000 }] }],
+           "PreToolUse": [{ "matcher": "apply_patch|mcp__.*", "hooks": [{ "type": "command", "command": "node \"<vault>/.live/tools/adapters/codex/launch.mjs\" edit 10", "timeout": 10 }] }],
+           "SubagentStart": [{ "hooks": [{ "type": "command", "command": "node \"<vault>/.live/tools/adapters/codex/launch.mjs\" subagent-start 10", "timeout": 10, "additionalContextLimit": 4000 }] }],
+           "Stop": [{ "hooks": [{ "type": "command", "command": "node \"<vault>/.live/tools/adapters/codex/launch.mjs\" stop 10", "timeout": 10 }] }]
+         }
+       }
+       ```
+
+       It then prints one line: "Merge this into ~/.codex/hooks.json, then open /hooks in Codex and trust the five vault hooks. Codex skips them until you do." (open question).
+       - It writes nothing, since AGENTS.md:220 keeps the agent from writing outside the vault.
+       - The path uses forward slashes, which node reads on Windows. It is quoted, so `cmd.exe` keeps a path with spaces whole.
+       - The command names `.live`, whose content changes with each commit while the definition stays the same, so trust holds across vault commits.
+       - `additionalContextLimit` leaves room above `delivery.maxContextChars` (8,000 characters). Codex counts tokens by its own estimate (§11).
+     - **Launcher** (`tools/adapters/codex/launch.mjs <hook> <seconds>`).
+       - It runs from the vault's `.live/tools/`, so the vault is found from its own folder, and no option or environment variable is needed.
+       - It sets `VAULT_HOOK_TIMEOUT` and imports `./hooks/<hook>.mjs`.
+       - For a name that isn't a hook, it calls `runHook(hook, agent, () => { throw … })`, so the failure line is runHook's and the launcher prints nothing itself.
+     - **`events`.**
+       - SessionStart: `source: startup` becomes `reason: 'new'`, and `resume`, `clear` and `compact` are kept. Any other value is read as `new`, since the docs already list `fork`.
+       - UserPromptSubmit: `prompt` becomes `text`. A prompt that is a Stop continuation the vault sent (below) gives no event, so it neither restamps the turn nor gets excerpts.
+       - PreToolUse: `apply_patch` goes through `patch.mjs`. An `mcp__…` call gives `{ tool, args: tool_input }`. Any other tool gives no event.
+       - SubagentStart gives `{ session, agent: agent_id, cwd }`, and Stop gives `{ session, cwd }`.
+     - **`patch.mjs`.** `parsePatch(text)` returns `[{ op, path, moveTo?, lines?, chunks? }]`.
+       - It follows the grammar in `parser.rs:4-22`, with the markers at `parser.rs:37-45`.
+       - It allows whitespace around the markers, as Codex does (`parser.rs:24-25`), and skips an `*** Environment ID:` line.
+       - Paths are from `cwd`, or absolute (`parser.rs:85-90`).
+
+       Each file becomes one event:
+       - **Add File:** `added` is the content, the `+` lines without their `+`, and `after` returns the content.
+       - **Update File:** `added` is the `+` lines joined with LF. `after(before)` applies each chunk in order after the one before it, at its `@@` context line when it has one. It looks for the chunk's ` ` and `-` lines exactly, then ignoring trailing whitespace, then ignoring both ends, as `seek_sequence.rs:1-6` does. It returns null when a chunk isn't found.
+       - **Move to:** a second event on the new path, with the same `added` and `after`.
+       - **Delete File:** `added` is `''` and `after` returns `''`. So `vaultGuard` refuses deleting what it guards, `noteGuard` refuses a page cut to nothing once, and a user's page is refused (`edit.mjs:97`).
+       - A patch that doesn't parse throws. That is a loud hook failure, and Codex's own parser refuses the same patch.
+     - **`output`.**
+       - Context from start, prompt and subagentStart becomes `{ hookSpecificOutput: { hookEventName, additionalContext } }`.
+       - Denies from a patch's events are joined with a blank line into one PreToolUse deny. Every file's markers were written as it was checked, so the same patch sent again passes.
+       - Stop's context becomes `{ "decision": "block", "reason": <context> }`.
+         - The adapter marks `continued|<shortHash(context.trim())>` for the session.
+         - The prompt event and the transcript provider drop a text whose hash is marked. So the vault's own text never counts as the user's words.
+         - The gate markers keep it to one continuation per file, as for Claude Code (6.3d).
+     - **`transcript.mjs`.** `typedMessages(file)` reads the rollout JSONL.
+       - It keeps a line with `type: 'response_item'`, `payload.type: 'message'` and `payload.role: 'user'` whose `payload.internal_chat_message_metadata_passthrough.content_item_kinds` is exactly `['user.text']`. Its texts are the `text` of each `input_text` item in `payload.content`.
+       - It drops a text that starts `<send_user_message_question_reply`, the reply to Codex's question tool. The answer's format isn't known, and the options in it are the agent's (§7).
+       - It drops a text whose hash is marked `continued`.
+       - It returns null when the file can't be read, and when a user message has no `content_item_kinds`. So a format change refuses quotes, rather than letting injected text count as the user's.
+     - **Other exports.**
+       - `fileTools` is `['apply_patch']`, and `sends` tests `^(?:apply_patch|mcp__.*)$`.
+       - `sessionVar` is `CODEX_THREAD_ID`.
+       - `disabled` is always false. Codex has no safe-mode variable: the user turns hooks off in `/hooks` or with `features.hooks = false`.
+       - `identifiers`: `CODEX_`, `apply_patch`, `*** Begin Patch`, `content_item_kinds`, `send_user_message` and `Codex`.
+     - **Skills.** Codex reads `.agents/skills`, and the skills live in `.claude/skills/`. `.agents/skills/<name>/SKILL.md` is kept as a byte copy of each one. Lint errors when a copy differs, and `lint --fix` writes it (open question). Codex ignores the Claude-only frontmatter key `disable-model-invocation` (§11).
+     - **AGENTS.md.** Codex reads the vault's AGENTS.md natively in the vault folder, so the vault's own instructions need nothing compiled.
+   - **Compiled files (6.7f, decision 4).**
+     - **Opt-in.** `domains.<d>.compile` in `vault.config.json` lists the adapters whose format that domain's projects get, for example `["codex"]`. It is unset by default. Lint errors on a name whose adapter has no `compile.mjs`.
+     - **Command.** `node tools/compile.mjs <project>...`.
+       - A project's domains are those `sessionReach(project)` finds, as at session start, that have `compile`. Its formats are the union of their lists.
+       - It exits 2 for a path that isn't a folder, and for a project no opted-in domain reaches.
+     - **What compiles.** The live, settled rules of global and those domains:
+       - always rules;
+       - `file` namespace glob rules, grouped by their `applies_to`;
+       - keyword rules, grouped by their `keywords`.
+
+       Within each group, rules go in key order (`cmp`), so the bytes are fixed. A rule with `triggers` is listed under its globs, and its triggers are dropped.
+
+       What doesn't compile:
+       - namespace globs, since the formats know only files;
+       - `tools` rules;
+       - pages, whose paths are this machine's vault.
+     - **Interface.** The core builds `{ always: [line], files: [{ globs, lines }], keywords: [{ keywords, lines }] }`, with each line from `ruleLine`. `tools/adapters/<agent>/compile.mjs` exports `compile(sections, root)`, which returns `[{ path, text }]`. A Cursor or Copilot format would be one more adapter folder holding only `compile.mjs`, with every capability false.
+     - **The Codex format** is a marked section of `<root>/AGENTS.md`:
+
+       ```md
+       <!-- taste-vault: begin 3f9c01ab77e0d2c1 · written by node tools/compile.mjs; edits inside are overwritten -->
+       ## Taste rules
+
+       From the user's taste vault. Follow them in this project.
+
+       - glim/panel-gap: Do: … Not: …
+
+       ### When editing src/**/*.txt
+
+       - glim/code-header: Do: … Not: …
+
+       ### When the request mentions panel or grid
+
+       - glim/grid-words: Do: … Not: …
+       <!-- taste-vault: end -->
+       ```
+
+       - The hash is `shortHash` of the text between the two markers.
+       - The rest of the file is kept byte for byte. A new file holds the section alone.
+       - The section takes the file's line endings: CRLF when the file already has any.
+       - It fits `compile.maxBytes` (16,384 by default, half of Codex's 32 KiB for all AGENTS.md files together) through `fitContext`, whose overflow line names what it left out.
+     - **Output.** One line per file, then exit 0, or 1 when any line is `refused`:
+
+       ```
+       wrote <root>/AGENTS.md: 12 rules
+       unchanged <root>/AGENTS.md
+       refused <root>/AGENTS.md: the taste-vault section was edited by hand since it was compiled. Move those edits out of the section, or delete it, then compile again.
+       ```
+
+     - **Rebuilds.** A section is rebuilt only when the user runs the command. No hook, build or git hook writes one (decision 4).
+     - **Drift.** Lint checks each project root on this machine that an opted-in domain reaches. All three findings are warnings, since the project is another repo and lint runs in the vault's pre-commit hook:
+       - no section: `not compiled; run node tools/compile.mjs <root>`;
+       - a hash that doesn't match: `edited by hand since it was compiled`;
+       - a body that differs from what compiling now would write: `stale: 3 rules changed since it was compiled; run node tools/compile.mjs <root>`.
+     - **With Codex hooks.** A project whose domain opts in to `codex` gets its rules twice in a session whose Codex hooks are trusted. The README says to opt in only for a project where the hooks don't run, such as a machine without the vault's hooks, or a repo other people's agents read.
+     - **What is lost** (6.7f): deny-then-retry, `triggers`, once-per-session delivery, proposing, pages and namespace globs. The copy is stale until compiled again.
+   - **Neutral core.**
+     - `test/neutral-core.test.mjs` gains a second test. It loads every adapter's `identifiers` and fails on each one found in a file under `tools/` outside `tools/adapters/`, naming the file and line. It reads the names from the adapters, so the test itself names no agent.
+       - It scans `tools/` only. `test/` keeps Claude Code payloads, which the existing tests pin, and the skills and AGENTS.md are copy for every agent, which review checks.
+       - The domain-key test keeps its four roots, and `tools/adapters/` falls inside them.
+     - The inventory grep, run from the vault folder, prints what the identifier test would find:
+
+       ```sh
+       git grep -nE 'CLAUDE_|CODEX_|hookSpecificOutput|permissionDecision|additionalContext|AskUserQuestion|MultiEdit|NotebookEdit|apply_patch|content_item_kinds|toolUseResult|isCompactSummary|system-reminder|\b(session_id|agent_id|tool_name|transcript_path)\b|Claude Code|Codex' -- tools ':!tools/adapters'
+       ```
+
+       On this branch it prints the inventory's lines. After the move it prints nothing.
+     - Lint's code rules (`lint.mjs:626-651`) follow the move:
+       - `inHooks` matches `^adapters/[^/]+/hooks/`, and the `runHook` check (`lint.mjs:642`) applies there;
+       - `quiet` covers `adapters/` and `lib/`, so neither prints nor reaches the network;
+       - the `tools/hooks/` shims are exempt from the `runHook` check while they last.
+     - `CODING_STANDARDS.md:37-38` say `adapters/<agent>/hooks/`. They gain one rule: nothing outside `adapters/` names an agent, its tools or its hook fields, and an adapter holds no delivery logic.
+   - **Fixtures.**
+     - **`test/fixture.mjs`.**
+       - `v.hook(name, input, { agent = 'claude-code', timeout })` runs `adapters/${agent}/hooks/${name}.mjs` (`fixture.mjs:71-81`). Every existing caller keeps the default.
+       - `cleanEnv` (`fixture.mjs:142-147`) also deletes `CODEX_THREAD_ID`.
+     - **`test/codex.mjs`** holds the Codex helpers:
+       - `codexInput(event, fields)` fills each event's required fields from the 0.153.4 schemas. For PreToolUse:
+
+         ```js
+         { session_id, transcript_path: null, cwd, hook_event_name: 'PreToolUse', model: 'fixture-model', permission_mode: 'default', turn_id: 'turn-1', tool_name: 'apply_patch', tool_use_id: 'call-1', tool_input: { command: patch } }
+         ```
+
+       - `codexPatch(ops)` writes patch text from `{ add | update | delete, path, lines, moveTo }`.
+       - `codexRollout(v, sid, messages)` writes a rollout under `.transcripts/`: a `session_meta` line, then one `response_item` per message:
+
+         ```jsonl
+         {"timestamp":"2026-11-01T00:00:00.000Z","type":"session_meta","payload":{"id":"<sid>","cwd":"<project>","cli_version":"0.153.4"}}
+         {"timestamp":"2026-11-01T00:00:01.000Z","type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"<the vault's AGENTS.md>"}],"internal_chat_message_metadata_passthrough":{"content_item_kinds":["agents_md.instructions"]}}}
+         {"timestamp":"2026-11-01T00:00:02.000Z","type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"Keep the grid gap at eight."}],"internal_chat_message_metadata_passthrough":{"content_item_kinds":["user.text"]}}}
+         ```
+
+         The shape was read from local Codex rollouts, field names only (§11).
+     - **Schemas.** The five input schemas at `rust-v0.153.4` are copied into `test/fixtures/codex/schema/`. A test checks that each `codexInput` payload has every `required` field and only `enum` values they allow. This is a few lines over the schema's `required` and `enum` keys, not a validator dependency.
+   - **Tests.** Each new test is written before its code and seen red for its reason.
+     - **Existing tests.** They pass unchanged, except:
+       - `plugin.test.mjs:26` reads `tools/adapters/claude-code/hooks`;
+       - `plugin.test.mjs:82` and `:90` write the new `.live` path. The message at `plugin.test.mjs:73` doesn't change.
+     - **The neutral-core identifier test** comes first. It is red on this branch, naming `sessions.mjs:14` and the other inventory lines, and green once the move is done.
+     - **`test/adapters.test.mjs`, the contract.** It loops over `['claude-code', 'codex']`. Each agent has a driver in `test/drivers/<agent>.mjs`, which builds that agent's payloads and reads its outputs: `start`, `prompt`, `editFile`, `toolCall`, `subagent`, `stop`, `context(out)`, `deny(out)` and `continued(out)`. On the `glim` preset, for each agent:
+       1. A session start delivers the always rule. A `compact` start after a refusal makes the next edit refuse again.
+       2. A prompt with a keyword gets the excerpt once.
+       3. The first edit to a covered file is denied with the rule. The same edit again gives no output, never an `allow`.
+       4. An edit outside every glob gives no output.
+       5. A subagent hears the always rules, and its edit is gated apart from the parent's.
+       6. A shell write, then a stop, continues once with the lead line. The next stop gives nothing.
+       7. With a broken `vault.config.json`, each hook exits 1 with one `vault <hook> failed:` line and nothing on stdout.
+       8. An `editTools` MCP tool is gated in its namespace.
+       9. `propose.mjs` with no session argument uses the session from the agent's `sessionVar`.
+       10. The typed-text provider returns the typed message from the driver's fixture transcript, and none of the injected text.
+     - **`test/codex.test.mjs`.**
+       - The parser handles Add, Update with and without `@@` context, Move to, Delete, an Environment ID line, whitespace around the markers, and `*** End of File`.
+       - A patch over two covered files gives one deny naming both. The same patch again passes. A malformed patch is a loud failure.
+       - `after()` on a wiki note: a patch that removes a `## You said` line is refused; one that adds lines under `## Agent notes` on a user's page passes; a chunk that matches nothing refuses a user's page.
+       - Stop's output is `{"decision":"block","reason":…}` byte for byte. A prompt with that text afterwards gives no output and doesn't restamp the turn, and the provider drops it.
+       - The provider keeps `user.text`, drops `agents_md.*`, `environments.*`, `additional_content.*` and the question reply, and returns null for a user message with no `content_item_kinds` and for a missing file.
+       - `source` mapping, including an unknown value read as `new`.
+       - `node tools/agents.mjs codex` prints the snippet byte for byte, for a vault at a fixed POSIX path and at a fixed Windows path, and it parses as JSON with the five events.
+       - Every `codexInput` payload fits the copied schemas.
+     - **`test/compile.test.mjs`.**
+       - The `glim` project's AGENTS.md section byte for byte, as a literal in the test.
+       - An existing AGENTS.md with CRLF keeps its other text and its line endings.
+       - A second run prints `unchanged`. A hand edit inside the section is `refused`, with exit 1 and nothing written.
+       - Lint warns on not compiled, stale and edited by hand.
+       - A project no opted-in domain reaches exits 2. A namespace-glob rule is left out. Over `compile.maxBytes`, the overflow line appears.
+       - Lint errors on `compile: ["nope"]` and on `agents: ["nope"]`.
+     - **`test/transcript.test.mjs`** (6.7c, the fixture half).
+       - Each adapter's provider, given a fixture transcript with one record of each kind it reads or skips, returns exactly the expected list.
+       - For Claude Code, the fixture holds a typed prompt, a queued prompt, an `AskUserQuestion` answer with labels and notes, an `isMeta` record, a compaction summary, a tool result, a `task-notification` turn and a `system-reminder` block. A turn with `origin.kind: 'task-notification'` is dropped, which shows the field is read.
+       - For Codex, the fixture holds the kinds the `codex.test.mjs` provider case lists.
+     - **`test/live/transcripts.live.mjs`** (6.7c, the live half). It runs with `VAULT_LIVE=1 node --test test/live/*.live.mjs`, outside the default run, as the perf group is.
+       - For each adapter, `newestTranscript(os.homedir())` finds the newest session file on this machine: `~/.claude/projects/*/*.jsonl`, or `~/.codex/sessions/**/rollout-*.jsonl`.
+       - `transcriptCheck(file)` returns `{ ok, missing }`. Claude Code's needs a `type: 'user'` record with an `origin` object. Codex's needs `session_meta` and a user `response_item` with `content_item_kinds`.
+       - It prints only counts and field names, never a message's text. With no session file, it skips and says why.
+       - Passing means the fields each provider reads exist in a current transcript.
+     - The perf group runs again, since every hook now goes through `events` and `output`.
+   - **Order of the build.**
+     1. The identifier test, seen red.
+     2. The move, with the Claude Code adapter. The suite passes, and so does the identifier test.
+     3. The Codex adapter and its tests.
+     4. Compiled files.
+     5. The provider tests.
+   - **Rules that change.**
+     - `CODING_STANDARDS.md` changes as Neutral core says.
+     - The README gains a Codex section: `node tools/agents.mjs codex`, trust in `/hooks`, and what §7 declares.
+     - `.claude/skills/ingest/SKILL.md:23` drops `"$CLAUDE_CODE_SESSION_ID"`, since `propose.mjs` reads the session itself. Its shell wording is copy (open question).
+     - `proposeNote`'s shell line (`session-start.mjs:19`) comes from the adapter, as `agent.proposeShell`. Claude Code's is today's line. Codex's names no tool (open question).
+     - AGENTS.md changes as §10 says.
+   - **Open questions.** The recommended choice comes first, and is what this design says.
+     - Codex ships opt-in. The user runs `node tools/agents.mjs codex`, merges the hooks and trusts them, and adds `codex` to `agents`. Codex's trust step rules out shipping it on. The alternative is a `--write` flag that merges into `~/.codex/hooks.json`, which needs the "Write outside the vault" exception widened.
+     - The hooks go in the user's `~/.codex/hooks.json`. Alternatives: each project's `.codex/hooks.json`, which needs project trust and a copy per project; or a Codex plugin, whose hooks the docs limit to desktop plugins installed by hand.
+     - Phase 6 ships only the AGENTS.md section. The alternative is Cursor `.mdc` and Copilot `.instructions.md` too, each pinned from its documented format with no agent to try it on.
+     - Skills for Codex are byte copies in `.agents/skills/`. Alternatives: move the skills to `.agents/skills/` and point `plugin.json` there, which makes Claude Code see them only as plugin skills in the vault folder; or no Codex skills in phase 6.
+     - A Codex question-tool reply is dropped from typed text. The alternative is reading the user's own words out of it, once its format is documented.
+     - `tools/hooks/` keeps one-line shims for one release. The alternative is no shims: a stale plugin then fails every hook loudly until `claude plugin update`.
+     - Copy: the snippet's closing line, the compiled section's heading and intro line, the `refused` line, the `propose.mjs:85` refusal, and the skill's and `proposeNote`'s shell lines (`CODING_STANDARDS.md:15`).
+   - **Done** when the phase 6 check in §9 passes. The suite passes with no `todo` test, the identifier test included. Lint reports 0 errors. Both greps print nothing, and the perf group passes. The live provider check is run once on a machine that has both agents' session files.
 
 ## 9. Checks
 
@@ -937,11 +1316,12 @@ The phases build mechanism only. Adding real knowledge and taste is the user's c
 | Neutral-core test (§3) | No configured domain's key or title appears in `tools/`, `.claude/skills/`, `test/` or AGENTS.md | Passes on this vault's config, with its `todo` mark removed (phase 3). |
 | Phase 4 check: the suite through the TAP reporter, then lint and the grep, below the table | The suite has no failure and exactly 2 `todo` tests, 6.3c and 6.4a, both failing; lint reports 0 errors; the grep prints nothing. Then 6.1c, 6.2a and 6.2b pass, and only phase 5's checks are open. Run the perf group too, since phase 4 adds a read to every hook. | Passes (phase 4, before review): 431 pass, 0 fail, 2 `todo`, 6.3c (the first AskUserQuestion isn't denied) and 6.4a (a quote the PDF's derived text doesn't hold is written); lint 0 errors; the grep prints nothing. The perf group passes. Passes again after the review's fixes: 458 pass, 1 skipped, 0 fail, the same 2 `todo`; lint 0 errors; the grep prints nothing; the perf group passes, its build test included. |
 | Phase 5 check: the suite through the TAP reporter, then lint, the grep and the perf group, below the table | The suite has no failure and no `todo` test; lint reports 0 errors; the grep prints nothing; the perf group passes, AskUserQuestion test included. Then every *Check* in §6 runs on built code. | Passes (phase 5, before review): 473 pass, 0 fail, 0 `todo`; lint 0 errors; the grep prints nothing. The perf group passes, the AskUserQuestion call at 212 ms. After the review's fixes: 530 pass, 1 skipped, 0 fail, 0 `todo`; lint 0 errors; the grep prints nothing. The perf group's latency tests pass, the AskUserQuestion call at 260 ms; its build test misses, a session start that builds taking about 5.2 s against 5,000 ms. With phase 4's perf pass merged in: 535 pass, 1 skipped, 0 fail, 0 `todo`; lint 0 errors; the grep prints nothing; the perf group passes, the AskUserQuestion call at 207 ms and a session start that builds at about 1.5 s. |
+| Phase 6 check: the phase 5 check, then the agent-name grep, below the table | The phase 5 check passes, with the neutral-core identifier test, the adapter contract test and the Codex and compile tests in the suite; the agent-name grep prints nothing. Then nothing in `tools/` outside `tools/adapters/` names an agent, its tools or its hook fields. | Not built (phase 6 is designed). The grep prints the inventory lines of §8 item 6 on this branch. |
 | Phase 3 check: the suite, then the grep below the table | With the neutral-core `todo` mark removed, the suite passes with 5 `todo` tests (6.1c, 6.2a, 6.2b, 6.3c, 6.4a), each red for its reason, and the grep prints nothing. Then no test, tool, skill or AGENTS.md example leans on one platform, and only the five later-phase checks are open. | Passes (phase 3): the five `todo` tests fail for their reasons, and the grep prints nothing. |
 | The probes as `todo` tests (phase 0) | Each passes with its `todo` mark removed: slow trigger, subagent gate, settle after an mtime change, negated glob, one refusal per file, frontmatter | All pass with their marks removed (phase 2): slow trigger, subagent gate (2), settle after an mtime change (2), one refusal per file, frontmatter, long-path prefix. Negated glob passes (phase 1). |
 | Perf group: `VAULT_PERF=1 node --test test/perf/*.perf.mjs` (about 50 s, outside the default run) | Fastest of 5 gated edits under 1,000 ms at 1,000 notes; fastest of 3 under 300 ms at 3,000; three parallel proposes of unrelated rules at 3,000 notes all succeed (6.6f); an AskUserQuestion call under 300 ms at 3,000 notes (6.3c); at 3,000 notes and 3,000 files in `raw/refs/`, the fastest of 3 session starts that build, after a note edit and after a new copy, under 5,000 ms, and the fastest of 3 builds with nothing changed under 1,500 ms (`build.perf.mjs`) | About 135–166 ms; about 245–290 ms; all succeed in about 4.3–5.4 s (phase 3). With phase 4's reads, 145 ms; 232 ms; all succeed in about 7.4 s, since builds run one at a time under `build.lock`. A warm session start at 3,000 notes takes about 340 ms, including the vault-wide stat for the lint reminder. After the review's fixes, 191 ms; 298 ms; all succeed in about 6.4 s; a session start that builds about 4.6 s, one with nothing changed about 630 ms, and a build with nothing changed about 830 ms. With the copies in `raw/refs/` cached and the hooks' stats taken at once, 155 ms; 201–218 ms; all succeed in about 5.9 s; a session start that builds about 1.4 s, one with nothing changed about 550 ms, and a build with nothing changed about 810 ms. With phase 5, before phase 4's fixes were merged in, 138 ms; 220 ms; an AskUserQuestion call 212 ms; all succeed in about 7.1 s. After phase 5's fixes, 170 ms; 275 ms; an AskUserQuestion call 260 ms; all succeed in about 5.9 s; a session start that builds about 5.2–5.4 s, one with nothing changed about 640–730 ms, and a build with nothing changed about 830–1,010 ms. With phase 4's perf pass merged into phase 5, 172 ms; 233 ms; an AskUserQuestion call 207 ms; all succeed in about 6.3 s; a session start that builds about 1.5 s, one with nothing changed about 590 ms, and a build with nothing changed about 870 ms. The timings are noisy on this machine. |
 | Each *Check* in §6 | As stated there, against the presets. All 17 pass in phase 5 | 17 pass against the presets (6.2c and 6.6f in the perf group), 6.3c and 6.4a with their `todo` marks removed (phase 5, before review) |
-| Transcript provider test (6.7c) | The fields the provider reads still exist in a current transcript | Not built |
+| Transcript provider test (6.7c): `test/transcript.test.mjs`, and `VAULT_LIVE=1 node --test test/live/*.live.mjs` outside the default run | Each adapter's provider returns exactly the typed messages in its fixture transcript; the live half finds the fields each provider reads in this machine's newest transcript, printing only field names and counts | Not built (phase 6 is designed). |
 | Linear regex test (6.6c) | `new RegExp(p, 'l')` works after `v8.setFlagsFromString` on the installed Node | Works on Node 22.14 |
 | Vault server trial (6.7g) | A PreToolUse `mcp_tool` hook's JSON deny stops an Edit, and a gated edit is faster than the cached command hook | Run once in a scratch folder, not kept. Deny honored, but it fails open. |
 | Hook trials (6.2c, 6.3d, 6.6a) | In headless runs of the installed Claude Code: Stop `additionalContext` and `decision: "block"` continue the turn in bypass mode; a failing hook is recorded on each event; exec form is faster than Git Bash | Run once in a scratch folder on 2.1.296, not kept. All three hold. Exec form saves about 50 ms a call, less than measured outside Claude Code. |
@@ -970,6 +1350,14 @@ out=$(node --test --test-reporter=tap test/*.test.mjs); echo "$out" | grep -E '^
 ```
 
 It prints the tally and every top-level test that failed. It exits 0 only when the suite has no failure and no `todo` test, lint finds no error, the grep prints nothing, and the perf group passes.
+
+The phase 6 check, run from the vault folder:
+
+```sh
+out=$(node --test --test-reporter=tap test/*.test.mjs); echo "$out" | grep -E '^# (pass|fail|todo) |^not ok '; echo "$out" | grep -qx '# fail 0' && echo "$out" | grep -qx '# todo 0' && node tools/lint.mjs && ! git grep -nIiE 'luau|\.lua\b|roblox|--!strict|UIListLayout|task\.wait|local x = 1|\bdemo\b' -- test tools .claude/skills AGENTS.md && VAULT_PERF=1 node --test test/perf/*.perf.mjs && ! git grep -nE 'CLAUDE_|CODEX_|hookSpecificOutput|permissionDecision|additionalContext|AskUserQuestion|MultiEdit|NotebookEdit|apply_patch|content_item_kinds|toolUseResult|isCompactSummary|system-reminder|\b(session_id|agent_id|tool_name|transcript_path)\b|Claude Code|Codex' -- tools ':!tools/adapters'
+```
+
+It prints what the phase 5 check prints, then every line outside `tools/adapters/` that names an agent. It exits 0 only when the phase 5 check passes and that grep prints nothing. The identifier test in the suite checks the same from the names each adapter exports; the grep also catches a name no adapter lists yet.
 
 ## 10. AGENTS.md changes
 
@@ -1003,6 +1391,14 @@ The design changes these parts of AGENTS.md. Each change lands with the phase th
   - Line 207 (Lint): `/lint` runs refresh first. Offline, it reports the failed checks and goes on.
   - Line 213 (conflicting evidence): between knowledge rules, prefer the one that matches the project's version, then the newer `as_of`.
   - Line 222 (what the hooks refuse): add `.sources/`.
+- **Phase 6.** The line numbers are AGENTS.md's at the end of phase 3; phases 4 and 5 shift them.
+  - Line 3: "so Claude Code can apply and look them up" becomes "so an agent can apply and look them up", and the hooks are in `tools/adapters/<agent>/hooks/`.
+  - Line 16 (`tools/`): `tools/adapters/<agent>/` holds what is one agent's, its hooks included; the rest of `tools/` is the core and the scripts. A new line after it: `.agents/skills/` holds copies of `.claude/skills/` for Codex, which lint checks and `lint --fix` writes; edit the skill in `.claude/skills/`.
+  - Line 44: "since Claude Code turns a longer one into a file path" becomes "since the agent turns a longer one into a file path".
+  - Line 91 (`tools`): names are each agent's own, and lint checks them against every adapter that `agents` in `vault.config.json` lists.
+  - Line 195 (rules): "the project's CLAUDE.md or `.claude/rules/`" becomes "the project's own agent instructions, such as CLAUDE.md, AGENTS.md or `.claude/rules/`". A compiled taste-vault section doesn't count as the project's own.
+  - Line 207 (Lint): lint also warns on a compiled section that is missing, stale or edited by hand, and names the `node tools/compile.mjs` command to run.
+  - Line 220 ("Write outside the vault", listed above as line 186): the exception names `node tools/compile.mjs`, run by the user, in projects whose domain lists an agent under `compile`. `node tools/agents.mjs` prints hooks for the user to merge and writes nothing.
 - **Phase 5.** The line numbers are AGENTS.md's at the end of phase 3; phase 4's changes shift them.
   - Line 11 (`derived/`): `node tools/extract.mjs <file>` writes it, through an extractor in `tools/ext/extractors/` that `extractors` in `vault.config.json` lists.
   - Line 92 (`tools`): "Nothing delivers on `tools` yet" goes. The first call to a listed tool in a session is refused with the rule, once per agent, and the retry goes through. Lint reports a name the edit hook never sees, or one that edits a file, as an error.
@@ -1019,7 +1415,7 @@ The design changes these parts of AGENTS.md. Each change lands with the phase th
 2. The transcript's `origin.kind` field is observed, not documented, and the format is documented as unstable.
 3. The V8 linear engine flag is experimental. It works on Node 22.14, in-process.
 4. That a denied `AskUserQuestion` costs one agent retry and no user turn (6.3c).
-5. For the second adapter and compiled files: OpenCode v2 payloads, whether Claude Code reads `.agents/skills`, and whether the Copilot cloud agent can reach the vault.
+5. For compiled files and skills: whether Claude Code reads `.agents/skills`, which would show the Codex skill copies twice (§8 item 6), and whether the Copilot cloud agent can reach the vault. OpenCode's v2 payloads no longer bear on the design, since Codex is the second adapter (decision 5).
 6. Whether Claude Code normalizes a `directory` option's path itself. The launcher doesn't rely on it: it reads a Git Bash `/c/...` path as `C:/...` and refuses a relative one (6.7d). What the phase 2 plugin trial settled: `CLAUDE_PLUGIN_OPTION_VAULT` from the parent env reaches the hooks under `--plugin-dir`, and `pluginConfigs` is read from user settings, `--settings` and managed settings, never project settings (Claude Code's debug log).
 7. For refresh (phase 4), with git 2.49.0.windows.1 on Node 22.14:
    - Not verified: that git is on `PATH` on every machine that runs refresh. Without it, each git source is a failed check, `git not found`, and URL sources still run.
@@ -1032,6 +1428,19 @@ The design changes these parts of AGENTS.md. Each change lands with the phase th
    - Not verified: that the edit hook's deny reaches the agent for `AskUserQuestion` in an interactive session, with the same deny-then-retry as an edit. A headless trial couldn't test it: `AskUserQuestion` isn't offered in `claude -p`, so the model's tool search found no such tool and the hook never ran. The 6.3c test drives the hook directly, and claim 4 above, no user turn, stays unverified.
    - Not verified: how often the `token` and `assignment` patterns flag text in real sources. The 4.2-bit entropy threshold was set on a few dozen hand-made samples.
    - Settled by scratch scripts, not kept: the fixture extractor reads the new `paper.pdf` bytes and its rendering equals the preset's derived text byte for byte; the file still fails `TextDecoder('utf-8', { fatal: true })`. `createRequire` of an ES module with top-level `await` throws `ERR_REQUIRE_ASYNC_MODULE`, and an async `extract` export loads and runs. The secret patterns catch and pass the cases Privacy lists, including integrity hashes after the `sha384-` fix, and scan a 1.86 MB line in about 25 ms.
+9. For phase 6, on Codex CLI 0.153.4, from its docs, its source at `rust-v0.153.4` and local rollout files, with no Codex model run:
+   - Not verified: where the user sees a hook that exits 1. The source marks it failed, "hook exited with code 1", and goes on; the TUI and desktop app weren't checked.
+   - Not verified: whether the Stop continuation's prompt fires UserPromptSubmit. The adapter drops it either way.
+   - Not verified: a cap on Stop continuations in a row, like Claude Code's 8. The gate markers keep it to one per file.
+   - Not verified: the rollout fields the provider reads, `content_item_kinds`, `input_text` and the `<send_user_message_question_reply` prefix. They were seen in local Codex Desktop 0.158–0.160 rollouts, field names only, and aren't documented.
+   - Not verified: that `CODEX_THREAD_ID` in the shell tool's environment equals the hooks' `session_id`. It comes from the binary's strings and openai/codex issues 19937 and 22124.
+   - Not verified: that Codex's question tool reaches PreToolUse, so a phase 5 `tools` rule could name it.
+   - Not verified: that a denied `apply_patch` costs one agent retry and no user turn, as claim 4 assumes for Claude Code.
+   - Not verified: how Codex estimates tokens for `additionalContextLimit`. 4,000 leaves twice the room 8,000 characters need at 4 characters a token.
+   - Not verified: how `/hooks` presents five new hooks for trust, and that a changed vault path asks again. The docs key trust to the definition.
+   - Not verified: that hooks in `~/.codex/hooks.json` run in a project the user hasn't trusted. The docs gate only a project's own hooks on trust.
+   - Not verified: that Codex ignores `disable-model-invocation` in a skill's frontmatter rather than refusing the skill.
+   - Settled from the source: exit codes other than 0 and 2 don't block (`pre_tool_use.rs:278-284`); Stop takes only its schema (`stop.rs:282-329`); commands run through `cmd.exe` on Windows (`command_runner.rs:428-433`); `additionalContextLimit` defaults to 2,500 tokens (`output_spill.rs:12`); the `apply_patch` grammar (`parser.rs:4-45`) and the order chunks are matched in (`seek_sequence.rs:1-6`). The paths are under `codex-rs/hooks/src/` and `codex-rs/apply-patch/src/`.
 
 ## 12. Not doing
 
