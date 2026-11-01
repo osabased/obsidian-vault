@@ -19,7 +19,8 @@ const notes = once(loadNotes);
 
 const linted = once(() => {
   try {
-    return { counts: tally(lint(notes())) };
+    const found = lint(notes());
+    return { counts: tally(found), found };
   } catch (e) {
     return { failed: e.message };
   }
@@ -191,6 +192,11 @@ const unnamedSources = () => {
   }).sort();
 };
 
+function uncheckedQuotes() {
+  if (linted().failed) throw new Error(linted().failed);
+  return (linted().found.find(f => f.unchecked)?.unchecked ?? []).map(u => `- ${u.note} · ${u.cites} · "${clip(u.quote, 80)}"`);
+}
+
 function provisional() {
   return newestFirst(liveRows(subjectRows()).filter(r => r.status === 'provisional'))
     .map(r => `- ${localDay(r.at)} · ${projectName(r.project)}/${r.subject} · ${r.question}: "${r.pick}" (${r.id})`);
@@ -205,6 +211,7 @@ const status = () => [
   ...section('Knowledge rules a newer source on their topic may override', newerSources),
   ...section('Notes a changed source has left unverified', unverifiedNotes),
   ...section('Source checks that failed', failedChecks),
+  ...section("Quotes lint can't check", uncheckedQuotes),
   ...section('Provisional picks not yet confirmed', provisional),
   ...section('Sources in raw/refs/ no source page names', () => unnamedSources().map(f => `- ${f}`)),
 ].join('\n');
