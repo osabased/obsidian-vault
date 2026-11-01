@@ -3,6 +3,7 @@ import path from 'node:path';
 import { parse, yamlQuote } from './frontmatter.mjs';
 import { validGlob, overlapping, entryParts, globListProblems } from './glob.mjs';
 import { config, vaultPath, shortHash, toPosix, today, inside, plural, isVaultOnly, memo } from './vault.mjs';
+import { cachedNotes, cleanFromGit } from './cache.mjs';
 
 export const LIST_FIELDS = ['applies_to', 'triggers', 'keywords', 'tools'];
 // Slugs and domains take lowercase letters, modifier letters (ー, 々, ʻ), letters of scripts with no case (CJK and the
@@ -86,8 +87,9 @@ function field(lead, name) {
   return m ? m[1].trim() : '';
 }
 
-export function parseNote(text, rel) {
-  const { data, body, ok } = parse(text);
+export const parseNote = (text, rel) => noteFrom(parse(text), rel);
+
+function noteFrom({ data, body, ok }, rel) {
   const parts = nfc(rel).replace(/^wiki\//i, '').replace(/\.md$/i, '').split('/');
   const lead = body.split(/^## /m)[0];
   const successor = single(data.superseded_by);
@@ -240,22 +242,18 @@ function checkNote(n) {
   return errs;
 }
 
-export function loadNotes() {
-  const root = vaultPath('wiki');
-  const notes = [];
-  const walk = dir => {
-    let entries = [];
-    try { entries = fs.readdirSync(dir, { withFileTypes: true }); } catch {}
-    for (const e of entries) {
-      if (e.name.startsWith('.')) continue;
-      const full = path.join(dir, e.name);
-      if (e.isDirectory()) walk(full);
-      else if (e.isFile() && /\.md$/i.test(e.name)) {
-        notes.push({ ...parseNote(fs.readFileSync(full, 'utf8'), `wiki/${path.relative(root, full).replace(/\\/g, '/')}`), saved: fs.statSync(full).mtimeMs });
-      }
-    }
-  };
-  walk(root);
+// The cache keeps what parse() read, so a change to frontmatter.mjs makes it read every note again.
+let parserStamp;
+const stamp = () => (parserStamp ??= shortHash(fs.readFileSync(path.join(import.meta.dirname, 'frontmatter.mjs'), 'utf8')));
+const parsed = (rel, text) => {
+  const { data, body, ok } = parse(text);
+  return { data, body, ok };
+};
+
+// The notes under wiki/<domain>/ for each domain given, or every note in wiki/.
+export function loadNotes(domains) {
+  const notes = cachedNotes(domains ?? null, parsed, stamp())
+    .map(e => ({ ...noteFrom(e.note, e.rel), saved: e.m, seen: e.seen, clean: e.clean, contentHash: e.h }));
   // A key names one note, so two notes in two folders of a domain with one name would each answer for the other.
   const rels = new Map();
   for (const n of notes) rels.set(n.key, [...(rels.get(n.key) ?? []), n.rel]);
@@ -322,11 +320,16 @@ export function liveRules(notes = loadNotes()) {
   return rules;
 }
 
-// Obsidian saves a note every few seconds while the user types, so a note saved in the last settleSeconds
-// waits rather than reach sessions half-written.
+// Obsidian saves a note every few seconds while the user types, so a note waits rather than reach sessions half-written,
+// until its text has held for settleSeconds or its file was last saved that long ago. A checkout or a sync gives every
+// file a fresh mtime without changing its text, and committed text isn't half-typed, so a note git finds unchanged from
+// HEAD is settled too; git is asked only about notes the other two tests leave waiting.
 export function settledNotes(notes = loadNotes()) {
-  const since = Date.now() - config().delivery.settleSeconds * 1000;
-  return notes.filter(n => n.saved <= since);
+  const window = config().delivery.settleSeconds * 1000;
+  const now = Date.now();
+  const held = n => n.saved <= now - window || now - n.seen >= window;
+  if (notes.some(n => n.clean === undefined && !held(n))) cleanFromGit(notes, stamp());
+  return notes.filter(n => n.clean || held(n));
 }
 
 export const settledRules = (notes = loadNotes()) => liveRules(settledNotes(notes));

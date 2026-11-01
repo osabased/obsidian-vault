@@ -2,7 +2,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { isBuiltin } from 'node:module';
 import {
-  config, vaultPath, plural, today, datedFiles, filesIn, pickRows, rewriteText, lf, readJson, readJsonSafe, toPosix, memo, isVaultOnly, isMarkerName,
+  config, vaultPath, plural, today, datedFiles, filesIn, pickRows, rewriteText, lf, readJson, readJsonSafe, toPosix, memo, isVaultOnly, isMarkerName, clock,
 } from './vault.mjs';
 import {
   vaultFile, loadNotes, noteErrors, ruleText, ruleTextParts, liveRules, knownDomain, alwaysSize, isUrl, validDay, normTopic, topicNotes, rawFile, toKey, resolver, linksUnder, noteLinks, byTopic, isTopicPage, isSourcePage, PAGE_KINDS, joinList,
@@ -69,6 +69,8 @@ export function lint(notes = loadNotes()) {
       add('warn', n.rel, `${/^[aeiou]/.test(what) ? 'an' : 'a'} ${what} goes in wiki/${n.domain}/${folder}/`);
     }
     for (const e of noteErrors(n)) add('error', n.rel, e);
+    // Settling can't go by a save time that hasn't come yet, so such a note waits until its text has held unchanged.
+    if (n.saved > Date.now()) add('warn', n.rel, `its file is dated ${clock(new Date(n.saved))}, in the future, so the hooks wait until its text has gone ${plural(delivery.settleSeconds, 'second')} unchanged. Save it again, or fix the clock that dated it`);
     lintLinks(n, noteAt, named, md, add);
     if (n.type === 'page') {
       lintPage(n, () => watched(n), add);
@@ -609,7 +611,7 @@ function codeErrors(rel, src) {
     if (!relative && !spec.startsWith('node:') && isBuiltin(spec)) errors.push(`imports '${spec}'; name built-ins with node:, as in 'node:${spec}'`);
     else if (!relative && !(spec.startsWith('node:') && isBuiltin(spec))) errors.push(`imports '${spec}'; tools/ uses only Node's built-in modules`);
     const mod = spec.replace(/^node:/, '');
-    if (mod === 'child_process') errors.push("imports node:child_process; tools/ doesn't run other programs");
+    if (mod === 'child_process' && rel !== 'lib/git.mjs') errors.push("imports node:child_process; only lib/git.mjs runs another program, git status");
     if (quiet && NETWORK.includes(mod)) errors.push(`imports node:${mod}; hooks and lib/ stay off the network`);
   }
   if (quiet && /(?<![\w$.])fetch\s*\(/.test(code)) errors.push('calls fetch(); hooks and lib/ stay off the network');
