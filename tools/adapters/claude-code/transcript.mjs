@@ -1,3 +1,5 @@
+import fs from 'node:fs';
+import path from 'node:path';
 import { readJsonl } from '../../lib/vault.mjs';
 
 // Claude Code logs tool output, skill text, compaction summaries, injected context and prompts the app or a script
@@ -23,4 +25,28 @@ export function typedMessages(transcript) {
     if (r.toolUseResult !== undefined) return r.toolUseResult?.answers ? answerTexts(r.toolUseResult) : [];
     return byHuman(r) ? blockTexts(r.message?.content) : [];
   }).map(t => t.replace(INJECTED, ' ')) ?? null;
+}
+
+// For the live provider test: the fields typedMessages reads, and the ones the file lacks.
+export function transcriptCheck(file) {
+  const rows = readJsonl(file, []);
+  const users = rows.filter(r => r?.type === 'user' && r.toolUseResult === undefined && !r.isMeta);
+  const missing = [
+    !users.length && 'user record',
+    !users.some(r => r.origin && typeof r.origin === 'object') && 'origin',
+  ].filter(Boolean);
+  return { ok: !missing.length, missing, records: rows.length };
+}
+
+// The newest session file under ~/.claude/projects/<project>/, or null. A subagent's file sits a folder deeper.
+export function newestTranscript(home) {
+  const dir = path.join(home, '.claude', 'projects');
+  const files = [];
+  try {
+    for (const p of fs.readdirSync(dir, { withFileTypes: true })) {
+      if (!p.isDirectory()) continue;
+      for (const f of fs.readdirSync(path.join(dir, p.name))) if (f.endsWith('.jsonl')) files.push(path.join(dir, p.name, f));
+    }
+  } catch { return null; }
+  return files.map(f => ({ f, at: fs.statSync(f).mtimeMs })).sort((a, b) => b.at - a.at)[0]?.f ?? null;
 }
