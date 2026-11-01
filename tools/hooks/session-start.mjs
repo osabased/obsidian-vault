@@ -1,5 +1,5 @@
 import { runHook, sessionReach, inVaultFolder, readableDomains, vaultPath, toolsPath, toPosix, guarded, config, plural, clock } from '../lib/vault.mjs';
-import { alwaysContext, alwaysIn, loadNotes, settledNotes, liveRules, domainTopics, joinList, clip, undelivered, knownDomain } from '../lib/rules.mjs';
+import { alwaysContext, alwaysIn, fitContext, loadNotes, settledNotes, liveRules, domainTopics, joinList, clip, undelivered, knownDomain } from '../lib/rules.mjs';
 import { build } from '../lib/build.mjs';
 import { changedSinceBuild, markBuilt } from '../lib/cache.mjs';
 import { touchSession, clearMarkers, markAlways, markShown, tidy, errorsSinceLint, sinceLint } from '../lib/sessions.mjs';
@@ -30,14 +30,14 @@ function pickNote(sid) {
   ].join(' ');
 }
 
-function indexNote(scope, notes) {
+const indexNote = topics => [
+  `Taste vault: when the task touches ${joinList(topics, 'or')}, read \`${toPosix(vaultPath('index.md'))}\` and the pages it lists under those topics.`,
+  `File a useful answer that draws on the vault back as a page, as \`${toPosix(vaultPath('AGENTS.md'))}\` says under Pages.`,
+].join(' ');
+
+function topicsOf(scope, notes) {
   const all = domainTopics(notes);
-  const topics = [...new Set(scope.flatMap(d => all.get(d) ?? []))];
-  if (!topics.length) return '';
-  return [
-    `Taste vault: when the task touches ${joinList(topics, 'or')}, read \`${toPosix(vaultPath('index.md'))}\` and the pages it lists under those topics.`,
-    `File a useful answer that draws on the vault back as a page, as \`${toPosix(vaultPath('AGENTS.md'))}\` says under Pages.`,
-  ].join(' ');
+  return [...new Set(scope.flatMap(d => all.get(d) ?? []))];
 }
 
 function errorsNote() {
@@ -93,7 +93,7 @@ runHook('session-start', input => {
   const ready = settledNotes(notes);
   const rules = liveRules(ready);
   const always = alwaysContext(scope, rules);
-  const index = guarded('index note', () => indexNote(readable, ready));
+  const topics = guarded('index note', () => topicsOf(readable, ready), []);
   let propose = '';
   let pick = '';
   // Vault sessions register so /ingest can propose; the skill tells them how, so they get no note.
@@ -109,11 +109,16 @@ runHook('session-start', input => {
     }
   }
   // Compaction and /clear start the context again within one session, which already heard these lines.
-  const health = ['compact', 'clear'].includes(input.source) ? [] : [
-    guarded('hook errors', errorsNote),
-    guarded('undelivered notes', () => undeliveredNote(readable, vaultFolder, ready)),
-    guarded('lint reminder', () => lintNote(notes)),
-  ];
-  const context = [always.text, index, propose, pick, ...health].filter(Boolean).join('\n\n');
+  const again = ['compact', 'clear'].includes(input.source);
+  const errors = again ? [] : [guarded('hook errors', errorsNote), guarded('undelivered notes', () => undeliveredNote(readable, vaultFolder, ready))];
+  // Errors rank first, then the always rules, the instructions for proposing and recording, and the topics.
+  const { text: context } = fitContext([
+    ...errors,
+    { noun: 'block of always rules', items: always.text ? [always.text] : [] },
+    propose,
+    pick,
+    { noun: 'topic', items: topics, render: indexNote },
+    again ? '' : guarded('lint reminder', () => lintNote(notes)),
+  ]);
   return context ? { hookSpecificOutput: { hookEventName: 'SessionStart', additionalContext: context } } : null;
 });

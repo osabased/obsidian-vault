@@ -1,13 +1,12 @@
 import { runHook, config, inVaultFolder, readableDomains, everywhereDomains } from '../lib/vault.mjs';
-import { loadNotes, settledNotes, liveRules, livePages, alwaysIn, ruleLine, pagePointers, cmp, mentions } from '../lib/rules.mjs';
+import { loadNotes, settledNotes, liveRules, livePages, alwaysIn, ruleLine, pageLine, fitContext, cmp, mentions } from '../lib/rules.mjs';
 import { touchSession, sessionDomains, markAlways, markShown, markFirst, markPages } from '../lib/sessions.mjs';
 
 // Session start marks the always rules it loads, so these are the ones written, reworded or settled since,
-// or the ones of a domain the session moved into.
+// or the ones of a domain the session moved into. A section's keys are the rules its items show.
 function late(sid, scope, rules) {
   const due = alwaysIn(rules, scope).filter(([k, r]) => markAlways(sid, k, r));
-  for (const [k] of due) markShown(sid, k);
-  return due.length ? ['Taste rules that apply for the rest of this session:', ...due.map(([k, r]) => ruleLine(k, r))].join('\n') : '';
+  return { noun: 'rule', head: 'Taste rules that apply for the rest of this session:', items: due.map(([k, r]) => ruleLine(k, r)), keys: due.map(([k]) => k) };
 }
 
 const mentioned = (entries, scope, said) => entries
@@ -19,8 +18,7 @@ const mentioned = (entries, scope, said) => entries
 function excerpts(sid, scope, rules, said) {
   const ranked = mentioned(Object.entries(rules).filter(([, r]) => !r.always), scope, said);
   const hits = markFirst('excerpts', sid, ranked, config().delivery.maxPromptExcerpts, h => `${h.key}|${h.note.hash}`);
-  for (const h of hits) markShown(sid, h.key);
-  return hits.length ? ['Taste rules that may apply to this request:', ...hits.map(h => ruleLine(h.key, h.note))].join('\n') : '';
+  return { noun: 'rule', head: 'Taste rules that may apply to this request:', items: hits.map(h => ruleLine(h.key, h.note)), keys: hits.map(h => h.key) };
 }
 
 runHook('prompt', input => {
@@ -37,10 +35,13 @@ runHook('prompt', input => {
   const notes = settledNotes(loadNotes(readableDomains(doms, vaultFolder)));
   const rules = liveRules(notes);
   const pages = markPages(input, mentioned(Object.entries(livePages(notes)), readableDomains(doms, vaultFolder), said));
-  const context = [
-    registered ? late(sid, scope, rules) : '',
+  const sections = [
+    registered ? late(sid, scope, rules) : null,
     excerpts(sid, heard, rules, said),
-    pagePointers('Vault pages on this request. Read the ones that bear on it:', pages),
-  ].filter(Boolean).join('\n\n');
+    { noun: 'page', head: 'Vault pages on this request. Read the ones that bear on it:', items: pages.map(h => pageLine(h.key, h.note)) },
+  ];
+  const { text: context, kept } = fitContext(sections);
+  // A rule cut for room isn't counted as shown.
+  sections.forEach((s, i) => s?.keys?.slice(0, kept[i]).forEach(k => markShown(sid, k)));
   return context ? { hookSpecificOutput: { hookEventName: 'UserPromptSubmit', additionalContext: context } } : null;
 });

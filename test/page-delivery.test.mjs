@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { makeVault, ruleNote, pageNote as page, denied, sessionId, editFile as edit, prompt, lintFound } from './fixture.mjs';
 
 const context = out => out?.hookSpecificOutput?.additionalContext ?? null;
-const pointed = out => (context(out) ?? '').split('\n').slice(1).map(l => l.split(' ')[1]);
+const pointed = out => (denied(out) ?? context(out) ?? '').split('\n').filter(l => /^- \S+ \(\w+ page\)/.test(l)).map(l => l.split(' ')[1]);
 
 const pushed = opts => page({ kind: 'concept', ...opts });
 const pathOf = (v, key) => v.at('wiki', ...key.split('/')).replace(/\\/g, '/') + '.md';
@@ -22,16 +22,18 @@ test('a prompt that names a page\'s keyword points the session to the page, once
   assert.match(context(prompt(v, sid, 'strict mode')), /demo\/luau-types/);
 });
 
-test('an edit to a file a page applies to points the session to it without refusing the edit, once per session', t => {
+test('the first edit to a file a page applies to is refused with a pointer to it, once per session', t => {
   const v = makeVault(t);
   const sid = sessionId();
   v.write('wiki/demo/shop-layout.md', pushed({ applies_to: ['src/ui/**'], keywords: ['shop'] }));
   const out = edit(v, sid, 'src/ui/shop.luau');
-  assert.equal(out.hookSpecificOutput.permissionDecision, undefined);
-  assert.equal(context(out), [
+  assert.equal(denied(out), [
     'Vault pages on src/ui/shop.luau. Read the ones that bear on this work:',
     `- demo/shop-layout (concept page): What we know. ${pathOf(v, 'demo/shop-layout')}`,
+    'Revise this edit to follow the pages, then retry. The retry is allowed.',
   ].join('\n'));
+  assert.equal(context(out), null, 'an allowed edit carries no pointer');
+  assert.equal(edit(v, sid, 'src/ui/shop.luau'), null, 'the retry goes through');
   assert.equal(edit(v, sid, 'src/ui/bag.luau'), null, 'once per session, not per file');
   assert.equal(prompt(v, sid, 'the shop'), null, 'a prompt does not bring it up again');
   assert.equal(edit(v, sessionId(), 'src/net/remote.luau'), null, 'a file outside its globs');
@@ -52,7 +54,7 @@ test('a global page\'s globs are read from the project folder of the file edited
   const v = makeVault(t);
   v.write('wiki/global/ui-notes.md', pushed({ domain: 'global', applies_to: ['src/ui/**'] }));
   const out = edit(v, sessionId(), 'src/ui/shop.luau');
-  assert.match(context(out), /^Vault pages on src\/ui\/shop\.luau\./);
+  assert.match(denied(out), /^Vault pages on src\/ui\/shop\.luau\./);
   assert.deepEqual(pointed(out), ['global/ui-notes']);
 });
 
@@ -66,17 +68,16 @@ test('an edit to the vault\'s notes or sources brings up no page', t => {
   assert.deepEqual(pointed(write('notes.md')), ['global/everything']);
 });
 
-test('a rule that refuses an edit holds the pages back for the retry', t => {
+test('a rule that refuses an edit carries the pages in the same refusal, and the retry passes', t => {
   const v = makeVault(t);
   const sid = sessionId();
   v.write('wiki/demo/ui-rule.md', ruleNote({ applies_to: ['src/**'] }));
   v.write('wiki/demo/shop-layout.md', pushed({ applies_to: ['src/**'] }));
-  const first = edit(v, sid, 'src/a.luau');
-  assert.ok(denied(first));
-  assert.equal(context(first), null);
-  const retry = edit(v, sid, 'src/a.luau');
-  assert.equal(denied(retry), null);
-  assert.match(context(retry), /demo\/shop-layout/);
+  const first = denied(edit(v, sid, 'src/a.luau'));
+  assert.match(first, /demo\/ui-rule/);
+  assert.match(first, /demo\/shop-layout/);
+  assert.match(first, /Revise this edit to follow them and the pages, then retry\./);
+  assert.equal(edit(v, sid, 'src/a.luau'), null);
 });
 
 test('pages reach the sessions their domain\'s rules reach, and every page reaches a session in the vault folder', t => {
@@ -97,15 +98,24 @@ test('a page saved within the settle window, or with an error, does not come up'
   assert.deepEqual(pointed(edit(v, sessionId(), 'src/a.luau')), ['demo/a-grid', 'demo/b-grid']);
 });
 
-test('at most delivery.maxPages come up at a time, and the rest on the next match', t => {
+test('at most delivery.maxPages come up at a time on a prompt, and the rest on the next match', t => {
   const v = makeVault(t);
   for (const slug of ['a-grid', 'b-grid', 'c-grid', 'd-grid']) v.write(`wiki/demo/${slug}.md`, pushed({ keywords: ['grid'], applies_to: ['src/**'] }));
   const sid = sessionId();
   assert.deepEqual(pointed(prompt(v, sid, 'a grid')), ['demo/a-grid', 'demo/b-grid', 'demo/c-grid']);
   assert.deepEqual(pointed(prompt(v, sid, 'a grid')), ['demo/d-grid']);
-  const other = sessionId();
-  assert.deepEqual(pointed(edit(v, other, 'src/a.luau')), ['demo/a-grid', 'demo/b-grid', 'demo/c-grid']);
-  assert.deepEqual(pointed(edit(v, other, 'src/b.luau')), ['demo/d-grid']);
+});
+
+test('a refusal lists every page due, the ones past delivery.maxPages without their summaries', t => {
+  const v = makeVault(t);
+  for (const slug of ['a-grid', 'b-grid', 'c-grid', 'd-grid']) v.write(`wiki/demo/${slug}.md`, pushed({ applies_to: ['src/**'] }));
+  const sid = sessionId();
+  const first = edit(v, sid, 'src/a.luau');
+  assert.deepEqual(pointed(first), ['demo/a-grid', 'demo/b-grid', 'demo/c-grid', 'demo/d-grid']);
+  assert.ok(denied(first).includes(`- demo/c-grid (concept page): What we know. ${pathOf(v, 'demo/c-grid')}`));
+  assert.ok(denied(first).includes(`- demo/d-grid (concept page): ${pathOf(v, 'demo/d-grid')}`));
+  assert.equal(edit(v, sid, 'src/a.luau'), null, 'the retry goes through');
+  assert.equal(edit(v, sid, 'src/b.luau'), null, 'every page was told of');
 });
 
 test('lint checks a page\'s scope fields as it does a rule\'s, always and triggers included', async t => {

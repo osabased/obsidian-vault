@@ -29,16 +29,18 @@ Global reaches every session. A domain that isn't vault-only and reaches no proj
 A note `tools/propose.mjs` writes applies at once. A note saved any other way applies once it has gone `delivery.settleSeconds` (60 by default, in `vault.config.json`) without another save, so a rule being typed in Obsidian doesn't reach sessions half-written. The hooks read each note as it is now:
 
 - `always: true` rules load at the start of every session the domain reaches, and a session already running gets one with its next prompt.
-- Rules with `applies_to` refuse the first matching edit to each file in a session and show the rule. The retry goes through.
+- Rules with `applies_to` refuse the first matching edit to each file in a session. The one refusal carries every rule and page due on that file: the first `delivery.maxRulesPerEdit` rules (3 by default) in full, the rest as one-line pointers. The retry goes through.
 - Rules with `keywords` are shown when a prompt mentions one of them.
 
 Taste and knowledge rules arrive the same three ways.
 
 Each session gets a rule once, and again after its Do, Not or Because changes, or a knowledge rule's `as_of`. A note with a lint error, or with `superseded_by`, is never delivered; `index.md` marks the first kind `not delivered` with its error.
 
-A page with `keywords` or `applies_to` comes up as a pointer, its key, kind, summary and path, when a prompt mentions one of its keywords or an edit touches a file its globs match. A page never refuses an edit, and comes up on one only when no rule refuses it. Each session, and each subagent in it, gets a page once, and again after compaction, and at most `delivery.maxPages` (3 by default, in `vault.config.json`) at a time. A domain's pages reach the sessions it reaches, global's and an `everywhere` domain's reach every session, and a session in this folder gets every domain's, a vault-only domain's among them.
+A page with `keywords` or `applies_to` comes up as a pointer, its key, kind, summary and path, when a prompt mentions one of its keywords or an edit touches a file its globs match. On an edit, an unseen page refuses the first edit like a rule and rides in the same refusal, the pages past `delivery.maxPages` (3 by default, in `vault.config.json`) without their summaries; on a prompt, at most `delivery.maxPages` come up at a time. Each session, and each subagent in it, gets a page once, and again after compaction. A domain's pages reach the sessions it reaches, global's and an `everywhere` domain's reach every session, and a session in this folder gets every domain's, a vault-only domain's among them.
 
 Every session start also names the topics of global, the session's domains and the `everywhere` domains (the listed ones, then the others rules and pages have) and points to `index.md`, so the agent reads the pages on a topic its task touches. A session in this folder hears every domain's topics.
+
+Each hook's output stays within `delivery.maxContextChars` (8,000 by default), since Claude Code turns a longer one into a file path. It fills in rank order: errors, always rules, matched rules, pages, topics. A closing line names what it left out and points to `index.md`.
 
 A new or resumed session also hears, in one line each, how many errors were logged in `.state/errors.log` since `/lint` last ran, and when `/lint` last ran and how many notes changed since, once one has and either `lint.remindAfterDays` (14 by default) have passed or `lint.remindAfterNotes` (10) notes have changed, both in `vault.config.json`. The notes a `/lint` run changes before its last step, `node tools/review.mjs done`, don't count. Both lines repeat until `/lint` runs. A third line names the notes of the domains whose topics it hears that an error keeps from delivery, up to three with their first error, and repeats until they're fixed; a session in this folder hears of every domain's, and of notes outside any domain.
 

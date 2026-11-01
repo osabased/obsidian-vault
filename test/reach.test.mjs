@@ -101,8 +101,8 @@ test('an everywhere domain\'s pages and keyword rules reach any folder, and its 
   assert.match(said, /notes\/word/);
   assert.doesNotMatch(said, /notes\/always/);
   const out = edit(v, sid, '', { abs: path.join(dir, 'a.txt'), cwd: dir });
-  assert.equal(denied(out), null);
-  assert.match(context(out), /notes\/files/);
+  assert.match(denied(out), /notes\/files/);
+  assert.doesNotMatch(denied(out), /notes\/gate/);
 });
 
 test('lint reports a missing path as an error and a domain that reaches no project as a warning', async t => {
