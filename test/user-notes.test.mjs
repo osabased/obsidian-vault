@@ -301,3 +301,10 @@ test("author: user as a one-item list, or in capitals, still marks the page as t
   assert.deepEqual(await lintFound(vault(t, { text: mine(BODY, ['author:', '  - user']) }), /^(?:author|no topic|no summary)/), []);
   assert.deepEqual((await lintFound(vault(t, { text: mine(BODY, ['author: User']) }), /author/)).map(f => [f.level, f.msg]), [['error', 'author must be user or agent']]);
 });
+
+test("a tool editTools maps to the file namespace is denied on a user's page rather than failing the hook", t => {
+  const v = makeVault(t, { config: { editTools: { mcp__fixture__write_page: { namespace: 'file', path: 'tool_input.path', after: 'tool_input.text' } } } });
+  v.write(REL, mine());
+  const out = v.edit(SID, 'mcp__fixture__write_page', { path: v.at(...REL.split('/')), text: 'Cards may be cramped.\n' });
+  assert.match(denied(out) ?? '', /^wiki\/glim\/concepts\/journal\.md is the user's own writing/);
+});

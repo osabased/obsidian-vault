@@ -30,7 +30,9 @@ async function launch() {
   if (!root) return fail(`the plugin's vault option "${vault}" is not an absolute path; run claude plugin configure obsidian-vault`);
   const tools = path.join(root, '.live', 'tools');
   if (!fs.existsSync(tools)) return fail(`${tools} does not exist; run .githooks/post-commit in the vault to make it`);
-  const file = path.join(tools, 'adapters', 'claude-code', 'hooks', `${hook}.mjs`);
+  // A .live copy made before the adapters has its hooks in tools/hooks/, until the vault's next commit replaces it.
+  const file = [path.join(tools, 'adapters', 'claude-code', 'hooks', `${hook}.mjs`), path.join(tools, 'hooks', `${hook}.mjs`)].find(f => fs.existsSync(f))
+    ?? path.join(tools, 'adapters', 'claude-code', 'hooks', `${hook}.mjs`);
   if (!fs.existsSync(file)) return fail(`${file} does not exist; commit the vault's tools/ so post-commit copies it`);
   if (timeout) process.env.VAULT_HOOK_TIMEOUT = timeout;
   await import(pathToFileURL(file).href);

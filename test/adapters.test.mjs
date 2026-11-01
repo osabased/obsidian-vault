@@ -130,6 +130,23 @@ for (const d of [claudeCode, codex]) {
     assert.match(r.stdout, /^Wrote wiki\/glim\/rules\/own-session\.md\./);
   });
 
+  test(`${d.name}: propose refuses a session id other than the agent's own, whatever agents lists`, async t => {
+    for (const agents of [[], [d === codex ? claudeCode.name : codex.name]]) {
+      const v = makeVault(t, { presets: ['glim'], config: { ...d.config, agents } });
+      const { sessionVar } = await v.import(`adapters/${d.name}/adapter.mjs`);
+      const [sid, other] = [sessionId(), sessionId()];
+      d.start(v, sid);
+      d.start(v, other);
+      const rule = {
+        domain: 'glim', slug: 'not-mine', topic: 'naming', basis: 'reading', reading: 'The user rewrote the screen twice.',
+        do: 'Zebra quartz mango.', not: 'Plover lantern ember.', applies_to: ['src/new/**'],
+      };
+      const r = v.run('propose.mjs', [other], { input: rule, env: { [sessionVar]: sid } });
+      assert.equal(r.code, 1, `agents ${JSON.stringify(agents)}: ${r.stdout}`);
+      assert.match(r.stderr, new RegExp(`${other} isn't this session, which is ${sid}\.`));
+    }
+  });
+
   test(`${d.name}: the typed-text provider returns the typed message and none of the injected text`, async t => {
     const v = vault(t);
     const sid = sessionId();

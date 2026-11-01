@@ -89,8 +89,9 @@ function noteGuard(event, file, cwd) {
   if (fs.existsSync(toPosix(file, cwd))) {
     try { before = plainText(fs.readFileSync(toPosix(file, cwd), 'utf8')); } catch { return null; }
   }
-  const after = event.after(before ?? '');
-  // The agent refuses an edit it can't apply before the hook runs, so one the guard can't follow still applies.
+  const after = event.after ? event.after(before ?? '') : null;
+  // The agent refuses an edit it can't apply before the hook runs, so one the guard can't follow still applies. A tool
+  // config maps to the file namespace comes with no after, so the guard can't follow it either.
   if (after === null) return authoredByUser(before ?? '') ? usersOwn(rel) : null;
   // A user's page gets no second try: a retry of an edit that changes their words would be the slip the guard is for.
   const owned = userNoteGuard(rel, before ?? '', after);

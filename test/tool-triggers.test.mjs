@@ -112,3 +112,17 @@ test('lint errors on a tools name the matcher never sends and on one that edits 
     ['error', 'wiki/glim/rules/todo.md', "tools names TodoWrite, which the edit hook's matcher, ^(?:Edit|Write|MultiEdit|NotebookEdit|AskUserQuestion|mcp__.*)$, never sends to the hook, so it would never bring the rule up"],
   ]);
 });
+
+test("a tools rule reaches a session whatever agents lists, and lint says when agents lists none", async t => {
+  for (const agents of [['codex'], []]) {
+    const v = makeVault(t, { presets: ['glim'], config: { agents } });
+    const sid = sessionId();
+    v.startSession(sid);
+    assert.match(denied(ask(v, sid)) ?? '', /glim\/ask-rule: Do: Offer layouts as two to four options\./, `agents ${JSON.stringify(agents)}`);
+  }
+  const none = makeVault(t, { config: { agents: [] } });
+  none.write('wiki/glim/rules/todo.md', ruleNote({ extra: ['tools: [TodoWrite]'] }));
+  assert.deepEqual((await lintFound(none, /^tools names/)).map(f => f.msg), [
+    "tools names TodoWrite, but agents in vault.config.json lists no agent, so lint can't tell whether an edit hook is sent it",
+  ]);
+});

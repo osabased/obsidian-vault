@@ -35,6 +35,13 @@ export function currentSession(env = process.env) {
   return null;
 }
 
+// The ids every adapter in tools/adapters/ finds set in its session variable, whatever agents lists, so whether a
+// session is the one a script runs in doesn't turn on vault.config.json.
+export function sessionIds(env = process.env) {
+  const names = fs.readdirSync(toolsPath('adapters'), { withFileTypes: true }).filter(e => e.isDirectory() && hasAgent(e.name)).map(e => e.name);
+  return [...new Set(names.map(n => env[agent(n).sessionVar]).filter(Boolean).map(String))];
+}
+
 // A session's short name, which pages, raw/inbox and raw/picks file names and log lines call it by, as its agent's
 // adapter gives it. A session whose agent isn't known is named as the first agent names it.
 export const shortName = (sid, name) => agent(hasAgent(name) ? name : FIRST_AGENT).shortName(String(sid));

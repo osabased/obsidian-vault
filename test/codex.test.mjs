@@ -300,6 +300,20 @@ test('node tools/agents.mjs codex prints the hooks.json snippet byte for byte, w
   assert.match(none.stderr, /^Usage: node tools\/agents\.mjs <agent>/);
 });
 
+test('node tools/agents.mjs run from a worktree outside .claude/worktrees/ names the main checkout', t => {
+  const v = codexVault(t);
+  const env = cleanEnv({ GIT_CONFIG_NOSYSTEM: '1', GIT_CONFIG_GLOBAL: '/dev/null' });
+  const git = (...args) => execFileSync('git', ['-c', 'user.name=t', '-c', 'user.email=t@example.com', '-c', 'commit.gpgsign=false', ...args], { cwd: v.root, env, stdio: 'pipe' });
+  git('init', '-q');
+  git('add', '-A');
+  git('commit', '-q', '-m', 'vault');
+  const elsewhere = `${v.root}-ledger`;
+  t.after(() => fs.rmSync(elsewhere, { recursive: true, force: true }));
+  git('worktree', 'add', '-q', elsewhere);
+  const r = execFileSync(process.execPath, [path.join(elsewhere, 'tools', 'agents.mjs'), 'codex'], { cwd: elsewhere, env, encoding: 'utf8' });
+  assert.equal(r, `${snippet(v.root.replace(/\\/g, '/'))}\n\n${WHERE}\n`);
+});
+
 test('the launcher runs the hook it names, and fails loudly through runHook for a name that is no hook', t => {
   const v = codexVault(t);
   const sid = sessionId();
