@@ -249,7 +249,7 @@ test('a build waits for one already running, and session start skips its build r
   fs.mkdirSync(v.at('.state'), { recursive: true });
   fs.writeFileSync(v.at('.state', 'build.lock'), `${process.pid}:0123456789ab`);
   const { build } = await v.import('lib/build.mjs');
-  assert.throws(() => build({ waitMs: 100 }), /build\.lock is held by another process/);
+  assert.throws(() => build({ waitMs: 100 }), e => e.code === 'ELOCKED' && /build\.lock is held by another process/.test(e.message));
   v.startSession(sessionId());
   assert.ok(!v.exists('index.md'));
   fs.rmSync(v.at('.state', 'build.lock'));
