@@ -139,17 +139,26 @@ export function parse(text) {
   return { data: mapping(rows, 0) ?? {}, body: lines.slice(end + 1).join('\n'), ok: true };
 }
 
-// Sets a scalar on the line parse reads it from, the last one with its key, keeping the line's quotes, comment and
-// ending. Text without frontmatter, without the key, or whose key holds a nested block comes back as it was.
+// YAML reads these plain as something other than the text: a number, a boolean or null in the YAML other tools use,
+// or an indicator character at the start.
+const PLAIN_NOT_TEXT = /^(?:[-+]?(?:\d[\d_]*(?:\.\d*)?|\.\d+)(?:e[-+]?\d+)?|[-+]?\.(?:inf|nan)|0x[\da-f]+|0o[0-7]+|y|n|yes|no|on|off|true|false|null|~)$/i;
+const plainSafe = s => s !== '' && s === s.trim() && !/[\r\n\t]/.test(s) && !/^[-?:,[\]{}#&*!|>'"%@`]/.test(s)
+  && !/: | #|:$/.test(s) && !PLAIN_NOT_TEXT.test(s) && value(s) === s;
+
+// Sets a scalar on the line parse reads it from, the last one with its key, keeping the line's ending. The whole old
+// value goes, quotes and comment too. The new one is written plain when it reads back as itself and was plain before,
+// single-quoted otherwise. Text without frontmatter, without the key, or whose key holds a nested block comes back as
+// it was.
 export function setField(text, key, val) {
   const lines = text.split('\n');
   const end = closing(lines);
   const at = lines.findLastIndex((l, i) => i > 0 && i < end && l.replace(/\r$/, '').match(KV)?.[1] === key);
   if (at < 0) return text;
-  const [, head, old, comment, eol] = lines[at].match(/^([^:]*:[ \t]*)(.*?)((?:[ \t]+#.*)?)(\r?)$/);
+  const [, head, old, eol] = lines[at].match(/^([^:]*:[ \t]*)(.*?)(\r?)$/);
   const next = lines.slice(at + 1, end).find(l => l.trim() && !/^\s*#/.test(l));
-  if (!old && next && /^(?:\s|-)/.test(next)) return text;
-  const q = /^['"]/.test(old) ? old[0] : '';
-  lines[at] = `${/\s$/.test(head) ? head : `${head} `}${q}${val}${q}${comment}${eol}`;
+  if ((!old.trim() || old.startsWith('#')) && next && /^(?:\s|-)/.test(next)) return text;
+  const s = String(val);
+  const written = plainSafe(s) && !/^['"]/.test(old) ? s : `'${s.replace(/'/g, "''")}'`;
+  lines[at] = `${/\s$/.test(head) ? head : `${head} `}${written}${eol}`;
   return lines.join('\n');
 }

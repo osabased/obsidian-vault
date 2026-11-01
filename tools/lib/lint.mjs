@@ -1,18 +1,16 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { isBuiltin } from 'node:module';
-import { config, vaultPath, plural, today, datedFiles, filesIn, pickRows, rewriteText, lf, readJson } from './vault.mjs';
+import { config, vaultPath, plural, today, datedFiles, filesIn, pickRows, rewriteText, lf, readJson, readJsonSafe, toPosix } from './vault.mjs';
 import {
   vaultFile, loadNotes, noteErrors, ruleText, ruleTextParts, liveRules, knownDomain, alwaysSize, isUrl, validDay, normTopic, topicNotes, rawFile, toKey, resolver, linksUnder, noteLinks, byTopic, isTopicPage, isSourcePage, PAGE_KINDS, joinList,
-  hasSection, footnotes, youSaid, linkedKeys, clip, isResearch, citedSources, evidenceQuotes, keyOf, kindFolder, kindLabel, linkTo, parseNote, noteLinkSpans, maxChars,
+  hasSection, footnotes, youSaid, linkedKeys, clip, isResearch, citedSources, evidenceQuotes, keyOf, kindFolder, kindLabel, linkTo, parseNote, noteLinkSpans, maxChars, bundleOf, locate,
 } from './rules.mjs';
 import { parse, setField } from './frontmatter.mjs';
 import { NAMESPACE_NAME } from './glob.mjs';
 import { build } from './build.mjs';
-import { readJsonSafe, toPosix } from './vault.mjs';
 import { transcriptFor } from './sessions.mjs';
 import { typedMessages, saidIn, sourceTexts, userPageTexts } from './quotes.mjs';
-import { bundleOf, locate } from './rules.mjs';
 import {
   KINDS, LOCATORS, filled, hashFile, lineCount, clockTime, parseLocator, anchorsIn, derivedAnchors, manifestLine, sourceProblems, refSources,
 } from './sources.mjs';
@@ -218,6 +216,8 @@ export function lintConfig(add) {
       }
       if (typeof ns.separator !== 'string' || !ns.separator) bad(`${at}.separator must be a non-empty string`);
       if (typeof ns.escape !== 'string' || [...ns.escape].length !== 1) bad(`${at}.escape must be one character`);
+      else if ('*?[]{},!'.includes(ns.escape)) bad(`${at}.escape ${ns.escape} is a glob character. Pick one that isn't * ? [ ] { } , or !`);
+      else if (typeof ns.separator === 'string' && ns.separator.includes(ns.escape)) bad(`${at}.escape ${ns.escape} is in the separator. Pick another character`);
     }
   }
   const editTools = c.editTools ?? {};
@@ -458,7 +458,6 @@ function lintPage(n, watched, add) {
     if (set.length) add('warn', n.rel, `${joinList(set, 'and')} ${set.length > 1 ? 'are' : 'is'} for ${owner}. ${instead}`);
   };
   if (!isSourcePage(n)) misplaced(['source', 'source_date'], 'source pages', 'Cite a source with a footnote instead');
-  misplaced(['always', 'triggers'], 'rules', 'A page comes up through keywords and applies_to');
   if (n.applies_to?.length && isResearch(n.domain)) {
     add('warn', n.rel, `${n.domain} is vault-only, so no edit brings this page up. Give it keywords instead`);
   }

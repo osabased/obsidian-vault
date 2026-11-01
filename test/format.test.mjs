@@ -133,7 +133,7 @@ test('tools is a list of exact tool names on any note', async t => {
   assert.deepEqual(rules.parseNote(pageNote({ extra: ['tools: [AskUserQuestion]'] }), 'wiki/demo/code.md').tools, ['AskUserQuestion']);
   assert.deepEqual(page(['tools: AskUserQuestion']), ['tools must be a list']);
   assert.deepEqual(page(["tools: ['Ask User', '']"]), ['tools must name each tool exactly, with no spaces: Ask User', 'tools must name each tool exactly, with no spaces: (empty)']);
-  assert.deepEqual(check(rules, ruleNote({ keywords: ['x'], extra: ['tools: [true]'] })), ['tools must name each tool exactly, with no spaces: true']);
+  assert.deepEqual(check(rules, ruleNote({ keywords: ['x'], extra: ['tools: [true]'] })), ["tools item true isn't text. Single-quote it, as in 'true'"]);
 });
 
 test('requires takes the OSV affected shape on knowledge rules and pages, not taste rules', async t => {
@@ -264,4 +264,43 @@ test('lintConfig checks namespaces and editTools, naming the key', async t => {
     'editTools.mcp__a__b.after must be tool_input.<field>',
   ]);
   assert.deepEqual(await lintOf({ editTools: { mcp__a__b: 'x' } }), ['editTools.mcp__a__b must be an object with namespace, path and after']);
+});
+
+test('setField writes a value that reads back exactly, replacing the whole old value and its comment', () => {
+  const set = (line, val) => setField(front([line, 'type: page']), 'source', val);
+  const read = text => parse(text).data.source;
+  const cases = [
+    ["source: 'raw\\refs\\Designer''s shop.png'", "raw/refs/Designer's shop.png"],
+    ["source: 'raw\\refs\\Shop #2.png'", 'raw/refs/Shop #2.png'],
+    ['source: raw\\refs\\a.png', 'raw/refs/a #1.png'],
+    ['source: raw\\refs\\a.png # old', 'raw/refs/a.png'],
+    ['source: "raw\\\\refs\\\\a.png" # old', 'raw/refs/a.png'],
+    ['source: raw/a.png', 'raw/refs/a: b.png'],
+    ['source: raw/a.png', "'quoted'"],
+    ['source: raw/a.png', 'true'],
+  ];
+  for (const [line, val] of cases) {
+    const out = set(line, val);
+    assert.equal(read(out), val, out);
+    assert.doesNotMatch(out, /old/, out);
+    assert.equal(parse(out).data.type, 'page', out);
+  }
+  assert.equal(set("source: 'raw\\refs\\Designer''s shop.png'", "raw/refs/Designer's shop.png").split('\n')[1], "source: 'raw/refs/Designer''s shop.png'");
+  assert.equal(set('source: raw\\refs\\a.png # old', 'raw/refs/a.png').split('\n')[1], 'source: raw/refs/a.png');
+});
+
+test('lintConfig refuses an escape that is a glob character or is in the separator', async t => {
+  const lintOf = async namespaces => {
+    const v = makeVault(t, { config: { namespaces } });
+    const found = [];
+    (await v.import('lib/lint.mjs')).lintConfig((level, file, msg) => found.push(msg));
+    return found;
+  };
+  for (const ch of ['*', '?', '[', ']', '{', '}', ',', '!']) {
+    assert.deepEqual(await lintOf({ 'demo-tree': { separator: '.', escape: ch } }), [`namespaces.demo-tree.escape ${ch} is a glob character. Pick one that isn't * ? [ ] { } , or !`]);
+  }
+  assert.deepEqual(await lintOf({ 'demo-tree': { separator: '.', escape: '.' } }), ['namespaces.demo-tree.escape . is in the separator. Pick another character']);
+  assert.deepEqual(await lintOf({ 'demo-tree': { separator: '::', escape: ':' } }), ['namespaces.demo-tree.escape : is in the separator. Pick another character']);
+  assert.deepEqual(await lintOf({ 'demo-tree': { separator: '.', escape: '/' } }), []);
+  assert.deepEqual(await lintOf({ 'demo-tree': { separator: '/', escape: '\\' } }), []);
 });
