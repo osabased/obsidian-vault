@@ -3,7 +3,7 @@ import path from 'node:path';
 import v8 from 'node:v8';
 import { parse, yamlQuote } from './frontmatter.mjs';
 import { validGlob, overlapping, entryParts, globListProblems } from './glob.mjs';
-import { config, vaultPath, shortHash, toPosix, today, inside, plural, isVaultOnly, memo, readJson, statePath } from './vault.mjs';
+import { config, vaultPath, shortHash, toPosix, today, inside, plural, isVaultOnly, memo, readJson, statePath, FILE_TOOLS, EDIT_HOOK_MATCHER } from './vault.mjs';
 import { cachedNotes, cleanFromGit } from './cache.mjs';
 import { SEMVER, fitOf, projectVersions } from './versions.mjs';
 
@@ -189,11 +189,15 @@ function listErrors(n) {
     ...globs.filter(g => !validGlob(g, namespaces)).map(g => targetError(g, namespaces)),
     ...globListProblems(globs, namespaces),
     ...(n.tools ?? []).filter(x => !/^\S+$/.test(x)).map(x => `tools must name each tool exactly, with no spaces: ${x === '' ? '(empty)' : x}`),
+    ...(n.tools ?? []).filter(x => /^\S+$/.test(x)).flatMap(x => toolError(x)),
     ...(n.triggers ?? []).map(t => regexError(t)).filter(Boolean),
   ];
 }
 
-// tools counts though nothing delivers on it yet, so a rule written for it now needs no change when that lands.
+const hooked = new RegExp(`^(?:${EDIT_HOOK_MATCHER})$`);
+const toolError = x => (FILE_TOOLS.includes(x) ? [`tools names ${x}, which edits a file; give the rule applies_to instead`]
+  : hooked.test(x) ? [] : [`tools names ${x}, which the edit hook's matcher, ${EDIT_HOOK_MATCHER}, never sends to the hook, so it would never bring the rule up`]);
+
 export const hasChannel = n => n.always === true || ['applies_to', 'keywords', 'tools'].some(f => n[f]?.length);
 
 const EVENTS = ['introduced', 'fixed', 'last_affected', 'limit'];
@@ -333,7 +337,7 @@ export function liveRules(notes = loadNotes()) {
       domain: n.domain, topic: n.topic, rel: n.rel, text,
       // Only the delivered wording counts, so an edit to a rule's evidence or globs doesn't deliver it again.
       hash: shortHash(text),
-      kind: n.kind, always: n.always, applies_to: n.applies_to, triggers: n.triggers, keywords: n.keywords,
+      kind: n.kind, always: n.always, applies_to: n.applies_to, triggers: n.triggers, keywords: n.keywords, tools: n.tools,
       requires: n.requires, mtime: n.saved, size: n.size,
     };
   }
