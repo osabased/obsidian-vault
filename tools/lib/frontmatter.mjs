@@ -90,6 +90,11 @@ const childrenEnd = (rows, i, level) => {
 
 const block = rows => (ITEM.test(rows[0].text) ? sequence(rows) : mapping(rows, rows[0].indent));
 
+// A | or > after the key. The lines below are its text, folded with spaces or kept with newlines. Blank lines are
+// already gone, so a paragraph break folds to a space.
+const BLOCK_SCALAR = /^[|>][-+]?\d*\s*(?:#.*)?$/;
+const blockScalar = (head, rows) => rows.map(r => r.text).join(head[0] === '>' ? ' ' : '\n');
+
 // Lines that read as nothing are skipped. An empty mapping or list reads as null, as an empty key always has.
 function mapping(rows, level) {
   const out = {};
@@ -98,7 +103,7 @@ function mapping(rows, level) {
     const kv = rows[i].indent <= level && rows[i].text.match(KV);
     if (!kv) continue;
     const j = childrenEnd(rows, i, level);
-    let v = kv[2] === undefined ? null : value(kv[2]);
+    let v = kv[2] === undefined ? null : BLOCK_SCALAR.test(kv[2]) ? blockScalar(kv[2], rows.slice(i + 1, j)) : value(kv[2]);
     if (v === null && j > i + 1) v = block(rows.slice(i + 1, j));
     out[kv[1]] = v;
     any = true;
@@ -171,6 +176,7 @@ export function setField(text, key, val) {
   if (at < 0) return text;
   const [, head, old, eol] = lines[at].match(/^([^:]*:[ \t]*)(.*?)(\r?)$/);
   const next = lines.slice(at + 1, end).find(l => l.trim() && !/^\s*#/.test(l));
+  if (BLOCK_SCALAR.test(old)) return text;
   if ((!old.trim() || old.startsWith('#')) && next && /^(?:\s|-)/.test(next)) return text;
   const tail = old.slice(valueEnd(old));
   const comment = /^[ \t]+#/.test(tail) ? tail : '';
