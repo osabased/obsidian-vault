@@ -1,0 +1,2 @@
+# Bundle hashes cover raw bytes, so git never rewrites the line endings of a source.
+raw/** -text

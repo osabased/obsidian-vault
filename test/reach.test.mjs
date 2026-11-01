@@ -169,3 +169,14 @@ test('a folder\'s domains are the nearest marker folder\'s and the paths that ho
   ]);
   assert.deepEqual(domainsFor(path.join(root, 'pkg')), [{ domain: 'beta', root: at('pkg'), rel: '' }]);
 });
+
+test('a session in the vault folder takes no domain from a marker inside raw/refs', t => {
+  const v = makeVault(t, { domains: { alpha: ALPHA } });
+  v.write('raw/refs/somerepo/alpha.project', '');
+  const sid = sessionId();
+  v.startSession(sid, { cwd: v.root });
+  assert.deepEqual(JSON.parse(v.read(`.state/sessions/${sid}.json`)).reach.domains, []);
+  const below = sessionId();
+  v.startSession(below, { cwd: folder(t, ['sub/alpha.project']) });
+  assert.deepEqual(JSON.parse(v.read(`.state/sessions/${below}.json`)).reach.domains, ['alpha']);
+});

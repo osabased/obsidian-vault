@@ -149,22 +149,26 @@ function automaton(parts) {
 
 const meets = (x, y) => x === 'any' || y === 'any' || (x === 'seg' ? y !== '/' : y === 'seg' ? x !== '/' : x === y);
 
+// A folder's name is spelled out, character by character, since glob syntax has no escape for a file's characters.
+const folderParts = dir => (dir ? [...`${dir}/`].map(ch => (ch === '/' ? { ch, sep: true } : { ch })) : []);
+
 // A glob the gate can't use gets null.
 const automata = new Map();
-function automatonOf(glob) {
-  if (!automata.has(glob)) {
+function automatonOf(glob, dir) {
+  const key = `${dir}|${glob}`;
+  if (!automata.has(key)) {
     try {
-      automata.set(glob, automaton(parse(normGlob(glob), FILE)));
+      automata.set(key, automaton([...folderParts(dir), ...parse(normGlob(glob), FILE)]));
     } catch {
-      automata.set(glob, null);
+      automata.set(key, null);
     }
   }
-  return automata.get(glob);
+  return automata.get(key);
 }
 
 // True when some path matches both globs, as the gate matches them.
 function globsOverlap(a, b) {
-  const [x, y] = [a, b].map(automatonOf);
+  const [x, y] = [a, b].map(([glob, dir]) => automatonOf(glob, dir));
   if (!x || !y) return false;
   const seen = new Set();
   const todo = [[0, 0]];
@@ -191,8 +195,7 @@ export function overlapping(as, bs, [inA, inB] = ['', '']) {
     const { negated, namespace, glob } = entryParts(entry);
     return negated || namespace !== 'file' ? [] : [[entry, glob]];
   });
-  const under = (dir, g) => (dir ? `${dir}/${normGlob(g)}` : g);
-  for (const [a, ga] of globs(as)) for (const [b, gb] of globs(bs)) if (globsOverlap(under(inA, ga), under(inB, gb))) return [a, b];
+  for (const [a, ga] of globs(as)) for (const [b, gb] of globs(bs)) if (globsOverlap([ga, inA], [gb, inB])) return [a, b];
   return null;
 }
 
@@ -206,17 +209,16 @@ export function specificity(entry, namespaces) {
 export const bySpecificity = (a, b) => b[0] - a[0] || b[1] - a[1];
 
 // Entries of one namespace apply in order, as in a .gitignore: the last one that matches decides. The result is the
-// most specific entry that adds the subject, or null when none does or the last match is a ! entry.
+// most specific entry that adds the subject and that no later ! entry removes, or null when none does.
 function select(list, namespace, namespaces, subject) {
-  let added = false;
-  const hits = [];
+  let hits = [];
   for (const entry of list) {
     const c = compiled(entry, namespaces);
     if (!c || c.namespace !== namespace || !c.regex.test(subject)) continue;
-    added = !c.negated;
-    if (added) hits.push(entry);
+    if (c.negated) hits = [];
+    else hits.push(entry);
   }
-  return added ? hits.sort((a, b) => bySpecificity(specificity(a, namespaces), specificity(b, namespaces)))[0] : null;
+  return hits.sort((a, b) => bySpecificity(specificity(a, namespaces), specificity(b, namespaces)))[0] ?? null;
 }
 
 export const bestMatch = (globs, rel) => select(globs, 'file', undefined, rel);
