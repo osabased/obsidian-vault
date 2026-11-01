@@ -220,13 +220,13 @@ const checkedOut = (t, name, rule) => {
   return v;
 };
 
-test('session start still delivers always rules after a checkout touches every note', { todo: '6.6d' }, t => {
+test('session start still delivers always rules after a checkout touches every note', t => {
   const v = checkedOut(t, 'always-rule', ruleNote({ always: true, doLine: 'Be brief.', notLine: 'Ramble.' }));
   const ctx = v.startSession(sessionId())?.hookSpecificOutput.additionalContext ?? '';
   assert.match(ctx, /demo\/always-rule: Do: Be brief\./);
 });
 
-test('the gate still refuses after a checkout touches every note', { todo: '6.6d' }, t => {
+test('the gate still refuses after a checkout touches every note', t => {
   const v = checkedOut(t, 'ui-rule', ruleNote({ applies_to: ['src/**/*.txt'] }));
   assert.ok(denied(edit(v, sessionId(), 'src/a.txt')));
 });

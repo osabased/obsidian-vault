@@ -1,5 +1,5 @@
 import { runHook, config, inVaultFolder, readableDomains, everywhereDomains } from '../lib/vault.mjs';
-import { settledNotes, liveRules, livePages, alwaysIn, ruleLine, pagePointers, cmp, mentions } from '../lib/rules.mjs';
+import { loadNotes, settledNotes, liveRules, livePages, alwaysIn, ruleLine, pagePointers, cmp, mentions } from '../lib/rules.mjs';
 import { touchSession, sessionDomains, markAlways, markShown, markFirst, markPages } from '../lib/sessions.mjs';
 
 // Session start marks the always rules it loads, so these are the ones written, reworded or settled since,
@@ -34,7 +34,7 @@ runHook('prompt', input => {
   const said = String(input.prompt ?? '');
   // An everywhere domain's keyword rules reach every session; its always rules only the sessions its reach puts it in.
   const heard = [...new Set([...scope, ...everywhereDomains()])];
-  const notes = settledNotes();
+  const notes = settledNotes(loadNotes(readableDomains(doms, vaultFolder)));
   const rules = liveRules(notes);
   const pages = markPages(input, mentioned(Object.entries(livePages(notes)), readableDomains(doms, vaultFolder), said));
   const context = [
