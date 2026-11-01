@@ -56,7 +56,7 @@ test('basis must fit the kind', async t => {
   assert.deepEqual(check(rules, k), ["a knowledge rule's basis must be stated, failure or source"]);
 });
 
-test('knowledge rule needs applies_to and as_of, no keywords or always', async t => {
+test('knowledge rule needs as_of and a channel, and takes keywords or always', async t => {
   const { rules } = await vault(t);
   const ok = ruleNote({ kind: 'knowledge', basis: 'source', applies_to: ['a/**'], extra: ['as_of: 2026-10-01'] });
   assert.deepEqual(check(rules, ok), []);
@@ -67,11 +67,11 @@ test('knowledge rule needs applies_to and as_of, no keywords or always', async t
 
   assert.match(check(rules, ruleNote({ kind: 'knowledge', basis: 'source', applies_to: ['a/**'] }))[0], /needs as_of/);
   assert.match(check(rules, ruleNote({ kind: 'knowledge', basis: 'source', applies_to: ['a/**'], extra: ['as_of: 2999-01-01'] }))[0], /in the future/);
-  assert.match(check(rules, ruleNote({ kind: 'knowledge', basis: 'source', extra: ['as_of: 2026-10-01'] }))[0], /needs applies_to/);
+  assert.deepEqual(check(rules, ruleNote({ kind: 'knowledge', basis: 'source', extra: ['as_of: 2026-10-01'] })), ['a rule needs keywords, applies_to, tools or always: true, or nothing brings it up']);
   const both = ruleNote({ kind: 'knowledge', basis: 'source', applies_to: ['a/**'], keywords: ['k'], extra: ['as_of: 2026-10-01'] });
-  assert.match(check(rules, both)[0], /takes no keywords or always/);
-  const always = ruleNote({ kind: 'knowledge', basis: 'source', applies_to: ['a/**'], always: true, extra: ['as_of: 2026-10-01'] });
-  assert.match(check(rules, always)[0], /takes no keywords or always/);
+  assert.deepEqual(check(rules, both), []);
+  const always = ruleNote({ kind: 'knowledge', basis: 'source', always: true, extra: ['as_of: 2026-10-01'] });
+  assert.deepEqual(check(rules, always), []);
 });
 
 test('as_of on a taste rule is an error', async t => {
@@ -90,6 +90,16 @@ test('names, type and domain are checked', async t => {
   const { rules } = await vault(t);
   const base = ruleNote({ keywords: ['x'] });
   assert.deepEqual(check(rules, base, 'wiki/demo/Some_Rule.md'), ['file and folder names must be lowercase-kebab-case']);
+  assert.deepEqual(check(rules, base, 'wiki/demo/Ünicode-regel.md'), ['file and folder names must be lowercase-kebab-case']);
+  assert.deepEqual(check(rules, base, 'wiki/demo/café-règle.md'), []);
+  assert.deepEqual(check(rules, base, 'wiki/demo/ボタン-2.md'), []);
+  assert.deepEqual(check(rules, base, 'wiki/demo/कार्य.md'), []);
+  assert.deepEqual(check(rules, base, 'wiki/demo/café--règle.md'), ['file and folder names must be lowercase-kebab-case']);
+  const decomposed = rules.parseNote(base, 'wiki/demo/café-règle.md');
+  assert.equal(decomposed.key, 'demo/café-règle');
+  assert.deepEqual(rules.noteErrors(decomposed), []);
+  assert.equal(rules.toKey('wiki/demo/café.md'), 'demo/café');
+  assert.ok(rules.KEY_RE.test('démo/ボタン'));
   assert.deepEqual(check(rules, base, 'wiki/other/some-rule.md'), ['domain is demo but the note is in wiki/other/']);
   assert.deepEqual(check(rules, base.replace('type: rule', 'type: wat')), ['type must be rule or page']);
   assert.ok(check(rules, without(base, /^domain:/)).includes('no domain'));

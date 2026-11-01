@@ -4,9 +4,11 @@ import { parse } from './frontmatter.mjs';
 import { validGlob, overlapping } from './glob.mjs';
 import { config, vaultPath, shortHash, toPosix, today, inside, plural } from './vault.mjs';
 
-export const LIST_FIELDS = ['applies_to', 'triggers', 'keywords'];
-const PAGE_LIST_FIELDS = ['applies_to', 'keywords'];
-export const KEY_RE = /^[a-z0-9-]+\/[a-z0-9-]+$/;
+export const LIST_FIELDS = ['applies_to', 'triggers', 'keywords', 'tools'];
+const PAGE_LIST_FIELDS = ['applies_to', 'keywords', 'tools'];
+// Slugs and domains take lowercase letters, letters of scripts with no case (CJK and the like), digits and combining
+// marks, read in NFC, so a name never has an uppercase letter and two spellings of one name compare equal.
+export const KEY_RE = /^[\p{Ll}\p{Lo}\p{Nd}\p{M}-]+\/[\p{Ll}\p{Lo}\p{Nd}\p{M}-]+$/u;
 export const BASES = { taste: ['stated', 'inferred', 'pick', 'reading'], knowledge: ['stated', 'failure', 'source'] };
 export const PAGE_KINDS = ['topic', 'concept', 'entity', 'synthesis', 'source'];
 const FOLDERS = { topic: 'topics', concept: 'concepts', entity: 'entities', synthesis: 'syntheses', source: 'sources' };
@@ -18,7 +20,8 @@ export const wrongBasis = (kind, basis) => (kind === 'knowledge' ? `a knowledge 
 export const isUrl = s => typeof s === 'string' && /^https?:\/\/\S+$/i.test(s);
 export const normTopic = s => String(s ?? '').trim().toLowerCase();
 export const validDay = s => typeof s === 'string' && /^\d{4}-\d\d-\d\d$/.test(s) && !Number.isNaN(Date.parse(s)) && new Date(s).toISOString().startsWith(s);
-export const KEBAB = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
+export const KEBAB = /^[\p{Ll}\p{Lo}\p{Nd}\p{M}]+(?:-[\p{Ll}\p{Lo}\p{Nd}\p{M}]+)*$/u;
+const nfc = s => String(s).normalize('NFC');
 const HEAD = [
   '# Taste rules',
   "Follow these unless the user's current request or the project's own instructions say otherwise. If an edit is refused with taste rules, apply them and retry the edit.",
@@ -32,7 +35,7 @@ export function toKey(ref) {
   // An unquoted [[link]] in the frontmatter reads as a list in a list, which leaves [link].
   const link = s.match(/^\[\[?([^\]|#]+)[^\]]*\]\]?$/);
   if (link) s = link[1];
-  return s.trim().replace(/\\/g, '/').replace(/^\.?\/?wiki\//i, '').replace(/\.md$/i, '').toLowerCase();
+  return nfc(s.trim().replace(/\\/g, '/').replace(/^\.?\/?wiki\//i, '').replace(/\.md$/i, '').toLowerCase());
 }
 
 // A note's key is its domain and name, whichever folder of the domain holds it.
@@ -75,7 +78,7 @@ function field(lead, name) {
 
 export function parseNote(text, rel) {
   const { data, body, ok } = parse(text);
-  const parts = rel.replace(/^wiki\//i, '').replace(/\.md$/i, '').split('/');
+  const parts = nfc(rel).replace(/^wiki\//i, '').replace(/\.md$/i, '').split('/');
   const lead = body.split(/^## /m)[0];
   const successor = single(data.superseded_by);
   const note = {
@@ -92,6 +95,8 @@ export function parseNote(text, rel) {
     kind: single(data.kind) ?? (data.type === 'page' ? null : 'taste'),
     as_of: data.as_of ?? null,
     always: data.always === true,
+    author: data.author ?? (data.type === 'page' ? 'agent' : null),
+    requires: data.requires ?? null,
     topic: typeof data.topic === 'string' ? normTopic(data.topic) : '',
     summary: typeof data.summary === 'string' ? data.summary.trim() : '',
     superseded_by: typeof successor === 'string' && successor.trim() ? toKey(successor) : null,
@@ -122,19 +127,71 @@ export function noteErrors(n) {
   return checked.get(n);
 }
 
+// An applies_to entry is '<namespace>:<glob>', or a bare glob over files, with any ! before the namespace. A prefix
+// holding a path or glob character belongs to a file glob.
+export function splitTarget(entry) {
+  const [, not, namespace = null, glob] = String(entry).match(/^(!?)(?:([^:/\\*?{}[\]!]+):)?(.*)$/s);
+  return { negated: not === '!', namespace, glob };
+}
+
+export const fileGlobs = globs => globs.filter(g => !splitTarget(g).namespace);
+
+function targetErrors(g) {
+  const { namespace, glob } = splitTarget(g);
+  if (namespace === 'file') return ['applies_to: write a file glob bare, without file:'];
+  if (namespace && !Object.hasOwn(config().namespaces, namespace)) return [`applies_to names namespace ${namespace}, which vault.config.json doesn't declare under namespaces`];
+  return validGlob(namespace ? glob : g) ? [] : [`bad glob in applies_to: ${g}`];
+}
+
 const listErrors = (n, fields) => [
   ...fields.filter(f => n[f] === null).map(f => `${f} must be a list`),
-  ...(n.applies_to ?? []).filter(g => !validGlob(g)).map(g => `bad glob in applies_to: ${g}`),
+  ...(n.applies_to ?? []).flatMap(targetErrors),
+  ...(Array.isArray(n.data.tools) ? n.data.tools : []).filter(x => typeof x !== 'string' || !/^\S+$/.test(x))
+    .map(x => `tools must name each tool exactly, with no spaces: ${x === '' ? '(empty)' : x}`),
 ];
+
+// tools counts though nothing delivers on it yet, so a rule written for it now needs no change when that lands.
+export const hasChannel = n => n.always === true || ['applies_to', 'keywords', 'tools'].some(f => n[f]?.length);
+
+const SEMVER = /^(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)(?:-[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?(?:\+[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?$/;
+const EVENTS = ['introduced', 'fixed', 'last_affected', 'limit'];
+const isMap = x => x !== null && typeof x === 'object' && !Array.isArray(x);
+const filled = x => typeof x === 'string' && x.trim() !== '';
+const oneEvent = e => isMap(e) && Object.keys(e).length === 1 && EVENTS.includes(Object.keys(e)[0]) && filled(Object.values(e)[0]);
+
+// The shape of OSV's affected entries (https://ossf.github.io/osv-schema/). Which ecosystems exist is the version
+// readers' business, so the name isn't checked against any.
+function requiresErrors(req) {
+  if (req === null) return [];
+  if (!Array.isArray(req) || !req.every(isMap)) return ['requires must be a list of { package, ranges } entries, as in OSV affected'];
+  return req.flatMap((r, i) => {
+    const at = `requires entry ${i + 1}`;
+    const errs = [];
+    if (!isMap(r.package) || !filled(r.package.ecosystem) || !filled(r.package.name)) errs.push(`${at}: package needs an ecosystem and a name`);
+    if (!Array.isArray(r.ranges) || !r.ranges.length || !r.ranges.every(isMap)) return [...errs, `${at}: ranges must be a list of { type, events }`];
+    for (const { type, events } of r.ranges) {
+      if (!['SEMVER', 'ECOSYSTEM'].includes(type)) errs.push(`${at}: a range type must be SEMVER or ECOSYSTEM`);
+      if (!Array.isArray(events) || !events.length || !events.every(oneEvent)) {
+        errs.push(`${at}: each event is one of introduced, fixed, last_affected or limit, with a version`);
+        continue;
+      }
+      if (type !== 'SEMVER') continue;
+      for (const [[k, v]] of events.map(e => Object.entries(e))) if (!SEMVER.test(v) && !(k === 'introduced' && v === '0')) errs.push(`${at}: ${v} is not a semver version`);
+    }
+    return [...new Set(errs)];
+  });
+}
 
 function checkNote(n) {
   const errs = n.clash ? [`${joinList(n.clash, 'and')} ${n.clash.length > 1 ? 'have' : 'has'} this note's name too. Rename one: each name is used once in a domain`] : [];
   if (!n.ok) return [...errs, 'no frontmatter'];
   if (!KEBAB.test(n.slug) || (n.domain && !KEBAB.test(n.domain))) errs.push('file and folder names must be lowercase-kebab-case');
   if (n.type !== 'rule' && n.type !== 'page') errs.push('type must be rule or page');
-  if (n.domain && n.data.domain !== undefined && n.data.domain !== n.domain) errs.push(`domain is ${n.data.domain} but the note is in wiki/${n.domain}/`);
+  if (n.domain && n.data.domain !== undefined && (typeof n.data.domain === 'string' ? nfc(n.data.domain) : n.data.domain) !== n.domain) errs.push(`domain is ${n.data.domain} but the note is in wiki/${n.domain}/`);
   if (n.data.domain === undefined) errs.push('no domain');
-  if (n.type === 'page') return [...errs, ...listErrors(n, PAGE_LIST_FIELDS)];
+  if (n.type === 'page') {
+    return [...errs, ...listErrors(n, PAGE_LIST_FIELDS), ...(['user', 'agent'].includes(n.author) ? [] : ['author must be user or agent']), ...requiresErrors(n.requires)];
+  }
   if (n.type !== 'rule') return errs;
   if (isResearch(n.domain)) errs.push(`${n.domain} is vault-only, so it holds pages only. Put the rule in a domain that reaches projects, or in global`);
   if (!BASES[n.kind]) errs.push('kind must be taste or knowledge');
@@ -142,9 +199,13 @@ function checkNote(n) {
   if (n.kind === 'knowledge') {
     if (!validDay(n.as_of)) errs.push('a knowledge rule needs as_of, the day it was last checked, as YYYY-MM-DD');
     else if (n.as_of > today()) errs.push(`as_of ${n.as_of} is in the future`);
-    if (!n.applies_to?.length) errs.push('a knowledge rule needs applies_to: it reaches the agent only on matching edits');
-    if (n.keywords?.length || n.always) errs.push('a knowledge rule reaches the agent only on matching edits, so it takes no keywords or always: true');
-  } else if (n.kind === 'taste' && n.as_of !== null) errs.push('as_of is only for knowledge rules; taste rules never expire');
+    errs.push(...requiresErrors(n.requires));
+  } else if (n.kind === 'taste') {
+    if (n.as_of !== null) errs.push('as_of is only for knowledge rules; taste rules never expire');
+    if (n.requires !== null) errs.push('requires is for knowledge rules and pages; a taste rule holds whatever the version');
+  }
+  if (n.author !== null) errs.push('author is only for pages');
+  if (!hasChannel(n)) errs.push('a rule needs keywords, applies_to, tools or always: true, or nothing brings it up');
   if (!n.do) errs.push('no **Do:** line');
   if (!n.not) errs.push('no **Not:** line');
   errs.push(...listErrors(n, LIST_FIELDS));
@@ -179,7 +240,10 @@ export function loadNotes() {
   return notes.sort((a, b) => cmp(a.key, b.key));
 }
 
-export const readNote = (key, notes = loadNotes()) => (KEY_RE.test(key) ? notes.find(n => n.key === key) ?? null : null);
+export function readNote(key, notes = loadNotes()) {
+  const k = nfc(key);
+  return KEY_RE.test(k) ? notes.find(n => n.key === k) ?? null : null;
+}
 
 export const knownDomain = d => d === 'global' || Object.hasOwn(config().domains, d);
 // A vaultOnly domain reaches no project session, so it holds only pages, which sessions read from the vault folder. It
@@ -231,7 +295,8 @@ export function liveRules(notes = loadNotes()) {
       domain: n.domain, topic: n.topic, text,
       // Only the delivered wording counts, so an edit to a rule's evidence or globs doesn't deliver it again.
       hash: shortHash(text),
-      kind: n.kind, always: n.always, applies_to: n.applies_to, triggers: n.triggers, keywords: n.keywords,
+      // A glob over another namespace never matches a file edit, so the hooks get only file globs.
+      kind: n.kind, always: n.always, applies_to: fileGlobs(n.applies_to), triggers: n.triggers, keywords: n.keywords,
     };
   }
   return rules;
@@ -251,7 +316,7 @@ export function livePages(notes = loadNotes()) {
   const pages = {};
   for (const n of notes) {
     if (n.type !== 'page' || !(n.keywords?.length || n.applies_to?.length) || undelivered(n)) continue;
-    pages[n.key] = { rel: n.rel, domain: n.domain, kind: n.kind, summary: n.summary, keywords: n.keywords, applies_to: n.applies_to };
+    pages[n.key] = { rel: n.rel, domain: n.domain, kind: n.kind, summary: n.summary, keywords: n.keywords, applies_to: fileGlobs(n.applies_to) };
   }
   return pages;
 }
@@ -282,8 +347,10 @@ function nestedFolders(da, db) {
 // and another domain's when their project folders nest.
 export function sharedFiles(a, b) {
   if (!a.topic || a.topic !== b.topic) return null;
-  const [as, bs] = [a.applies_to ?? [], b.applies_to ?? []];
-  if (a.domain === b.domain || [a.domain, b.domain].includes('global')) return overlapping(as, bs);
+  const [as, bs] = [fileGlobs(a.applies_to ?? []), fileGlobs(b.applies_to ?? [])];
+  // A glob over another namespace keeps its prefix, so it meets only globs over the same namespace, and no folder applies.
+  const named = overlapping(...[a, b].map(x => (x.applies_to ?? []).filter(g => splitTarget(g).namespace)));
+  if (a.domain === b.domain || [a.domain, b.domain].includes('global')) return overlapping(as, bs) ?? named;
   for (const folders of nestedFolders(a.domain, b.domain)) {
     const pair = overlapping(as, bs, folders);
     if (pair) return pair;
@@ -291,7 +358,9 @@ export function sharedFiles(a, b) {
   return null;
 }
 
-export const ruleLine = (k, r) => `- ${k}: ${clip(r.text, config().delivery.maxRuleChars)}`;
+export const maxChars = kind => (kind === 'knowledge' ? config().delivery.maxKnowledgeRuleChars : config().delivery.maxRuleChars);
+
+export const ruleLine = (k, r) => `- ${k}: ${clip(r.text, maxChars(r.kind))}`;
 
 export function domainOrder(domains) {
   const known = Object.keys(config().domains);

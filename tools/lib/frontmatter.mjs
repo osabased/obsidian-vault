@@ -28,10 +28,13 @@ function scalar(raw) {
   return v === '' || v === '~' || v === 'null' ? null : v;
 }
 
-function flowList(inner) {
+// Splits flow text at the commas outside quotes and outside the brackets in nest. A flow list nests only braces, so an
+// unquoted [[link]] in one still reads as the string [link], as it always has.
+function splitFlow(inner, nest, at = ',') {
   const parts = [];
   let cur = '';
   let q = null;
+  let depth = 0;
   for (let i = 0; i < inner.length; i++) {
     const ch = inner[i];
     if (q) {
@@ -39,58 +42,113 @@ function flowList(inner) {
       if (q === '"' && ch === '\\') cur += inner[++i] ?? '';
       else if (ch === q && q === "'" && inner[i + 1] === "'") cur += inner[++i];
       else if (ch === q) q = null;
-    } else if (ch === ',') {
+    } else if (ch === at && !depth && (at === ',' || /\s/.test(inner[i + 1] ?? ' '))) {
       parts.push(cur);
+      if (at !== ',') return [...parts, inner.slice(i + 1)];
       cur = '';
     } else {
       if (ch === "'" || ch === '"') q = ch;
+      else if (nest.includes(ch)) depth = Math.max(0, depth + ('{['.includes(ch) ? 1 : -1));
       cur += ch;
     }
   }
-  parts.push(cur);
-  return parts.map(scalar).filter(v => v !== null);
+  return [...parts, cur];
 }
+
+// Braces with no key: value inside, like a glob's {ts,tsx}, stay a string.
+const isFlowMap = s => s.startsWith('{') && s.endsWith('}') && splitFlow(s.slice(1, -1), '{}[]', ':').length > 1;
+
+function flowMap(s) {
+  const out = {};
+  for (const part of splitFlow(s.slice(1, -1), '{}[]')) {
+    if (!part.trim()) continue;
+    const [k, v] = splitFlow(part, '{}[]', ':');
+    out[scalar(k)] = v === undefined ? null : value(v);
+  }
+  return out;
+}
+
+const flowList = inner => splitFlow(inner, '{}').map(p => (isFlowMap(p.trim()) ? flowMap(p.trim()) : scalar(p))).filter(v => v !== null);
 
 function value(raw) {
   const v = raw.trim();
-  return v.startsWith('[') && v.endsWith(']') ? flowList(v.slice(1, -1)) : scalar(v);
+  if (v.startsWith('[') && v.endsWith(']')) return flowList(v.slice(1, -1));
+  return isFlowMap(v) ? flowMap(v) : scalar(v);
 }
 
 const closing = lines => (lines[0].trim() === '---' ? lines.findIndex((l, i) => i > 0 && /^---\s*$/.test(l)) : -1);
 const KV = /^([^\s#'"-][^:]*?)\s*:(?:\s+(.*))?$/;
+const ITEM = /^-(?:[ \t]+(.*))?$/;
 
-// The subset of YAML that Obsidian writes for properties: scalars, quoted strings, inline and block lists.
+// A key with no value takes the lines below it that are indented further, or are list items at its own indent.
+const childrenEnd = (rows, i, level) => {
+  let j = i + 1;
+  while (j < rows.length && (rows[j].indent > level || (rows[j].indent === level && ITEM.test(rows[j].text)))) j++;
+  return j;
+};
+
+const block = rows => (ITEM.test(rows[0].text) ? sequence(rows) : mapping(rows, rows[0].indent));
+
+// Lines that read as nothing are skipped. An empty mapping or list reads as null, as an empty key always has.
+function mapping(rows, level) {
+  const out = {};
+  let any = false;
+  for (let i = 0; i < rows.length; i++) {
+    const kv = rows[i].indent <= level && rows[i].text.match(KV);
+    if (!kv) continue;
+    const j = childrenEnd(rows, i, level);
+    let v = kv[2] === undefined ? null : value(kv[2]);
+    if (v === null && j > i + 1) v = block(rows.slice(i + 1, j));
+    out[kv[1]] = v;
+    any = true;
+    i = j - 1;
+  }
+  return any ? out : null;
+}
+
+// A scalar item takes no lines below it, so a list whose items wander in indent still reads as one list.
+function sequence(rows) {
+  const out = [];
+  for (let i = 0; i < rows.length; i++) {
+    const { indent, text } = rows[i];
+    const m = text.match(ITEM);
+    if (!m) continue;
+    const c = m[1] ?? '';
+    if (c && (isFlowMap(c) || !KV.test(c))) {
+      const v = isFlowMap(c) ? flowMap(c) : scalar(c);
+      if (v !== null) out.push(v);
+      continue;
+    }
+    let j = i + 1;
+    while (j < rows.length && rows[j].indent > indent) j++;
+    const kids = rows.slice(i + 1, j);
+    const v = c ? mapping([{ indent: indent + text.length - c.length, text: c }, ...kids], indent + text.length - c.length) : kids.length ? block(kids) : null;
+    if (v !== null) out.push(v);
+    i = j - 1;
+  }
+  return out.length ? out : null;
+}
+
+// The subset of YAML that Obsidian writes for properties, plus nested mappings: scalars, quoted strings, flow and block
+// lists, and flow and block mappings.
 export function parse(text) {
   const lines = String(text).replace(/^﻿/, '').split(/\r?\n/);
   const end = closing(lines);
   if (end < 0) return { data: {}, body: lines.join('\n'), ok: false };
-  const data = {};
-  let list = null;
-  for (const line of lines.slice(1, end)) {
-    if (!line.trim() || /^\s*#/.test(line)) continue;
-    const item = line.match(/^\s*-(?:\s+(.*))?$/);
-    if (item && list) {
-      const v = scalar(item[1] ?? '');
-      if (v !== null) data[list] = [...(data[list] ?? []), v];
-      continue;
-    }
-    list = null;
-    const kv = line.match(KV);
-    if (!kv) continue;
-    data[kv[1]] = kv[2] === undefined ? null : value(kv[2]);
-    if (data[kv[1]] === null) list = kv[1];
-  }
-  return { data, body: lines.slice(end + 1).join('\n'), ok: true };
+  const rows = lines.slice(1, end).filter(l => l.trim() && !/^\s*#/.test(l)).map(l => ({ indent: l.match(/^\s*/)[0].length, text: l.trim() }));
+  return { data: mapping(rows, 0) ?? {}, body: lines.slice(end + 1).join('\n'), ok: true };
 }
 
 // Sets a scalar on the line parse reads it from, the last one with its key, keeping the line's quotes, comment and
-// ending. Text without frontmatter or without the key comes back as it was.
+// ending. Text without frontmatter, without the key, or whose key holds a nested block comes back as it was.
 export function setField(text, key, val) {
   const lines = text.split('\n');
   const end = closing(lines);
   const at = lines.findLastIndex((l, i) => i > 0 && i < end && l.replace(/\r$/, '').match(KV)?.[1] === key);
   if (at < 0) return text;
   const [, head, old, comment, eol] = lines[at].match(/^([^:]*:[ \t]*)(.*?)((?:[ \t]+#.*)?)(\r?)$/);
+  const next = lines.slice(at + 1, end).find(l => l.trim() && !/^\s*#/.test(l));
+  if (!old && next && /^(?:\s|-)/.test(next)) return text;
   const q = /^['"]/.test(old) ? old[0] : '';
   lines[at] = `${/\s$/.test(head) ? head : `${head} `}${q}${val}${q}${comment}${eol}`;
   return lines.join('\n');
