@@ -409,7 +409,7 @@ function lintPage(n, watched, add) {
   if (!isSourcePage(n)) misplaced(['source', 'source_date'], 'source pages', 'Cite a source with a footnote instead');
   misplaced(['always', 'triggers'], 'rules', 'A page comes up through keywords and applies_to');
   if (n.applies_to?.length && isResearch(n.domain)) {
-    add('warn', n.rel, `${n.domain} is a research domain, with no project folders, so no edit brings this page up. Give it keywords instead`);
+    add('warn', n.rel, `${n.domain} is vault-only, so no edit brings this page up. Give it keywords instead`);
   }
   if (isSourcePage(n)) return;
   const mine = changed(n);

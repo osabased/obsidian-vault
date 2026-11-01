@@ -119,7 +119,7 @@ test('lint checks a page\'s keywords and applies_to as it does a rule\'s, and wa
   assert.deepEqual(found.map(f => [f.level, f.file, f.msg]).sort(), [
     ['error', 'wiki/demo/bad-glob.md', 'bad glob in applies_to: src/{a'],
     ['warn', 'wiki/demo/rule-fields.md', 'always and triggers are for rules. A page comes up through keywords and applies_to'],
-    ['warn', 'wiki/reading/solver-history.md', 'reading is a research domain, with no project folders, so no edit brings this page up. Give it keywords instead'],
+    ['warn', 'wiki/reading/solver-history.md', 'reading is vault-only, so no edit brings this page up. Give it keywords instead'],
   ]);
 });
 

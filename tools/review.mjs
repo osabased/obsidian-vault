@@ -1,10 +1,10 @@
-import { config, plural, toPosix, guarded, hookErrors, errorsLog, domainsFor, localDay, appendLog } from './lib/vault.mjs';
+import { config, plural, toPosix, guarded, hookErrors, errorsLog, localDay, appendLog } from './lib/vault.mjs';
 import {
   clip, normTopic, topicNotes, loadNotes, liveRules, evidenceSessions, validDay, byKey, cmp, sharedFiles, isResearch, rawFile, resolver, linkedKeys, evidenceSources, isSourcePage, joinList,
   rankPair,
 } from './lib/rules.mjs';
 import { lint, tally } from './lib/lint.mjs';
-import { lintRan, lintDone, trackedSessions } from './lib/sessions.mjs';
+import { lintRan, lintDone, trackedSessions, sessionDomains } from './lib/sessions.mjs';
 import { subjectRows, liveRows, newestFirst, projectName } from './lib/picks.mjs';
 import { UsageError } from './lib/input.mjs';
 import { bundleOf } from './lib/rules.mjs';
@@ -75,7 +75,7 @@ function correctedAgain() {
 // Counts the registered sessions in the rule's domain, active since it was written, that aren't in its Evidence.
 function neverShown() {
   const registered = tracked().filter(t => t.cwd !== null);
-  const domains = new Map(registered.map(t => [t.id, domainsFor(t.cwd).map(d => d.domain)]));
+  const domains = new Map(registered.map(t => [t.id, sessionDomains(t.id, t.cwd)]));
   return liveNotes().flatMap(([k, r, n]) => {
     if (tracked().some(t => t.keys.has(k))) return [];
     const created = validDay(n.data.created) ? n.data.created : '';

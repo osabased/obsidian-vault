@@ -1,0 +1,151 @@
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import { makeVault, ruleNote, sessionId } from './fixture.mjs';
+
+const ALPHA = { title: 'Alpha', markers: ['alpha.project'], topics: ['code', 'naming'] };
+const BETA = { title: 'Beta', markers: ['beta.project'], topics: ['code'] };
+
+// A monorepo outside every configured path: each package holds one domain's marker, so only the markers below the
+// session's folder put it in a domain.
+function monorepo(t) {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'vault-rows-')).replace(/\\/g, '/');
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  for (const rel of ['packages/a/alpha.project', 'packages/b/beta.project']) {
+    fs.mkdirSync(path.dirname(path.join(dir, rel)), { recursive: true });
+    fs.writeFileSync(path.join(dir, rel), '');
+  }
+  return dir;
+}
+
+function setup(t, { mono = false } = {}) {
+  const v = makeVault(t, mono ? { domains: { alpha: ALPHA, beta: BETA } } : {});
+  const sid = sessionId();
+  const root = mono ? monorepo(t) : null;
+  v.startSession(sid, root ? { cwd: root } : {});
+  return { v, sid, root };
+}
+
+const pick = (v, sid, input) => v.run('pick.mjs', [sid], { input });
+const comment = (extra = {}) => ({ subject: 'cards', comment: 'keep the cards roomy', ...extra });
+const provisional = (extra = {}) => ({
+  subject: 'cards', question: 'Which card style?', options: [{ label: 'Flat' }, { label: 'Raised' }], pick: 'Flat', status: 'provisional', ...extra,
+});
+const rowsIn = (v, folder) => fs.readdirSync(v.at('raw', folder)).filter(f => f.endsWith('.jsonl')).sort()
+  .flatMap(f => v.read(`raw/${folder}/${f}`).trim().split('\n').map(l => JSON.parse(l)));
+const lower = p => p.replace(/\\/g, '/').toLowerCase();
+const day = async v => (await v.import('lib/vault.mjs')).today();
+
+test('a session with one domain records it, its project root, and a file of its own', async t => {
+  const { v, sid } = setup(t);
+  const r = pick(v, sid, comment());
+  assert.equal(r.code, 0, r.stderr);
+  const file = `${await day(v)}-${sid.slice(0, 8)}.jsonl`;
+  assert.match(r.stdout, new RegExp(`^Recorded q-[0-9a-f]{8} in raw/picks/${file.replace('.', '\\.')}\\.`));
+  assert.deepEqual(fs.readdirSync(v.at('raw', 'picks')), [file]);
+  const [row] = rowsIn(v, 'picks');
+  assert.equal(row.domain, 'demo');
+  assert.equal(lower(row.project), lower(v.project));
+});
+
+test('two sessions on one day write to two files, and decisions.md lists both', t => {
+  const { v, sid } = setup(t);
+  const other = 'deadbeef-0000-4000-8000-000000000001';
+  v.startSession(other);
+  assert.equal(pick(v, sid, comment({ comment: 'first words' })).code, 0);
+  assert.equal(pick(v, other, comment({ comment: 'second words' })).code, 0);
+  assert.equal(fs.readdirSync(v.at('raw', 'picks')).length, 2);
+  const decisions = v.read('decisions.md');
+  assert.ok(decisions.indexOf('second words') < decisions.indexOf('first words'), 'newest first, whichever file holds it');
+});
+
+test('a session at a monorepo root picks for a package\'s domain, and must name one when it has several', t => {
+  const { v, sid, root } = setup(t, { mono: true });
+  const none = pick(v, sid, comment());
+  assert.equal(none.code, 1);
+  assert.equal(none.stderr, 'Not recorded: this session is in more than one domain: alpha and beta. Add domain with the one this is for.\n');
+  const wrong = pick(v, sid, comment({ domain: 'demo' }));
+  assert.equal(wrong.code, 1);
+  assert.equal(wrong.stderr, "Not recorded: demo isn't a domain of this session. It has: alpha and beta.\n");
+  assert.equal(pick(v, sid, comment({ domain: 'alpha' })).code, 0);
+  assert.equal(pick(v, sid, comment({ domain: 'beta', comment: 'beta words' })).code, 0);
+  const rows = rowsIn(v, 'picks');
+  assert.deepEqual(rows.map(r => [r.domain, lower(r.project)]), [['alpha', lower(`${root}/packages/a`)], ['beta', lower(`${root}/packages/b`)]]);
+  assert.equal(fs.readdirSync(v.at('raw', 'picks')).length, 1);
+});
+
+test('a session with one domain refuses another and lists the one it has', t => {
+  const { v, sid } = setup(t);
+  const r = pick(v, sid, comment({ domain: 'beta' }));
+  assert.equal(r.code, 1);
+  assert.equal(r.stderr, "Not recorded: beta isn't a domain of this session. It has: demo.\n");
+  assert.equal(pick(v, sid, comment({ domain: 'demo' })).code, 0);
+});
+
+test('a confirmation takes the domain of the pick it confirms, and a pick in one domain is not replaced from another', t => {
+  const { v, sid } = setup(t, { mono: true });
+  assert.equal(pick(v, sid, provisional({ domain: 'alpha' })).code, 0);
+  const [first] = rowsIn(v, 'picks');
+  const confirmed = pick(v, sid, { confirms: first.id });
+  assert.equal(confirmed.code, 0, confirmed.stderr);
+  assert.equal(rowsIn(v, 'picks')[1].domain, 'alpha');
+  assert.equal(pick(v, sid, provisional({ domain: 'beta', pick: 'Raised' })).code, 0);
+  const [, , second] = rowsIn(v, 'picks');
+  const across = pick(v, sid, provisional({ domain: 'alpha', replaces: second.id }));
+  assert.equal(across.code, 1);
+  assert.match(across.stderr, new RegExp(`${second.id} is for cards in beta, not alpha\\.`));
+});
+
+test('show takes the domain when the session has several', t => {
+  const { v, sid } = setup(t, { mono: true });
+  assert.equal(pick(v, sid, provisional({ domain: 'alpha' })).code, 0);
+  const none = v.run('pick.mjs', ['show', sid, 'cards']);
+  assert.equal(none.code, 1);
+  assert.match(none.stderr, /^Not shown: this session is in more than one domain: alpha and beta\./);
+  assert.match(v.run('pick.mjs', ['show', sid, 'cards', 'alpha']).stdout, /^Picks for cards in a, newest first:/);
+  assert.match(v.run('pick.mjs', ['show', sid, 'cards', 'beta']).stdout, /^No picks for cards in b yet\./);
+});
+
+test('propose cites a pick in its own domain, and a row with no domain in any', t => {
+  const { v, sid } = setup(t, { mono: true });
+  assert.equal(pick(v, sid, comment({ domain: 'alpha', comment: 'alpha words' })).code, 0);
+  const [row] = rowsIn(v, 'picks');
+  v.write('raw/picks/2026-09-01.jsonl', `${JSON.stringify({ id: 'q-0000beef', at: '2026-09-01T10:00:00.000Z', source: 'pick', subject: 'cards', text: 'old words', status: 'user' })}\n`);
+  const rule = (domain, slug, id) => ({ domain, slug, topic: 'code', basis: 'pick', pick: id, do: `Zebra quartz ${slug}.`, not: `Plover lantern ${slug}.`, applies_to: [`src/${slug}/**`] });
+  const refused = v.propose(sid, rule('beta', 'one', row.id));
+  assert.equal(refused.code, 1);
+  assert.match(refused.stderr, new RegExp(`${row.id} was recorded in alpha, not beta\\.`));
+  assert.equal(v.propose(sid, rule('alpha', 'two', row.id)).code, 0);
+  const old = v.propose(sid, rule('beta', 'three', 'q-0000beef'));
+  assert.equal(old.code, 0, old.stderr);
+  const files = fs.readdirSync(v.at('raw', 'inbox'));
+  assert.deepEqual(files, [`${files[0].slice(0, 10)}-${sid.slice(0, 8)}.jsonl`]);
+  assert.equal(rowsIn(v, 'inbox').length, 2);
+});
+
+test('the readers take the old per-day files and the per-session ones, and nothing else, in the order of the rows', async t => {
+  const v = makeVault(t);
+  const row = (id, at, extra = {}) => `${JSON.stringify({ id, at, source: 'pick', domain: 'demo', subject: 'cards', text: id, status: 'user', ...extra })}\n`;
+  v.write('raw/picks/2026-10-01.jsonl', row('q-00000002', '2026-10-01T12:00:00.000Z'));
+  v.write('raw/picks/2026-10-01-a1b2c3d4.jsonl', row('q-00000003', '2026-10-01T13:00:00.000Z') + row('q-00000001', '2026-10-01T09:00:00.000Z'));
+  v.write('raw/picks/2026-10-01-cards.png', 'not rows');
+  v.write('raw/picks/2026-10-01-a1b2c3d4.png', row('q-000000ff', '2026-10-01T08:00:00.000Z'));
+  v.write('raw/picks/notes.jsonl', row('q-000000ee', '2026-10-01T08:00:00.000Z'));
+  v.write('raw/inbox/2026-10-01-a1b2c3d4.jsonl', `${JSON.stringify({ id: 'a-00000001', at: '2026-10-01T10:00:00.000Z', source: 'agent', text: 'x' })}\n`);
+  v.write('raw/inbox/2026-10-02.jsonl', `${JSON.stringify({ id: 'a-00000002', at: '2026-10-02T10:00:00.000Z', source: 'agent', text: 'y' })}\n`);
+  const vault = await v.import('lib/vault.mjs');
+  assert.deepEqual(vault.datedFiles('picks').map(f => f.file), ['raw/picks/2026-10-01-a1b2c3d4.jsonl', 'raw/picks/2026-10-01.jsonl']);
+  assert.deepEqual(vault.pickRows().map(r => r.id), ['q-00000001', 'q-00000002', 'q-00000003']);
+  assert.deepEqual(vault.proposalRows().map(r => r.id), ['a-00000001', 'a-00000002']);
+});
+
+test('a rule in a package\'s domain counts the sessions at the monorepo root in review status\'s never-shown list', t => {
+  const { v } = setup(t, { mono: true });
+  v.write('wiki/alpha/rules/roomy-cards.md', ruleNote({ domain: 'alpha', applies_to: ['src/**'] }));
+  v.write('wiki/beta/rules/tight-cards.md', ruleNote({ domain: 'beta', applies_to: ['src/**'] }));
+  const out = v.run('review.mjs', ['status']).stdout;
+  const block = out.trimEnd().split('\n\n').find(b => b.startsWith('Rules no session was shown\n'));
+  assert.deepEqual(block?.split('\n').slice(1), ['- alpha/roomy-cards: 1 session since 2026-10-01', '- beta/tight-cards: 1 session since 2026-10-01']);
+});
