@@ -5,14 +5,14 @@ import { globToRegExp, bestMatch, normGlob, validGlob, specificity, bySpecificit
 const hits = (glob, rel) => globToRegExp(glob).test(rel);
 
 test('** crosses folders, * does not', () => {
-  assert.ok(hits('src/**/*.luau', 'src/a.luau'));
-  assert.ok(hits('src/**/*.luau', 'src/a/b/c.luau'));
+  assert.ok(hits('src/**/*.zqx', 'src/a.zqx'));
+  assert.ok(hits('src/**/*.zqx', 'src/a/b/c.zqx'));
   assert.ok(hits('src/**', 'src/a/b'));
   assert.ok(hits('**/*.md', 'x/y/z.md'));
   assert.ok(hits('**/*.md', 'z.md'));
-  assert.ok(!hits('src/*.luau', 'src/a/b.luau'));
-  assert.ok(hits('src/*.luau', 'src/b.luau'));
-  assert.ok(!hits('src/**/*.luau', 'other/a.luau'));
+  assert.ok(!hits('src/*.zqx', 'src/a/b.zqx'));
+  assert.ok(hits('src/*.zqx', 'src/b.zqx'));
+  assert.ok(!hits('src/**/*.zqx', 'other/a.zqx'));
 });
 
 test('? matches one non-slash character', () => {
@@ -22,16 +22,16 @@ test('? matches one non-slash character', () => {
 });
 
 test('{a,b} picks one alternative', () => {
-  assert.ok(hits('src/*.{lua,luau}', 'src/a.luau'));
-  assert.ok(hits('src/*.{lua,luau}', 'src/a.lua'));
-  assert.ok(!hits('src/*.{lua,luau}', 'src/a.md'));
-  assert.ok(hits('{client,server}/**', 'server/x/y.lua'));
+  assert.ok(hits('src/*.{zq,zqx}', 'src/a.zqx'));
+  assert.ok(hits('src/*.{zq,zqx}', 'src/a.zq'));
+  assert.ok(!hits('src/*.{zq,zqx}', 'src/a.md'));
+  assert.ok(hits('{client,server}/**', 'server/x/y.zq'));
 });
 
 test('matching ignores case and anchors both ends', () => {
-  assert.ok(hits('SRC/*.LUAU', 'src/Main.luau'));
-  assert.ok(!hits('src/*.lua', 'src/a.luau'));
-  assert.ok(!hits('src/*.lua', 'x/src/a.lua'));
+  assert.ok(hits('SRC/*.ZQX', 'src/Main.zqx'));
+  assert.ok(!hits('src/*.zq', 'src/a.zqx'));
+  assert.ok(!hits('src/*.zq', 'x/src/a.zq'));
 });
 
 test('regex metacharacters in a glob are literal', () => {
@@ -43,7 +43,7 @@ test('normGlob turns backslashes to slashes and drops a leading ./ or /', () => 
   assert.equal(normGlob('src\\ui\\**'), 'src/ui/**');
   assert.equal(normGlob('./src/a'), 'src/a');
   assert.equal(normGlob('/src/a'), 'src/a');
-  assert.ok(hits('.\\src\\*.lua', 'src/a.lua'));
+  assert.ok(hits('.\\src\\*.zq', 'src/a.zq'));
 });
 
 test('validGlob rejects blanks, non-strings and bad braces', () => {
@@ -58,46 +58,46 @@ test('validGlob rejects blanks, non-strings and bad braces', () => {
 });
 
 test('specificity counts literal folders then literal characters', () => {
-  assert.deepEqual(specificity('src/ui/*.lua'), [2, 'src/ui/.lua'.length]);
-  assert.deepEqual(specificity('**/*.lua'), [0, '/.lua'.length]);
+  assert.deepEqual(specificity('src/ui/*.zq'), [2, 'src/ui/.zq'.length]);
+  assert.deepEqual(specificity('**/*.zq'), [0, '/.zq'.length]);
   assert.deepEqual(specificity('src/**'), [1, 'src/'.length]);
 });
 
 test('bySpecificity sorts more literal folders first, then longer', () => {
-  const globs = ['**/*.lua', 'src/**', 'src/ui/*.lua', 'src/ui/**'];
+  const globs = ['**/*.zq', 'src/**', 'src/ui/*.zq', 'src/ui/**'];
   const sorted = [...globs].sort((a, b) => bySpecificity(specificity(a), specificity(b)));
-  assert.deepEqual(sorted, ['src/ui/*.lua', 'src/ui/**', 'src/**', '**/*.lua']);
+  assert.deepEqual(sorted, ['src/ui/*.zq', 'src/ui/**', 'src/**', '**/*.zq']);
 });
 
 test('bestMatch returns the most specific matching glob or null', () => {
-  const globs = ['**/*.lua', 'src/**', 'src/ui/*.lua', '{bad'];
-  assert.equal(bestMatch(globs, 'src/ui/a.lua'), 'src/ui/*.lua');
-  assert.equal(bestMatch(globs, 'src/other/a.lua'), 'src/**');
-  assert.equal(bestMatch(globs, 'lib/a.lua'), '**/*.lua');
+  const globs = ['**/*.zq', 'src/**', 'src/ui/*.zq', '{bad'];
+  assert.equal(bestMatch(globs, 'src/ui/a.zq'), 'src/ui/*.zq');
+  assert.equal(bestMatch(globs, 'src/other/a.zq'), 'src/**');
+  assert.equal(bestMatch(globs, 'lib/a.zq'), '**/*.zq');
   assert.equal(bestMatch(globs, 'lib/a.md'), null);
   assert.equal(bestMatch([], 'a'), null);
 });
 
 test('overlapping returns the first pair some path matches', () => {
-  assert.deepEqual(overlapping(['src/**'], ['**/*.lua']), ['src/**', '**/*.lua']);
-  assert.deepEqual(overlapping(['a/*.lua', 'src/**'], ['src/ui/*.md', 'src/*.md']), ['src/**', 'src/ui/*.md']);
-  assert.equal(overlapping(['src/*.lua'], ['src/*.md']), null);
-  assert.equal(overlapping(['src/*.lua'], ['src/a/*.lua']), null);
+  assert.deepEqual(overlapping(['src/**'], ['**/*.zq']), ['src/**', '**/*.zq']);
+  assert.deepEqual(overlapping(['a/*.zq', 'src/**'], ['src/ui/*.md', 'src/*.md']), ['src/**', 'src/ui/*.md']);
+  assert.equal(overlapping(['src/*.zq'], ['src/*.md']), null);
+  assert.equal(overlapping(['src/*.zq'], ['src/a/*.zq']), null);
   assert.equal(overlapping(['a/*'], ['a/b/*']), null);
   assert.equal(overlapping([], ['**']), null);
   assert.equal(overlapping(['{bad'], ['**']), null);
 });
 
 test('overlapping handles braces, ? and case', () => {
-  assert.deepEqual(overlapping(['src/*.{lua,luau}'], ['SRC/a.LUAU']), ['src/*.{lua,luau}', 'SRC/a.LUAU']);
+  assert.deepEqual(overlapping(['src/*.{zq,zqx}'], ['SRC/a.ZQX']), ['src/*.{zq,zqx}', 'SRC/a.ZQX']);
   assert.notEqual(overlapping(['a/?.md'], ['a/b.md']), null);
   assert.equal(overlapping(['a/?.md'], ['a/bc.md']), null);
 });
 
 test('overlapping reads each list under its folder', () => {
-  assert.equal(overlapping(['x/*.lua'], ['*.lua']), null);
-  assert.deepEqual(overlapping(['x/*.lua'], ['*.lua'], ['', 'x']), ['x/*.lua', '*.lua']);
-  assert.deepEqual(overlapping(['*.lua'], ['x/*.lua'], ['x', '']), ['*.lua', 'x/*.lua']);
+  assert.equal(overlapping(['x/*.zq'], ['*.zq']), null);
+  assert.deepEqual(overlapping(['x/*.zq'], ['*.zq'], ['', 'x']), ['x/*.zq', '*.zq']);
+  assert.deepEqual(overlapping(['*.zq'], ['x/*.zq'], ['x', '']), ['*.zq', 'x/*.zq']);
 });
 
 test('a ! entry removes what it matches from the entries before it', () => {
@@ -220,17 +220,17 @@ test('matchTarget: * stays in one segment, ** crosses segments', () => {
 });
 
 test('matchTarget: {a,b} picks one alternative, also across segments', () => {
-  assert.equal(at(['example-ui:{Menu,Hud}.*'], 'Hud.Frame'), 'example-ui:{Menu,Hud}.*');
-  assert.equal(at(['example-ui:{Menu,Hud}.*'], 'Shop.Frame'), null);
+  assert.equal(at(['example-ui:{Menu,Hud}.*'], 'Hud.Cell'), 'example-ui:{Menu,Hud}.*');
+  assert.equal(at(['example-ui:{Menu,Hud}.*'], 'Shop.Cell'), null);
   assert.equal(at(['example-ui:Main.{A.B,C}'], 'Main.A.B'), 'example-ui:Main.{A.B,C}');
   assert.equal(at(['example-ui:Main.{A.B,C}'], 'Main.A'), null);
 });
 
 test('matchTarget: the escape character makes a separator or metacharacter literal', () => {
-  assert.equal(at(['example-ui:Main.Frame\\.1'], 'Main.Frame\\.1'), 'example-ui:Main.Frame\\.1');
-  assert.equal(at(['example-ui:Main.Frame\\.1'], 'Main.Frame.1'), null);
-  assert.equal(at(['example-ui:Main.*'], 'Main.Frame\\.1'), 'example-ui:Main.*');
-  assert.equal(at(['example-ui:Main.Frame\\.*'], 'Main.Frame\\.1'), 'example-ui:Main.Frame\\.*');
+  assert.equal(at(['example-ui:Main.Cell\\.1'], 'Main.Cell\\.1'), 'example-ui:Main.Cell\\.1');
+  assert.equal(at(['example-ui:Main.Cell\\.1'], 'Main.Cell.1'), null);
+  assert.equal(at(['example-ui:Main.*'], 'Main.Cell\\.1'), 'example-ui:Main.*');
+  assert.equal(at(['example-ui:Main.Cell\\.*'], 'Main.Cell\\.1'), 'example-ui:Main.Cell\\.*');
   assert.equal(at(['example-ui:Main.a\\*b'], 'Main.a*b'), 'example-ui:Main.a\\*b');
   assert.equal(at(['example-ui:Main.a\\*b'], 'Main.axb'), null);
   assert.equal(at(['example-ui:Main.\\{x\\}'], 'Main.{x}'), 'example-ui:Main.\\{x\\}');
@@ -293,10 +293,10 @@ test('matchTarget: a file target keeps the file rules', () => {
 });
 
 test('a positive entry a later ! entry removes is not the best match', () => {
-  const list = ['src/ui/**', '!src/ui/x/**', 'src/**/*.luau'];
-  assert.equal(bestMatch(list, 'src/ui/x/a.luau'), 'src/**/*.luau');
-  assert.equal(bestMatch(list, 'src/ui/a.luau'), 'src/ui/**');
-  assert.equal(bestMatch(['src/ui/**', '!src/ui/x/**'], 'src/ui/x/a.luau'), null);
+  const list = ['src/ui/**', '!src/ui/x/**', 'src/**/*.zqx'];
+  assert.equal(bestMatch(list, 'src/ui/x/a.zqx'), 'src/**/*.zqx');
+  assert.equal(bestMatch(list, 'src/ui/a.zqx'), 'src/ui/**');
+  assert.equal(bestMatch(['src/ui/**', '!src/ui/x/**'], 'src/ui/x/a.zqx'), null);
 });
 
 test('overlapping reads a folder name as it is spelled, not as glob syntax', () => {

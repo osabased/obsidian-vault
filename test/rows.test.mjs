@@ -238,3 +238,15 @@ test('pick --help describes project', t => {
   const { v } = setup(t);
   assert.match(v.run('pick.mjs', ['--help']).stdout, /^  project      /m);
 });
+
+test('a pick in a domain reached by a path records that domain and the folder', t => {
+  const v = makeVault(t, { presets: ['journal'] });
+  const sid = sessionId();
+  const cwd = v.projects.journal;
+  v.startSession(sid, { cwd });
+  const r = pick(v, sid, comment());
+  assert.equal(r.code, 0, r.stderr);
+  const [row] = rowsIn(v, 'picks');
+  assert.equal(row.domain, 'journal');
+  assert.equal(lower(row.project), lower(cwd));
+});
