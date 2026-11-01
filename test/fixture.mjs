@@ -316,6 +316,17 @@ export const FIXTURE_EXTRACTOR = [
 export const LEDGER_GUIDE ='# Opening a ledger\n\nIn pkg 2, openLedger takes a path and returns the ledger.\nIn pkg 3, openLedger takes an options object with a path field.\n';
 export const LEDGER_REPO = 'openLedger returns the ledger it opened.\n';
 
+// The presets' rules quote proposal a-00000001 from a session no preset registers, as if its transcript were pruned, so
+// lint checks them against the inbox row that recorded the words. One row backs them all, whichever preset writes it.
+function proposedRow(v, note) {
+  const rel = 'raw/inbox/2026-10-01-1a2b3c4d.jsonl';
+  if (v.exists(rel)) return;
+  v.write(rel, `${JSON.stringify({
+    id: 'a-00000001', at: '2026-10-01T10:00:00.000Z', source: 'agent', kind: 'stated', text: 'do the thing', note,
+    session: '1a2b3c4d-0000-4000-8000-000000000001', transcript: null, cwd: null, domain: note.split('/')[0],
+  })}\n`);
+}
+
 // The five shapes a domain can take (design §8 item 3). Each writes its notes and files into v and returns its share of
 // vault.config.json and vault.local.json. Tests address their keys, slugs and ids, so those stay as they are.
 export const PRESETS = {
@@ -330,6 +341,7 @@ export const PRESETS = {
     };
     notes['wiki/glim/topics/code.md'] = topicPage({ domain: 'glim', topic: 'code', summary: "'Code taste for glim files.'", links: Object.keys(notes) });
     for (const [rel, text] of Object.entries(notes)) v.write(rel, text);
+    proposedRow(v, 'glim/always-rule');
     const project = v.project.replace(/\\/g, '/');
     v.write('raw/picks/2026-10-01-91170001.jsonl', `${JSON.stringify({
       id: 'q-91170001', at: '2026-10-01T10:00:00.000Z', source: 'pick', session: '91170001-0000-4000-8000-000000000001', transcript: null, cwd: project,
@@ -420,6 +432,7 @@ export const PRESETS = {
     };
     notes['wiki/commons/topics/words.md'] = topicPage({ domain: 'commons', topic: 'words', summary: "'Word choice everywhere.'", links: Object.keys(notes) });
     for (const [rel, text] of Object.entries(notes)) v.write(rel, text);
-    return { domains: { commons: { title: 'Commons', topics: ['words'], everywhere: true } } };
+    proposedRow(v, 'commons/plain-rule');
+    return { domains: { commons:{ title: 'Commons', topics: ['words'], everywhere: true } } };
   },
 };

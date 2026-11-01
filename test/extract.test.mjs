@@ -11,6 +11,8 @@ const configErrors = async v => (await found(v)).filter(f => f.level === 'error'
 const derivedFiles = v => (v.exists('derived') ? fs.readdirSync(v.at('derived')).sort() : []);
 const hashOf = (v, rel) => sha256(fs.readFileSync(v.at(...rel.split('/'))));
 const extract = (v, ...args) => v.run('extract.mjs', args);
+const allowOf = value => sha256(value).slice(0, 16);
+const REMOVE = "Remove it, or add an allow id to privacy.allow in vault.config.json if it isn't a secret, then extract again:";
 
 // An extractor that returns whatever JSON the file holds after its first byte, which keeps the file from reading as
 // UTF-8, so a test can hand extract.mjs any result.
@@ -83,7 +85,7 @@ test('each failure is a failed line, exits 1 and writes nothing', t => {
     'raw/refs/empty.echo': [echoed({ kind: 'pdf', parts: [] }), 'echo returned no parts'],
     'raw/refs/fall.echo': [echoed({ kind: 'pdf', parts: [page('One.'), { page: 1, text: 'One again.' }] }), 'echo returned page 1 after page 1'],
     'raw/refs/anchor.echo': [echoed({ kind: 'pdf', parts: [page('One.\n[p. 2]\nTwo.')] }), 'echo returned text with a line that reads as an anchor: [p. 2]'],
-    'raw/refs/key.echo': [echoed({ kind: 'pdf', parts: [page('Set api_key = "Zq3xV9pL2mK8wR4t" first.')] }), 'its text holds 1 key-shaped value; run node tools/scan.mjs raw/refs/key.echo'],
+    'raw/refs/key.echo': [echoed({ kind: 'pdf', parts: [page('Set api_key = "Zq3xV9pL2mK8wR4t" first.')] }), `its text holds 1 key- or token-shaped value. ${REMOVE}\nraw/refs/key.echo:8 assignment api_key=Zq…4t · allow ${allowOf('Zq3xV9pL2mK8wR4t')}`],
   };
   const before = derivedFiles(v);
   for (const [rel, [bytes, why]] of Object.entries(cases)) {
@@ -95,11 +97,33 @@ test('each failure is a failed line, exits 1 and writes nothing', t => {
   }
 });
 
+test('a refused text lists each value as scan.mjs lists it once the text is written', t => {
+  const rel = 'raw/refs/keys.echo';
+  const bytes = echoed({ kind: 'pdf', parts: [{ page: 1, text: 'Set api_key = "Zq3xV9pL2mK8wR4t" first.' }, { page: 2, text: 'Then pass Zq3xV9pL2mK8wR4tYb7NcQ1sHf6DgJ0aEu5WiOy.' }] });
+  const v = archive(t);
+  v.write(rel, bytes);
+  const refused = extract(v, rel);
+  assert.equal(refused.code, 1);
+  const [head, ...found] = refused.stdout.trimEnd().split('\n');
+  assert.equal(head, `failed ${rel}: its text holds 2 key- or token-shaped values. Remove them, or add an allow id to privacy.allow in vault.config.json if it isn't a secret, then extract again:`);
+  assert.equal(found.length, 2);
+  assert.match(v.run('scan.mjs', [rel]).stdout, /^skipped /);
+  const ids = found.map(l => l.match(/ · allow ([0-9a-f]{16})$/)[1]);
+  const allowed = archive(t, { privacy: { allow: ids } });
+  allowed.write(rel, bytes);
+  assert.equal(extract(allowed, rel).code, 0);
+  const config = JSON.parse(allowed.read('vault.config.json'));
+  allowed.write('vault.config.json', JSON.stringify({ ...config, privacy: { allow: [] } }));
+  const scan = allowed.run('scan.mjs', [rel]);
+  assert.equal(scan.code, 1);
+  assert.deepEqual(scan.stdout.trimEnd().split('\n').slice(0, -1), found);
+});
+
 test('a key-shaped value privacy.allow lets through is written', t => {
   const v = archive(t);
   const rel = 'raw/refs/key.echo';
   v.write(rel, echoed({ kind: 'pdf', parts: [{ page: 1, text: 'Set api_key = "Zq3xV9pL2mK8wR4t" first.' }] }));
-  const id = sha256('Zq3xV9pL2mK8wR4t').slice(0, 16);
+  const id = allowOf('Zq3xV9pL2mK8wR4t');
   const allowed = archive(t, { privacy: { allow: [id] } });
   allowed.write(rel, fs.readFileSync(v.at(...rel.split('/'))));
   assert.equal(extract(v, rel).code, 1);
