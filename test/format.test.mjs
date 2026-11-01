@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { parse, setField } from '../tools/lib/frontmatter.mjs';
-import { makeVault, ruleNote, pageNote, sessionId, prompt, userTurn, lintFound } from './fixture.mjs';
+import { makeVault, ruleNote, pageNote, sessionId, prompt, userTurn, lintFound, editFile } from './fixture.mjs';
 
 const front = lines => `---\n${lines.join('\n')}\n---\nbody\n`;
 const data = lines => parse(front(lines)).data;
@@ -188,18 +188,49 @@ test("lint asks an author: user page for no topic or summary, and lint --fix lea
 test('applies_to takes globs over a declared namespace, and file matching never sees them', async t => {
   const v = makeVault(t, { config: { namespaces: { 'demo-tree': { separator: '.', escape: '\\' } } } });
   const rules = await v.import('lib/rules.mjs');
-  assert.deepEqual(rules.splitTarget('!demo-tree:Shop.**'), { negated: true, namespace: 'demo-tree', glob: 'Shop.**' });
-  assert.deepEqual(rules.splitTarget('src/**'), { negated: false, namespace: null, glob: 'src/**' });
-  assert.deepEqual(rules.splitTarget('!src/a:b/*.ts'), { negated: true, namespace: null, glob: 'src/a:b/*.ts' });
   const errs = globs => check(rules, ruleNote({ applies_to: globs }));
   assert.deepEqual(errs(['demo-tree:Shop.**', '!demo-tree:Shop.Debug', 'src/**']), []);
   assert.deepEqual(errs(['other-tree:Shop.**']), ["applies_to names namespace other-tree, which vault.config.json doesn't declare under namespaces"]);
-  assert.deepEqual(errs(['file:src/**']), ['applies_to: write a file glob bare, without file:']);
   assert.deepEqual(errs(['demo-tree:Shop.{a']), ['bad glob in applies_to: demo-tree:Shop.{a']);
-  v.write('wiki/demo/rules/both.md', ruleNote({ applies_to: ['src/**', 'demo-tree:Shop.**', '!demo-tree:Shop.Debug'] }));
+  assert.deepEqual(errs(['demo-tree:Shop\\.\\{a']), []);
+  v.write('wiki/demo/rules/both.md', ruleNote({ applies_to: ['src/**', '!src/gen/**', 'demo-tree:Shop.**', '!demo-tree:Shop.Debug'] }));
+  v.write('wiki/demo/rules/tree-only.md', ruleNote({ topic: 'layout', applies_to: ['demo-tree:**'] }));
   v.write('wiki/demo/tree-page.md', pageNote({ applies_to: ['demo-tree:Shop.**', 'docs/**'] }));
-  assert.deepEqual(rules.liveRules()['demo/both'].applies_to, ['src/**']);
-  assert.deepEqual(rules.livePages()['demo/tree-page'].applies_to, ['docs/**']);
+  assert.deepEqual(rules.liveRules()['demo/both'].applies_to, ['src/**', '!src/gen/**', 'demo-tree:Shop.**', '!demo-tree:Shop.Debug']);
+  assert.deepEqual(rules.livePages()['demo/tree-page'].applies_to, ['demo-tree:Shop.**', 'docs/**']);
+  const sid = sessionId();
+  const gated = rel => editFile(v, sid, rel)?.hookSpecificOutput?.permissionDecisionReason ?? '';
+  const first = gated('src/a.lua');
+  assert.match(first, /demo\/both/);
+  assert.doesNotMatch(first, /demo\/tree-only/);
+  assert.equal(gated('src/gen/b.lua'), '', 'the ! file entry still excludes');
+});
+
+test('a file glob is the file namespace, with or without file:, and a drive letter is no namespace', async t => {
+  const v = makeVault(t, { config: { namespaces: { 'demo-tree': { separator: '.', escape: '\\' } } } });
+  const rules = await v.import('lib/rules.mjs');
+  const errs = globs => check(rules, ruleNote({ applies_to: globs }));
+  assert.deepEqual(errs(['file:src/**']), []);
+  assert.deepEqual(errs(['C:/x/**', 'c:/y']), []);
+  v.write('wiki/demo/rules/prefixed.md', ruleNote({ applies_to: ['file:src/**', '!file:src/gen/**'] }));
+  const sid = sessionId();
+  assert.match(editFile(v, sid, 'src/a.lua')?.hookSpecificOutput?.permissionDecisionReason ?? '', /demo\/prefixed/);
+  assert.equal(editFile(v, sid, 'src/gen/b.lua'), null);
+});
+
+test('lint reports an undeclared namespace and an exclusion that comes first', async t => {
+  const v = makeVault(t, { config: { namespaces: { 'demo-tree': { separator: '.', escape: '\\' } } } });
+  const rules = await v.import('lib/rules.mjs');
+  const errs = globs => check(rules, ruleNote({ applies_to: globs }));
+  assert.deepEqual(errs(['!src/gen/**', 'src/**']), ['exclusion in applies_to comes before any entry that adds files: !src/gen/**']);
+  assert.deepEqual(errs(['src/**', '!demo-tree:Shop.Debug', 'demo-tree:Shop.**']), ['exclusion in applies_to comes before any entry that adds demo-tree targets: !demo-tree:Shop.Debug']);
+  v.write('wiki/demo/rules/ghost.md', ruleNote({ applies_to: ['ghost-tree:A.**'] }));
+  v.write('wiki/demo/rules/first.md', ruleNote({ topic: 'layout', applies_to: ['!src/gen/**', 'src/**'] }));
+  const found = (await v.import('lib/lint.mjs')).lint().filter(f => f.level === 'error' && f.file.startsWith('wiki/demo/rules/')).map(f => [f.file, f.msg]);
+  assert.deepEqual(found, [
+    ['wiki/demo/rules/first.md', 'exclusion in applies_to comes before any entry that adds files: !src/gen/**'],
+    ['wiki/demo/rules/ghost.md', "applies_to names namespace ghost-tree, which vault.config.json doesn't declare under namespaces"],
+  ]);
 });
 
 test('lintConfig checks namespaces and editTools, naming the key', async t => {
@@ -213,10 +244,13 @@ test('lintConfig checks namespaces and editTools, naming the key', async t => {
   assert.deepEqual(await lintOf({}), []);
   assert.deepEqual(await lintOf({ namespaces: ns, editTools: { mcp__demo__set_property: { namespace: 'demo-tree', path: 'tool_input.path', after: 'tool_input.value' } } }), []);
   assert.deepEqual(await lintOf({ namespaces: 'x' }), ['namespaces must be an object of { separator, escape } by namespace name']);
-  assert.deepEqual(await lintOf({ namespaces: { Tree: { separator: '.', escape: '\\' }, file: { separator: '/', escape: '\\' } } }), [
-    'namespaces.Tree: a namespace name is lowercase-kebab-case',
+  assert.deepEqual(await lintOf({ namespaces: { Tree: { separator: '.', escape: '\\' }, t: { separator: '.', escape: '\\' }, 'café': { separator: '.', escape: '\\' }, file: { separator: '/', escape: '\\' } } }), [
+    'namespaces.Tree: a namespace name is two or more lowercase letters, digits, - or _, starting with a letter',
+    'namespaces.t: a namespace name is two or more lowercase letters, digits, - or _, starting with a letter',
+    'namespaces.café: a namespace name is two or more lowercase letters, digits, - or _, starting with a letter',
     'namespaces.file: file is the namespace of bare globs; pick another name',
   ]);
+  assert.deepEqual(await lintOf({ namespaces: { demo_tree: { separator: '.', escape: '\\' } } }), []);
   assert.deepEqual(await lintOf({ namespaces: { 'demo-tree': { separator: '', escape: '\\\\' } } }), [
     'namespaces.demo-tree.separator must be a non-empty string',
     'namespaces.demo-tree.escape must be one character',

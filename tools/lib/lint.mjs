@@ -4,9 +4,10 @@ import { isBuiltin } from 'node:module';
 import { config, vaultPath, plural, today, datedFiles, filesIn, pickRows, rewriteText, lf, readJson } from './vault.mjs';
 import {
   loadNotes, noteErrors, ruleText, ruleTextParts, liveRules, knownDomain, alwaysSize, isUrl, validDay, normTopic, topicNotes, rawFile, toKey, resolver, linksUnder, noteLinks, byTopic, isTopicPage, isSourcePage, PAGE_KINDS, joinList,
-  hasSection, footnotes, youSaid, linkedKeys, clip, isResearch, citedSources, evidenceQuotes, keyOf, kindFolder, kindLabel, linkTo, parseNote, noteLinkSpans, maxChars, KEBAB,
+  hasSection, footnotes, youSaid, linkedKeys, clip, isResearch, citedSources, evidenceQuotes, keyOf, kindFolder, kindLabel, linkTo, parseNote, noteLinkSpans, maxChars,
 } from './rules.mjs';
 import { parse, setField } from './frontmatter.mjs';
+import { NAMESPACE_NAME } from './glob.mjs';
 import { build } from './build.mjs';
 import { readJsonSafe, toPosix } from './vault.mjs';
 import { transcriptFor } from './sessions.mjs';
@@ -208,7 +209,7 @@ export function lintConfig(add) {
   else {
     for (const [name, ns] of Object.entries(namespaces)) {
       const at = `namespaces.${name}`;
-      if (!KEBAB.test(name)) bad(`${at}: a namespace name is lowercase-kebab-case`);
+      if (!NAMESPACE_NAME.test(name)) bad(`${at}: a namespace name is two or more lowercase letters, digits, - or _, starting with a letter`);
       else if (name === 'file') bad(`${at}: file is the namespace of bare globs; pick another name`);
       if (!isMap(ns)) {
         bad(`${at} must be an object with separator and escape`);
