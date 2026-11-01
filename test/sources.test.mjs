@@ -4,9 +4,8 @@ import path from 'node:path';
 import { execFileSync } from 'node:child_process';
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { makeVault, cleanEnv, ruleNote, pageNote as page, sourcePage, userTurn, sessionId } from './fixture.mjs';
+import { makeVault, cleanEnv, ruleNote, pageNote as page, sourcePage, userTurn, sessionId, sectionOf } from './fixture.mjs';
 
-const sectionOf = (out, title) => out.trimEnd().split('\n\n').find(b => b.startsWith(`${title}\n`))?.split('\n').slice(1);
 
 test('review sources lists the files in raw/refs/ no source page names, and status lists them too', t => {
   const v = makeVault(t);

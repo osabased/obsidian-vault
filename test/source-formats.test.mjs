@@ -1,11 +1,9 @@
 import fs from 'node:fs';
 import { execFileSync } from 'node:child_process';
-import { createHash } from 'node:crypto';
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { makeVault, pageNote as page, sourcePage, denied, sessionId, editFile as edit } from './fixture.mjs';
+import { makeVault, pageNote as page, sourcePage, denied, sessionId, editFile as edit, sha256, withFields } from './fixture.mjs';
 
-const sha = data => createHash('sha256').update(data).digest('hex');
 const found = async v => (await v.import('lib/lint.mjs')).lint();
 const msgsFor = async (v, prefix) => (await found(v)).filter(f => f.file.startsWith(prefix)).map(f => f.msg).sort();
 const footnoteMsgs = async v => (await found(v)).filter(f => f.file.startsWith('wiki/') && /\[\^/.test(f.msg)).map(f => f.msg).sort();
@@ -13,19 +11,19 @@ const cite = (...targets) => page({
   kind: 'concept',
   body: [targets.map((_, i) => `Fact ${i + 1}.[^${i + 1}]`).join(' '), '', ...targets.map((t, i) => `[^${i + 1}]: ${t}`)],
 });
-const saved = (fields, body = 'The page.\n') => `---\n${Object.entries(fields).map(([k, val]) => `${k}: ${val}`).join('\n')}\n---\n${body}`;
-const derived = (fields, body) => `---\n${Object.entries(fields).map(([k, val]) => `${k}: ${val}`).join('\n')}\n---\n${body}`;
+const saved = (fields, body = 'The page.\n') => withFields(fields, body);
+const derived = withFields;
 
 test('a saved source with well-formed fields has no findings, and every field is checked when it is present', async t => {
   const v = makeVault(t);
   const body = 'The page.\n';
-  v.write('raw/refs/good.md', saved({ url: 'https://example.com/a', fetched: '2026-10-01', etag: '"abc"', last_modified: 'Tue, 15 Sep 2026 08:12:31 GMT', sha256: sha(body) }, body));
+  v.write('raw/refs/good.md', saved({ url: 'https://example.com/a', fetched: '2026-10-01', etag: '"abc"', last_modified: 'Tue, 15 Sep 2026 08:12:31 GMT', sha256: sha256(body) }, body));
   v.write('raw/refs/bare.md', saved({ url: 'https://example.com/b', fetched: '2026-10-01' }));
   assert.deepEqual(await msgsFor(v, 'raw/refs/'), []);
 
   v.write('raw/refs/bad.md', saved({ url: 'example.com/a', fetched: 'yesterday', etag: "''", last_modified: 'soon', sha256: 'abc123' }));
   v.write('raw/refs/nofetch.md', saved({ url: 'https://example.com/c' }));
-  v.write('raw/refs/changed.md', saved({ url: 'https://example.com/d', fetched: '2026-10-01', sha256: sha('another body\n') }));
+  v.write('raw/refs/changed.md', saved({ url: 'https://example.com/d', fetched: '2026-10-01', sha256: sha256('another body\n') }));
   const all = (await found(v)).filter(f => f.file.startsWith('raw/refs/'));
   const of = file => all.filter(f => f.file === file).map(f => f.msg).sort();
   assert.deepEqual(of('raw/refs/bad.md'), [
@@ -42,7 +40,7 @@ test('a saved source with well-formed fields has no findings, and every field is
 
 test('the sha256 of a saved source covers its body whatever the line endings', async t => {
   const v = makeVault(t);
-  v.write('raw/refs/crlf.md', saved({ url: 'https://example.com/a', fetched: '2026-10-01', sha256: sha('One.\nTwo.\n') }, 'One.\r\nTwo.\r\n').replace(/---\n/g, '---\r\n'));
+  v.write('raw/refs/crlf.md', saved({ url: 'https://example.com/a', fetched: '2026-10-01', sha256: sha256('One.\nTwo.\n') }, 'One.\r\nTwo.\r\n').replace(/---\n/g, '---\r\n'));
   assert.deepEqual(await msgsFor(v, 'raw/refs/'), []);
 });
 
@@ -105,8 +103,8 @@ test('a page or time anchor must exist in the derived text of its source, and a 
   v.write('raw/refs/doc.pdf', pdf);
   v.write('raw/refs/talk.mp4', mp4);
   v.write('raw/refs/other.pdf', 'other bytes');
-  v.write(`derived/${sha(pdf)}.md`, derived({ kind: 'pdf', extractor: 'glim-extract', extractor_version: '1.0', source: 'raw/refs/doc.pdf' }, '[p. 1]\nFirst.\n[p. 2]\nSecond.\n'));
-  v.write(`derived/${sha(mp4)}.md`, derived({ kind: 'video', extractor: 'glim-transcribe', extractor_version: '2', source: 'raw/refs/talk.mp4' }, '[t=00:00:05]\nHello.\n[t=00:12:31]\nWorld.\n'));
+  v.write(`derived/${sha256(pdf)}.md`, derived({ kind: 'pdf', extractor: 'glim-extract', extractor_version: '1.0', source: 'raw/refs/doc.pdf' }, '[p. 1]\nFirst.\n[p. 2]\nSecond.\n'));
+  v.write(`derived/${sha256(mp4)}.md`, derived({ kind: 'video', extractor: 'glim-transcribe', extractor_version: '2', source: 'raw/refs/talk.mp4' }, '[t=00:00:05]\nHello.\n[t=00:12:31]\nWorld.\n'));
   v.write('wiki/glim/anchors.md', cite(
     'raw/refs/doc.pdf#page=2', 'raw/refs/doc.pdf#page=7', 'raw/refs/talk.mp4#t=00:12:31', 'raw/refs/talk.mp4#t=751', 'raw/refs/talk.mp4#t=00:12:31,00:12:45',
     'raw/refs/talk.mp4#t=00:13:00', 'raw/refs/other.pdf#page=99',
@@ -123,30 +121,30 @@ test('derived text is named by the hash of its binary, with a valid kind, its ex
   const pdf = 'pdf bytes';
   v.write('raw/refs/doc.pdf', pdf);
   const meta = { kind: 'pdf', extractor: 'glim-extract', extractor_version: '1.0', source: 'raw/refs/doc.pdf' };
-  v.write(`derived/${sha(pdf)}.md`, derived(meta, '[p. 1]\nA.\n[t=00:00:05]\nB.\n'));
+  v.write(`derived/${sha256(pdf)}.md`, derived(meta, '[p. 1]\nA.\n[t=00:00:05]\nB.\n'));
   assert.deepEqual(await msgsFor(v, 'derived/'), []);
 
-  const stale = sha('older bytes');
+  const stale = sha256('older bytes');
   v.write(`derived/${stale}.md`, derived(meta, 'x'));
   v.write('derived/notes.md', derived(meta, 'x'));
-  v.write(`derived/${sha('gone')}.md`, derived({ ...meta, source: 'raw/refs/gone.pdf' }, 'x'));
-  v.write(`derived/${sha('kinds')}.md`, derived({ kind: 'book', source: 'raw/refs/doc.pdf' }, 'x'));
-  v.write(`derived/${sha('plain')}.md`, 'just text\n');
-  v.write(`derived/${sha('anchors')}.md`, derived({ ...meta, source: 'raw/refs/doc.pdf' }, '[p.3]\n[p. 0]\n[t=0:12:31]\n[t=00:61:00]\n[p. 4]\n[t=00:00:09]\n'));
+  v.write(`derived/${sha256('gone')}.md`, derived({ ...meta, source: 'raw/refs/gone.pdf' }, 'x'));
+  v.write(`derived/${sha256('kinds')}.md`, derived({ kind: 'book', source: 'raw/refs/doc.pdf' }, 'x'));
+  v.write(`derived/${sha256('plain')}.md`, 'just text\n');
+  v.write(`derived/${sha256('anchors')}.md`, derived({ ...meta, source: 'raw/refs/doc.pdf' }, '[p.3]\n[p. 0]\n[t=0:12:31]\n[t=00:61:00]\n[p. 4]\n[t=00:00:09]\n'));
   const all = (await found(v)).filter(f => f.file.startsWith('derived/'));
   const of = name => all.filter(f => f.file === `derived/${name}.md`).map(f => f.msg).sort();
   assert.deepEqual(of(stale), [`source raw/refs/doc.pdf has changed: its SHA-256 isn't ${stale}. Extract the text again for the new file`]);
   assert.deepEqual(of('notes'), ['named notes.md. Derived text is derived/<sha256>.md, the SHA-256 of the file it was taken from']);
-  assert.deepEqual(of(sha('gone')), ["source raw/refs/gone.pdf is gone, so the text can't be checked against it"]);
-  assert.deepEqual(of(sha('kinds')), [
+  assert.deepEqual(of(sha256('gone')), ["source raw/refs/gone.pdf is gone, so the text can't be checked against it"]);
+  assert.deepEqual(of(sha256('kinds')), [
     'kind must be pdf, video, audio or image',
     'no extractor. Name the program that made the text',
     'no extractor_version. Give the version of the program that made the text',
-    `source raw/refs/doc.pdf has changed: its SHA-256 isn't ${sha('kinds')}. Extract the text again for the new file`,
+    `source raw/refs/doc.pdf has changed: its SHA-256 isn't ${sha256('kinds')}. Extract the text again for the new file`,
   ].sort());
-  assert.deepEqual(of(sha('plain')), ['no frontmatter. Derived text starts with kind, extractor, extractor_version and source']);
-  assert.deepEqual(of(sha('anchors')), [
-    `source raw/refs/doc.pdf has changed: its SHA-256 isn't ${sha('anchors')}. Extract the text again for the new file`,
+  assert.deepEqual(of(sha256('plain')), ['no frontmatter. Derived text starts with kind, extractor, extractor_version and source']);
+  assert.deepEqual(of(sha256('anchors')), [
+    `source raw/refs/doc.pdf has changed: its SHA-256 isn't ${sha256('anchors')}. Extract the text again for the new file`,
     "anchor [p. 0] isn't [p. N] or [t=hh:mm:ss]",
     "anchor [p.3] isn't [p. N] or [t=hh:mm:ss]",
     "anchor [t=00:61:00] isn't [p. N] or [t=hh:mm:ss]",
@@ -158,11 +156,11 @@ test('derived text is named by the hash of its binary, with a valid kind, its ex
 test('the vault guard refuses edits to derived/, which extraction writes', t => {
   const v = makeVault(t);
   const sid = sessionId();
-  v.write(`derived/${sha('x')}.md`, 'x');
+  v.write(`derived/${sha256('x')}.md`, 'x');
   const guard = rel => denied(edit(v, sid, '', { abs: v.at(...rel.split('/')) }));
   const why = 'derived/ is written by extraction, not edited by hand. A better extraction replaces the file.';
-  assert.equal(guard(`derived/${sha('x')}.md`), why);
-  assert.equal(guard(`derived/${sha('new')}.md`), why);
+  assert.equal(guard(`derived/${sha256('x')}.md`), why);
+  assert.equal(guard(`derived/${sha256('new')}.md`), why);
   assert.equal(guard('DERIVED/x.md'), why);
   assert.equal(guard('derived.md'), null);
 });
@@ -174,7 +172,7 @@ test('a folder under raw/refs/ with a source.md is a source, and its manifest is
   const lib = 'int main() {}\n';
   v.write('raw/refs/lib/src/main.c', lib);
   v.write('raw/refs/lib/README', 'Readme.\n');
-  v.write('raw/refs/lib/source.md', manifest({ url: 'https://example.com/glim/lib', fetched: '2026-10-01', sha256: [`${sha(lib)}  src/main.c`, `${sha('Readme.\n')}  ./README`] }));
+  v.write('raw/refs/lib/source.md', manifest({ url: 'https://example.com/glim/lib', fetched: '2026-10-01', sha256: [`${sha256(lib)}  src/main.c`, `${sha256('Readme.\n')}  ./README`] }));
   v.write('raw/refs/pinned/a.txt', 'a');
   v.write('raw/refs/pinned/source.md', manifest({ url: 'https://example.com/glim/pinned', commit: 'a1b2c3d4e5f6' }));
   v.write('wiki/glim/source-lib.md', sourcePage({ source: 'raw/refs/lib' }));
@@ -193,9 +191,9 @@ test('a bundle manifest that pins nothing, lists a bad line or a hash that does 
   v.write('raw/refs/nocommit/source.md', manifest({ commit: 'a1b2c3d4e5f6' }));
   v.write('raw/refs/hashes/a.txt', 'a');
   v.write('raw/refs/hashes/b.txt', 'b');
-  v.write('raw/refs/hashes/source.md', manifest({ url: 'https://example.com/glim/hashes', sha256: [`${sha('a')}  a.txt`, `${sha('not b')}  b.txt`, `${sha('c')}  c.txt`, 'abc  d.txt', `${sha('a')} a.txt`] }));
+  v.write('raw/refs/hashes/source.md', manifest({ url: 'https://example.com/glim/hashes', sha256: [`${sha256('a')}  a.txt`, `${sha256('not b')}  b.txt`, `${sha256('c')}  c.txt`, 'abc  d.txt', `${sha256('a')} a.txt`] }));
   v.write('raw/refs/scalar/a.txt', 'a');
-  v.write('raw/refs/scalar/source.md', manifest({ url: 'https://example.com/glim/scalar', sha256: sha('a') }));
+  v.write('raw/refs/scalar/source.md', manifest({ url: 'https://example.com/glim/scalar', sha256: sha256('a') }));
   const all = (await found(v)).filter(f => f.file.startsWith('raw/refs/'));
   const of = dir => all.filter(f => f.file === `raw/refs/${dir}/source.md`).map(f => f.msg).sort();
   assert.deepEqual(of('loose'), ["no commit or sha256. A bundle's source.md pins the folder with a commit, or a sha256 line for each file"]);
@@ -203,7 +201,7 @@ test('a bundle manifest that pins nothing, lists a bad line or a hash that does 
   assert.deepEqual(of('hashes'), [
     "b.txt doesn't match its sha256 line in source.md",
     "sha256 line \"abc  d.txt\" isn't '<64 hex>  <path in the folder>', as sha256sum writes it",
-    `sha256 line "${sha('a')} a.txt" isn't '<64 hex>  <path in the folder>', as sha256sum writes it`,
+    `sha256 line "${sha256('a')} a.txt" isn't '<64 hex>  <path in the folder>', as sha256sum writes it`,
     'sha256 lists c.txt, which isn\'t a file in the folder',
   ].sort());
   assert.deepEqual(of('scalar'), ["sha256 must be a list of '<64 hex>  <path>' lines, as sha256sum writes them"]);
@@ -252,7 +250,7 @@ test('a footnote with a locator, or inside a bundle, cites the source page of it
 
 test('a sha256 line YAML reads as a key and value is warned about, and lint checks the rest', async t => {
   const v = makeVault(t);
-  const line = `${sha('a')}  Notes: draft.txt`;
+  const line = `${sha256('a')}  Notes: draft.txt`;
   v.write('raw/refs/lib/a.txt', 'a');
   v.write('raw/refs/lib/source.md', `---\nurl: https://example.com/glim/lib\nsha256:\n  - ${line}\n  - true\n---\n`);
   assert.deepEqual(await msgsFor(v, 'raw/refs/lib/'), [
@@ -276,9 +274,9 @@ test("a source lint can't read is skipped, not reported as changed", async t => 
   if (process.getuid?.() === 0) return t.skip('root reads any file');
   const v = makeVault(t);
   v.write('raw/refs/doc.txt', 'hello source');
-  v.write(`derived/${sha('hello source')}.md`, derived({ kind: 'pdf', extractor: 'x', extractor_version: "'1'", source: 'raw/refs/doc.txt' }, '[p. 1] hi\n'));
+  v.write(`derived/${sha256('hello source')}.md`, derived({ kind: 'pdf', extractor: 'x', extractor_version: "'1'", source: 'raw/refs/doc.txt' }, '[p. 1] hi\n'));
   v.write('raw/refs/lib/a.txt', 'a');
-  v.write('raw/refs/lib/source.md', `---\nurl: https://example.com/glim/lib\nsha256:\n  - '${sha('a')}  a.txt'\n---\n`);
+  v.write('raw/refs/lib/source.md', `---\nurl: https://example.com/glim/lib\nsha256:\n  - '${sha256('a')}  a.txt'\n---\n`);
   unreadable(t, v.at('raw', 'refs', 'doc.txt'));
   unreadable(t, v.at('raw', 'refs', 'lib', 'a.txt'));
   assert.deepEqual((await found(v)).filter(f => /has changed|doesn't match/.test(f.msg)), []);
