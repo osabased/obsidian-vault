@@ -321,7 +321,7 @@ function lintCompiled(notes, add) {
       const msg = {
         missing: `not compiled; run ${run}`,
         stale: r.changed ? `stale: ${plural(r.changed, 'rule')} changed since it was compiled; run ${run}` : `stale: its wording changed since it was compiled; run ${run}`,
-        edited: 'edited by hand since it was compiled',
+        edited: `edited by hand since it was compiled; move those edits out of the section, or delete it, then run ${run}`,
         refused: r.refused,
       }[r.state];
       if (msg) add('warn', r.path, msg);

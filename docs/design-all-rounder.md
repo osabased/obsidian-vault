@@ -1,6 +1,6 @@
 # All-rounder vault: design draft
 
-Status: draft, 2026-11-01. Phases 0 to 5 are built and merged into main: phase 0 (checks), phase 1 (format), phase 2 (delivery), phase 3 (neutral fixtures), phase 4 (knowledge mechanisms) with its perf pass, and phase 5 (media and tool triggers). Phases 3, 4 and 5 were each reviewed and fixed before merging. Phase 6 (second adapter) is designed in §8 item 6, and its first two steps, the identifier test and the move behind the Claude Code adapter, are built on `phase-6-delivery`.
+Status: draft, 2026-11-01. Phases 0 to 5 are built and merged into main: phase 0 (checks), phase 1 (format), phase 2 (delivery), phase 3 (neutral fixtures), phase 4 (knowledge mechanisms) with its perf pass, and phase 5 (media and tool triggers). Phases 3, 4 and 5 were each reviewed and fixed before merging. Phase 6 (second adapter, §8 item 6) is built on `phase-6-delivery`: the identifier test, the move behind the Claude Code adapter, the Codex adapter, compiled files and the provider tests. It is not yet reviewed.
 
 Scope: structure, design and architecture only. This design adds no knowledge to the vault. It names no domain, platform, package ecosystem or site as built in. Where it needs an example, it uses a placeholder.
 
@@ -940,7 +940,7 @@ The phases build mechanism only. Adding real knowledge and taste is the user's c
      - `source-formats.test.mjs`: an anchor inside a line isn't an anchor, so a footnote's `#page=` needing it is warned.
      - The perf group gains the AskUserQuestion test.
    - **Done** when the phase 5 check in §9 passes: the suite passes with 0 `todo` tests, lint reports 0 errors, the grep finds nothing, and the perf group passes, AskUserQuestion test included.
-6. **Second adapter.** Designed, not built. Phase 6 splits `tools/hooks/` into the neutral core and `tools/adapters/claude-code/` (6.7a–c). It adds `tools/adapters/codex/` (6.7e) and compiled files (6.7f), and builds the transcript provider test (6.7c). The split is mechanical: the Claude Code adapter turns today's hook input into core events and the core's results back into today's output, so the existing suite pins the behavior through `v.hook` unchanged. Phases 4 and 5 land first and are cited by their item bullets. The line numbers below are this branch's, from before phases 4 and 5, so the builder runs the inventory grep (Neutral core) again before the move.
+6. **Second adapter.** Built on `phase-6-delivery`, not yet reviewed. Phase 6 splits `tools/hooks/` into the neutral core and `tools/adapters/claude-code/` (6.7a–c). It adds `tools/adapters/codex/` (6.7e) and compiled files (6.7f), and builds the transcript provider test (6.7c). The split is mechanical: the Claude Code adapter turns today's hook input into core events and the core's results back into today's output, so the existing suite pins the behavior through `v.hook` unchanged. Phases 4 and 5 land first and are cited by their item bullets. The line numbers below are this branch's, from before phases 4 and 5, so the builder runs the inventory grep (Neutral core) again before the move.
    - **What this settles in §6.**
      - `preTool` carries `after` as a function and no `before` (6.7a);
      - Codex's Stop continues the turn through `decision: "block"`, not `additionalContext` (6.7e);
@@ -1074,21 +1074,22 @@ The phases build mechanism only. Adding real knowledge and taste is the user's c
      - `registration(vaultRoot)`: `{ where, text }`, which `tools/agents.mjs` prints.
    - **Registry** (`tools/lib/agents.mjs`).
      - `agent(name)` loads `tools/adapters/<name>/adapter.mjs` through `createRequire`, as `extension()` loads extensions (`ext.mjs:15-20`). It throws on an unknown name.
-     - `config().agents` lists the adapters that lint checks tool names against. `DEFAULTS` (`vault.mjs:20-28`) gains `agents: ['claude-code']`. Lint errors on a name with no adapter folder.
+     - `config().agents` lists the adapters that lint checks tool names against. `config()` sets `agents` to `['claude-code']` when it is not a list; `DEFAULTS` doesn't hold it, since `DEFAULTS` merges objects. Lint errors on a name with no adapter folder.
      - `currentSession(env)` returns `{ agent, id }` for the first adapter, in the order of `agents`, whose `sessionVar` is set, or null.
      - `touchSession(event, hits, agentName)` writes `agent` into the registry entry. An entry with no `agent`, which is every entry today, reads as `claude-code`.
      - `typedFor(entry)` calls that adapter's `typedMessages(entry.transcript)`. It replaces the call at `propose.mjs:146`. `transcriptFor` (`sessions.mjs:196-200`) returns the entry, so lint's `typedIn` (`lint.mjs:48-51`) calls `typedFor` too.
      - `ownEntry` compares with `currentSession()`. `lint.mjs:24` and `log.mjs:55` take the id from it.
-     - `propose.mjs` and `pick.mjs` make the session id argument optional. With none, they use `currentSession()`, and with neither they refuse. The refusal at `propose.mjs:85` becomes: "Pass the session id from the taste vault's note at session start, or run this from the agent's own shell, which sets its session id." (open question).
+     - `propose.mjs` and `pick.mjs` make the session id argument optional. With none, they use `currentSession()`, and with neither they refuse. `pick.mjs show` still takes the session id. The refusal at `propose.mjs:85` becomes: "Pass the session id from the taste vault's note at session start, or run this from the agent's own shell, which sets its session id." (open question).
    - **The Claude Code adapter.** Code moves here, and none of it is rewritten.
      - `events`:
-       - `session_id`, `agent_id`, `cwd` (through `cwdOf`) and `transcript_path` become `session`, `agent`, `cwd` and `transcript`;
+       - `session_id`, `agent_id`, `cwd` and `transcript_path` become `session`, `agent`, `cwd` and `transcript`. Events carry the raw `cwd`; handlers apply `cwdOf` as before;
        - SessionStart's `source: startup` becomes `reason: 'new'`, and its other values are kept;
        - `prompt` becomes `text`;
-       - a `FILE_TOOLS` call gets `target` from `toolFile`, `added` from `newText`'s file branches, and `after` from `textAfter`;
-       - any other tool gets `args: tool_input` and no `target`.
+       - a `FILE_TOOLS` call gets `target` from `toolFile` and `after` from `textAfter`;
+       - any other tool gets `args: tool_input` and no `target`;
+       - the adapter sets `added` for every tool from its new-text field, so trigger behavior is byte-identical.
      - `output` writes today's JSON byte for byte, Stop's `additionalContext` included.
-     - `sends(tool)` tests `^(?:EDIT_HOOK_MATCHER)$`, and `hooks/hooks.json:11` still equals the matcher (`plugin.test.mjs:30-33`).
+     - `sends(tool)` tests `^(?:EDIT_HOOK_MATCHER)$`, and `hooks/hooks.json:11` still equals the matcher (`plugin.test.mjs:30-33`). The adapter exports `matcher`, and `plugin.test.mjs:7` imports it from there.
      - `sessionVar` is `CLAUDE_CODE_SESSION_ID`, and `disabled` checks `CLAUDE_CODE_SAFE_MODE === '1'`.
      - `transcript.mjs` is `quotes.mjs:5-28` as it stands.
      - `identifiers`: `CLAUDE_CODE_`, `CLAUDE_PLUGIN_`, `hookSpecificOutput`, `permissionDecision`, `additionalContext`, `AskUserQuestion`, `MultiEdit`, `NotebookEdit`, `toolUseResult`, `isCompactSummary`, `system-reminder`, `session_id`, `agent_id`, `tool_name`, `transcript_path` and `Claude Code`.
@@ -1126,11 +1127,12 @@ The phases build mechanism only. Adding real knowledge and taste is the user's c
      - **`patch.mjs`.** `parsePatch(text)` returns `[{ op, path, moveTo?, lines?, chunks? }]`.
        - It follows the grammar in `parser.rs:4-22`, with the markers at `parser.rs:37-45`.
        - It allows whitespace around the markers, as Codex does (`parser.rs:24-25`), and skips an `*** Environment ID:` line.
+       - A patch wrapped in a `<<EOF` heredoc is read as Codex's lenient mode reads it.
        - Paths are from `cwd`, or absolute (`parser.rs:85-90`).
 
        Each file becomes one event:
        - **Add File:** `added` is the content, the `+` lines without their `+`, and `after` returns the content.
-       - **Update File:** `added` is the `+` lines joined with LF. `after(before)` applies each chunk in order after the one before it, at its `@@` context line when it has one. It looks for the chunk's ` ` and `-` lines exactly, then ignoring trailing whitespace, then ignoring both ends, as `seek_sequence.rs:1-6` does. It returns null when a chunk isn't found.
+       - **Update File:** `added` is the `+` lines joined with LF. `after(before)` applies each chunk in order after the one before it, at its `@@` context line when it has one. It looks for the chunk's ` ` and `-` lines exactly, then ignoring trailing whitespace, then ignoring both ends, then with Unicode dashes, quotes and spaces read as ASCII, as `seek_sequence.rs` does. It returns null when a chunk isn't found.
        - **Move to:** a second event on the new path, with the same `added` and `after`.
        - **Delete File:** `added` is `''` and `after` returns `''`. So `vaultGuard` refuses deleting what it guards, `noteGuard` refuses a page cut to nothing once, and a user's page is refused (`edit.mjs:97`).
        - A patch that doesn't parse throws. That is a loud hook failure, and Codex's own parser refuses the same patch.
@@ -1138,14 +1140,14 @@ The phases build mechanism only. Adding real knowledge and taste is the user's c
        - Context from start, prompt and subagentStart becomes `{ hookSpecificOutput: { hookEventName, additionalContext } }`.
        - Denies from a patch's events are joined with a blank line into one PreToolUse deny. Every file's markers were written as it was checked, so the same patch sent again passes.
        - Stop's context becomes `{ "decision": "block", "reason": <context> }`.
-         - The adapter marks `continued|<shortHash(context.trim())>` for the session.
+         - The adapter marks `continued|<shortHash(context.trim())>` under the `turns` marker kind, which `output()` reaches through the session kept from `events()`.
          - The prompt event and the transcript provider drop a text whose hash is marked. So the vault's own text never counts as the user's words.
          - The gate markers keep it to one continuation per file, as for Claude Code (6.3d).
      - **`transcript.mjs`.** `typedMessages(file)` reads the rollout JSONL.
        - It keeps a line with `type: 'response_item'`, `payload.type: 'message'` and `payload.role: 'user'` whose `payload.internal_chat_message_metadata_passthrough.content_item_kinds` is exactly `['user.text']`. Its texts are the `text` of each `input_text` item in `payload.content`.
        - It drops a text that starts `<send_user_message_question_reply`, the reply to Codex's question tool. The answer's format isn't known, and the options in it are the agent's (§7).
        - It drops a text whose hash is marked `continued`.
-       - It returns null when the file can't be read, and when a user message has no `content_item_kinds`. So a format change refuses quotes, rather than letting injected text count as the user's.
+       - It returns null when the file can't be read, has no `session_meta`, or holds a user message with no `content_item_kinds`. So a format change refuses quotes, rather than letting injected text count as the user's.
      - **Other exports.**
        - `fileTools` is `['apply_patch']`, and `sends` tests `^(?:apply_patch|mcp__.*)$`.
        - `sessionVar` is `CODEX_THREAD_ID`.
@@ -1174,7 +1176,7 @@ The phases build mechanism only. Adding real knowledge and taste is the user's c
      - **The Codex format** is a marked section of `<root>/AGENTS.md`:
 
        ```md
-       <!-- taste-vault: begin 3f9c01ab77e0d2c1 · written by node tools/compile.mjs; edits inside are overwritten -->
+       <!-- taste-vault: begin 3f9c01ab77e0d2c1 · written by node tools/compile.mjs, which refuses to rewrite it once it is edited by hand -->
        ## Taste rules
 
        From the user's taste vault. Follow them in this project.
@@ -1194,9 +1196,10 @@ The phases build mechanism only. Adding real knowledge and taste is the user's c
        - The hash is `shortHash` of the text between the two markers.
        - The rest of the file is kept byte for byte. A new file holds the section alone.
        - The section takes the file's line endings: CRLF when the file already has any.
-       - It fits `compile.maxBytes` (16,384 by default, half of Codex's 32 KiB for all AGENTS.md files together) through `fitContext`, whose overflow line names what it left out. The cap counts bytes, so the format cuts again until the section fits.
+       - It fits `compile.maxBytes` (16,384 by default, half of Codex's 32 KiB for all AGENTS.md files together) through `fitContext`, whose overflow line names what it left out. The cap counts bytes, so the format cuts again until the section fits. The line names no file, since other machines and repos read the section without the vault: `(Left out to stay within 16384 bytes: 3 rules.)`.
        - A glob of a domain whose project root sits below the folder compiled into starts with that path. A `!` entry reads as "except" in the heading. A rule with globs and keywords is listed under both.
        - Markers it can't pair (a begin with no end, two begins, an end before a begin) and a file that isn't UTF-8 text are `refused`, with nothing written.
+       - A section edited by hand since it was compiled is `edited` and refused too, so compile never loses the user's words. The begin marker says so.
      - **Output.** One line per file, then exit 0, or 1 when any line is `refused`:
 
        ```
@@ -1208,7 +1211,7 @@ The phases build mechanism only. Adding real knowledge and taste is the user's c
      - **Rebuilds.** A section is rebuilt only when the user runs the command. No hook, build or git hook writes one (decision 4).
      - **Drift.** Lint checks each folder that an opted-in domain lists under `paths` in `vault.local.json`, since a project reached only by a marker has no root to look in. A section whose markers don't pair is also a warning, with the `refused` reason. All three findings are warnings, since the project is another repo and lint runs in the vault's pre-commit hook:
        - no section: `not compiled; run node tools/compile.mjs <root>`;
-       - a hash that doesn't match: `edited by hand since it was compiled`;
+       - a hash that doesn't match: `edited by hand since it was compiled; move those edits out of the section, or delete it, then run node tools/compile.mjs <root>`;
        - a body that differs from what compiling now would write: `stale: 3 rules changed since it was compiled; run node tools/compile.mjs <root>`.
      - **With Codex hooks.** A project whose domain opts in to `codex` gets its rules twice in a session whose Codex hooks are trusted. The README says to opt in only for a project where the hooks don't run, such as a machine without the vault's hooks, or a repo other people's agents read.
      - **What is lost** (6.7f): deny-then-retry, `triggers`, once-per-session delivery, proposing, pages and namespace globs. The copy is stale until compiled again.
@@ -1280,7 +1283,7 @@ The phases build mechanism only. Adding real knowledge and taste is the user's c
        - An existing AGENTS.md with CRLF keeps its other text and its line endings.
        - A second run prints `unchanged`. A hand edit inside the section is `refused`, with exit 1 and nothing written.
        - Lint warns on not compiled, stale and edited by hand.
-       - A project no opted-in domain reaches exits 2. A namespace-glob rule is left out. Over `compile.maxBytes`, the overflow line appears.
+       - A project no opted-in domain reaches exits 2. A namespace-glob rule is left out. Over `compile.maxBytes`, the overflow line appears, naming no path on this machine.
        - Lint errors on `compile: ["nope"]` and on `agents: ["nope"]`.
      - **`test/transcript.test.mjs`** (6.7c, the fixture half).
        - Each adapter's provider, given a fixture transcript with one record of each kind it reads or skips, returns exactly the expected list.
@@ -1318,16 +1321,16 @@ The phases build mechanism only. Adding real knowledge and taste is the user's c
 
 | Check | Passing means | Today |
 |---|---|---|
-| `node --test test/*.test.mjs` | All pass; each `todo` fails for the reason its design section names | 536 tests: 535 pass, 1 skipped (making a link needs Developer Mode on Windows), 0 `todo`, about 58 s. Lint: 0 errors. |
+| `node --test test/*.test.mjs` | All pass; each `todo` fails for the reason its design section names | 598 tests on `phase-6-delivery`: 597 pass, 1 skipped (making a link needs Developer Mode on Windows), 0 `todo`, about 68 s. Lint: 0 errors. |
 | Neutral-core test (§3) | No configured domain's key or title appears in `tools/`, `.claude/skills/`, `test/` or AGENTS.md | Passes on this vault's config, with its `todo` mark removed (phase 3). |
 | Phase 4 check: the suite through the TAP reporter, then lint and the grep, below the table | The suite has no failure and exactly 2 `todo` tests, 6.3c and 6.4a, both failing; lint reports 0 errors; the grep prints nothing. Then 6.1c, 6.2a and 6.2b pass, and only phase 5's checks are open. Run the perf group too, since phase 4 adds a read to every hook. | Passes (phase 4, before review): 431 pass, 0 fail, 2 `todo`, 6.3c (the first AskUserQuestion isn't denied) and 6.4a (a quote the PDF's derived text doesn't hold is written); lint 0 errors; the grep prints nothing. The perf group passes. Passes again after the review's fixes: 458 pass, 1 skipped, 0 fail, the same 2 `todo`; lint 0 errors; the grep prints nothing; the perf group passes, its build test included. |
 | Phase 5 check: the suite through the TAP reporter, then lint, the grep and the perf group, below the table | The suite has no failure and no `todo` test; lint reports 0 errors; the grep prints nothing; the perf group passes, AskUserQuestion test included. Then every *Check* in §6 runs on built code. | Passes (phase 5, before review): 473 pass, 0 fail, 0 `todo`; lint 0 errors; the grep prints nothing. The perf group passes, the AskUserQuestion call at 212 ms. After the review's fixes: 530 pass, 1 skipped, 0 fail, 0 `todo`; lint 0 errors; the grep prints nothing. The perf group's latency tests pass, the AskUserQuestion call at 260 ms; its build test misses, a session start that builds taking about 5.2 s against 5,000 ms. With phase 4's perf pass merged in: 535 pass, 1 skipped, 0 fail, 0 `todo`; lint 0 errors; the grep prints nothing; the perf group passes, the AskUserQuestion call at 207 ms and a session start that builds at about 1.5 s. |
-| Phase 6 check: the phase 5 check, then the agent-name grep, below the table | The phase 5 check passes, with the neutral-core identifier test, the adapter contract test and the Codex and compile tests in the suite; the agent-name grep prints nothing. Then nothing in `tools/` outside `tools/adapters/` names an agent, its tools or its hook fields. | Not built (phase 6 is designed). The grep prints the inventory lines of §8 item 6 on this branch. |
+| Phase 6 check: the phase 5 check, then the agent-name grep, below the table | The phase 5 check passes, with the neutral-core identifier test, the adapter contract test and the Codex and compile tests in the suite; the agent-name grep prints nothing. Then nothing in `tools/` outside `tools/adapters/` names an agent, its tools or its hook fields. | Passes (phase 6, before review): 597 pass, 1 skipped, 0 fail, 0 `todo`; lint 0 errors; both greps print nothing. The perf group passes: a gated edit at 3,000 notes 258 ms, an AskUserQuestion call 250 ms, a session start that builds about 1.8 s. |
 | Phase 3 check: the suite, then the grep below the table | With the neutral-core `todo` mark removed, the suite passes with 5 `todo` tests (6.1c, 6.2a, 6.2b, 6.3c, 6.4a), each red for its reason, and the grep prints nothing. Then no test, tool, skill or AGENTS.md example leans on one platform, and only the five later-phase checks are open. | Passes (phase 3): the five `todo` tests fail for their reasons, and the grep prints nothing. |
 | The probes as `todo` tests (phase 0) | Each passes with its `todo` mark removed: slow trigger, subagent gate, settle after an mtime change, negated glob, one refusal per file, frontmatter | All pass with their marks removed (phase 2): slow trigger, subagent gate (2), settle after an mtime change (2), one refusal per file, frontmatter, long-path prefix. Negated glob passes (phase 1). |
-| Perf group: `VAULT_PERF=1 node --test test/perf/*.perf.mjs` (about 50 s, outside the default run) | Fastest of 5 gated edits under 1,000 ms at 1,000 notes; fastest of 3 under 300 ms at 3,000; three parallel proposes of unrelated rules at 3,000 notes all succeed (6.6f); an AskUserQuestion call under 300 ms at 3,000 notes (6.3c); at 3,000 notes and 3,000 files in `raw/refs/`, the fastest of 3 session starts that build, after a note edit and after a new copy, under 5,000 ms, and the fastest of 3 builds with nothing changed under 1,500 ms (`build.perf.mjs`) | About 135–166 ms; about 245–290 ms; all succeed in about 4.3–5.4 s (phase 3). With phase 4's reads, 145 ms; 232 ms; all succeed in about 7.4 s, since builds run one at a time under `build.lock`. A warm session start at 3,000 notes takes about 340 ms, including the vault-wide stat for the lint reminder. After the review's fixes, 191 ms; 298 ms; all succeed in about 6.4 s; a session start that builds about 4.6 s, one with nothing changed about 630 ms, and a build with nothing changed about 830 ms. With the copies in `raw/refs/` cached and the hooks' stats taken at once, 155 ms; 201–218 ms; all succeed in about 5.9 s; a session start that builds about 1.4 s, one with nothing changed about 550 ms, and a build with nothing changed about 810 ms. With phase 5, before phase 4's fixes were merged in, 138 ms; 220 ms; an AskUserQuestion call 212 ms; all succeed in about 7.1 s. After phase 5's fixes, 170 ms; 275 ms; an AskUserQuestion call 260 ms; all succeed in about 5.9 s; a session start that builds about 5.2–5.4 s, one with nothing changed about 640–730 ms, and a build with nothing changed about 830–1,010 ms. With phase 4's perf pass merged into phase 5, 172 ms; 233 ms; an AskUserQuestion call 207 ms; all succeed in about 6.3 s; a session start that builds about 1.5 s, one with nothing changed about 590 ms, and a build with nothing changed about 870 ms. The timings are noisy on this machine. |
+| Perf group: `VAULT_PERF=1 node --test test/perf/*.perf.mjs` (about 50 s, outside the default run) | Fastest of 5 gated edits under 1,000 ms at 1,000 notes; fastest of 3 under 300 ms at 3,000; three parallel proposes of unrelated rules at 3,000 notes all succeed (6.6f); an AskUserQuestion call under 300 ms at 3,000 notes (6.3c); at 3,000 notes and 3,000 files in `raw/refs/`, the fastest of 3 session starts that build, after a note edit and after a new copy, under 5,000 ms, and the fastest of 3 builds with nothing changed under 1,500 ms (`build.perf.mjs`) | About 135–166 ms; about 245–290 ms; all succeed in about 4.3–5.4 s (phase 3). With phase 4's reads, 145 ms; 232 ms; all succeed in about 7.4 s, since builds run one at a time under `build.lock`. A warm session start at 3,000 notes takes about 340 ms, including the vault-wide stat for the lint reminder. After the review's fixes, 191 ms; 298 ms; all succeed in about 6.4 s; a session start that builds about 4.6 s, one with nothing changed about 630 ms, and a build with nothing changed about 830 ms. With the copies in `raw/refs/` cached and the hooks' stats taken at once, 155 ms; 201–218 ms; all succeed in about 5.9 s; a session start that builds about 1.4 s, one with nothing changed about 550 ms, and a build with nothing changed about 810 ms. With phase 5, before phase 4's fixes were merged in, 138 ms; 220 ms; an AskUserQuestion call 212 ms; all succeed in about 7.1 s. After phase 5's fixes, 170 ms; 275 ms; an AskUserQuestion call 260 ms; all succeed in about 5.9 s; a session start that builds about 5.2–5.4 s, one with nothing changed about 640–730 ms, and a build with nothing changed about 830–1,010 ms. With phase 4's perf pass merged into phase 5, 172 ms; 233 ms; an AskUserQuestion call 207 ms; all succeed in about 6.3 s; a session start that builds about 1.5 s, one with nothing changed about 590 ms, and a build with nothing changed about 870 ms. With phase 6, before review, 204 ms; 258 ms; an AskUserQuestion call 250 ms; all succeed in about 7.2 s; a session start that builds about 1.8 s, one with nothing changed about 665 ms, and a build with nothing changed about 1,050 ms. The timings are noisy on this machine. |
 | Each *Check* in §6 | As stated there, against the presets. All 17 pass in phase 5 | 17 pass against the presets (6.2c and 6.6f in the perf group), 6.3c and 6.4a with their `todo` marks removed (phase 5, before review) |
-| Transcript provider test (6.7c): `test/transcript.test.mjs`, and `VAULT_LIVE=1 node --test test/live/*.live.mjs` outside the default run | Each adapter's provider returns exactly the typed messages in its fixture transcript; the live half finds the fields each provider reads in this machine's newest transcript, printing only field names and counts | Built on `p6-codex`. The fixture half passes for both adapters, and the live half passed on 2026-11-01 with no field missing from either newest transcript. |
+| Transcript provider test (6.7c): `test/transcript.test.mjs`, and `VAULT_LIVE=1 node --test test/live/*.live.mjs` outside the default run | Each adapter's provider returns exactly the typed messages in its fixture transcript; the live half finds the fields each provider reads in this machine's newest transcript, printing only field names and counts | Built on `phase-6-delivery`. The fixture half passes for both adapters, and the live half passed on 2026-11-01 with no field missing from either newest transcript. |
 | Linear regex test (6.6c) | `new RegExp(p, 'l')` works after `v8.setFlagsFromString` on the installed Node | Works on Node 22.14 |
 | Vault server trial (6.7g) | A PreToolUse `mcp_tool` hook's JSON deny stops an Edit, and a gated edit is faster than the cached command hook | Run once in a scratch folder, not kept. Deny honored, but it fails open. |
 | Hook trials (6.2c, 6.3d, 6.6a) | In headless runs of the installed Claude Code: Stop `additionalContext` and `decision: "block"` continue the turn in bypass mode; a failing hook is recorded on each event; exec form is faster than Git Bash | Run once in a scratch folder on 2.1.296, not kept. All three hold. Exec form saves about 50 ms a call, less than measured outside Claude Code. |

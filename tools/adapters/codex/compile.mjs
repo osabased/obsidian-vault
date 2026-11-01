@@ -5,7 +5,7 @@ import { fitContext, joinList } from '../../lib/rules.mjs';
 const FILE = 'AGENTS.md';
 const BEGIN = /^<!-- taste-vault: begin ([0-9a-f]{16}) [^\r\n]*-->$/;
 const END = '<!-- taste-vault: end -->';
-const beginLine = hash => `<!-- taste-vault: begin ${hash} · written by node tools/compile.mjs; edits inside are overwritten -->`;
+const beginLine = hash => `<!-- taste-vault: begin ${hash} · written by node tools/compile.mjs, which refuses to rewrite it once it is edited by hand -->`;
 const RULE = /^- (\S+?): /;
 
 const editing = globs => {
@@ -14,8 +14,10 @@ const editing = globs => {
 };
 
 // Cut by bytes, which the cap counts, where fitContext counts characters: a rule in a language with wide characters
-// would otherwise push the section past it.
+// would otherwise push the section past it. The overflow line names no file, since other machines and repos read the
+// section without the vault.
 function bodyOf({ always, files, keywords }, maxBytes) {
+  const leftOut = list => `(Left out to stay within ${maxBytes} bytes: ${list}.)`;
   const groups = [
     ...files.map(g => ({ noun: 'rule', head: `### When editing ${editing(g.globs)}\n`, items: g.lines })),
     ...keywords.map(g => ({ noun: 'rule', head: `### When the request mentions ${joinList(g.keywords, 'or')}\n`, items: g.lines })),
@@ -29,7 +31,7 @@ function bodyOf({ always, files, keywords }, maxBytes) {
   ];
   let max = maxBytes;
   for (;;) {
-    const { text } = fitContext(parts, { max });
+    const { text } = fitContext(parts, { max, leftOut });
     const over = Buffer.byteLength(text) - maxBytes;
     if (over <= 0 || max <= over) return text;
     max -= over;
