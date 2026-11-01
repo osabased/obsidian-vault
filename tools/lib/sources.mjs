@@ -322,7 +322,7 @@ export function sourceChains() {
     if (!parsed) unreadable.push(f);
     return parsed && { data: parsed.data, ok: parsed.ok, errors: parsed.errors };
   };
-  const got = cachedFiles(copies.map(c => c.f), read, copyStamp(read));
+  const got = cachedFiles(copies.map(c => c.f), read, copyStamp(read), v => v !== null && typeof v === 'object' && v.data !== null && typeof v.data === 'object');
   for (const { f, set, manifest } of copies) {
     if (!got.has(f)) continue;
     const entry = withReplaces(got.get(f), null);
