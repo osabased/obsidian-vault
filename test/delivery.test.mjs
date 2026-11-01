@@ -268,7 +268,7 @@ test('a file path with the long-path prefix is gated by the rules of its project
   assert.ok(denied(edit(v, sessionId(), '', { abs: `\\\\?\\${file}` })), 'the prefixed spelling is gated');
 });
 
-test('a negated glob in applies_to excludes the files it names from the gate', { todo: '6.1g' }, t => {
+test('a negated glob in applies_to excludes the files it names from the gate', t => {
   const v = makeVault(t);
   const sid = sessionId();
   v.write('wiki/demo/rules/no-tests.md', ruleNote({ applies_to: ['src/**/*.ts', '!src/**/*.test.ts'] }));

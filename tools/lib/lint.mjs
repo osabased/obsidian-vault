@@ -1,17 +1,17 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { isBuiltin } from 'node:module';
-import { config, vaultPath, plural, today, datedFiles, filesIn, pickRows, rewriteText, lf } from './vault.mjs';
+import { config, vaultPath, plural, today, datedFiles, filesIn, pickRows, rewriteText, lf, readJson } from './vault.mjs';
 import {
   loadNotes, noteErrors, ruleText, ruleTextParts, liveRules, knownDomain, alwaysSize, isUrl, validDay, normTopic, topicNotes, rawFile, toKey, resolver, linksUnder, noteLinks, byTopic, isTopicPage, isSourcePage, PAGE_KINDS, joinList,
-  hasSection, footnotes, youSaid, linkedKeys, clip, isResearch, citedSources, evidenceQuotes, keyOf, kindFolder, kindLabel, linkTo, parseNote, noteLinkSpans,
+  hasSection, footnotes, youSaid, linkedKeys, clip, isResearch, citedSources, evidenceQuotes, keyOf, kindFolder, kindLabel, linkTo, parseNote, noteLinkSpans, maxChars,
 } from './rules.mjs';
-import { setField } from './frontmatter.mjs';
+import { parse, setField } from './frontmatter.mjs';
+import { NAMESPACE_NAME } from './glob.mjs';
 import { build } from './build.mjs';
 import { readJsonSafe, toPosix } from './vault.mjs';
 import { transcriptFor } from './sessions.mjs';
 import { typedMessages, saidIn, sourceTexts } from './quotes.mjs';
-import { parse } from './frontmatter.mjs';
 import { bundleOf, locate } from './rules.mjs';
 import {
   KINDS, LOCATORS, filled, hashFile, lineCount, clockTime, parseLocator, anchorsIn, derivedAnchors, manifestLine, sourceProblems, refSources,
@@ -89,8 +89,12 @@ export function lint(notes = loadNotes()) {
     if (n.data.replaces !== undefined) add('warn', n.rel, 'replaces does nothing. Set superseded_by on the note it replaces instead');
     if (!n.because) add('warn', n.rel, 'empty **Because:**');
     if (!n.superseded_by && !n.topic) add('warn', n.rel, 'no topic. Give it a short one, so the repeat check lists it with the rules on its topic');
-    if (n.do && n.not && ruleText(n).length > delivery.maxRuleChars) {
-      add('warn', n.rel, `${ruleTextParts(n)} come to ${ruleText(n).length} characters; the hooks cut them at ${delivery.maxRuleChars}`);
+    if (n.do && n.not && ruleText(n).length > maxChars(n.kind)) {
+      add('warn', n.rel, `${ruleTextParts(n)} come to ${ruleText(n).length} characters; the hooks cut them at ${maxChars(n.kind)}`);
+    }
+    // Every session start pays for an always rule, so one keeps to the taste cap whatever its kind.
+    if (n.do && n.not && n.always && n.kind === 'knowledge' && ruleText(n).length > delivery.maxRuleChars) {
+      add('warn', n.rel, `always: true loads this rule at every session start, and its ${ruleTextParts(n)} come to ${ruleText(n).length} characters, over the ${delivery.maxRuleChars} a taste rule may have. Shorten it, or give it keywords instead`);
     }
     if (n.kind === 'knowledge' && !n.superseded_by && validDay(n.as_of)) {
       const days = Math.round((Date.parse(today()) - Date.parse(n.as_of)) / 864e5);
@@ -98,6 +102,7 @@ export function lint(notes = loadNotes()) {
     }
   }
 
+  lintConfig(add);
   lintTopics(notes, domains, add);
   lintTopicPages(notes, add);
   lintOrphans(notes, resolve, add);
@@ -126,6 +131,8 @@ export function fix(found) {
   for (const rel of new Set(fixable.map(f => f.file))) {
     const file = vaultPath(rel);
     const text = fs.readFileSync(file, 'utf8');
+    // The user wrote this page and keeps it as they wrote it; lint still reports what it finds.
+    if (parse(text).data.author === 'user') continue;
     const before = lf(text);
     const out = fixable.filter(f => f.file === rel).reduce((t, f) => f.fix(t), before);
     if (out === before) continue;
@@ -189,6 +196,44 @@ function lintPicks(add) {
       }
       if (typeof r.sheet === 'string' && r.sheet && !fs.existsSync(vaultPath(r.sheet))) add('warn', file, `${r.id} names sheet ${r.sheet}, which doesn't exist`);
     }
+  }
+}
+
+// Reads the file rather than config(), which fills in defaults and would hide a value of the wrong shape.
+export function lintConfig(add) {
+  const c = readJson(vaultPath('vault.config.json'), {}) ?? {};
+  const bad = msg => add('error', 'vault.config.json', msg);
+  const isMap = x => x !== null && typeof x === 'object' && !Array.isArray(x);
+  const namespaces = c.namespaces ?? {};
+  if (!isMap(namespaces)) bad('namespaces must be an object of { separator, escape } by namespace name');
+  else {
+    for (const [name, ns] of Object.entries(namespaces)) {
+      const at = `namespaces.${name}`;
+      if (!NAMESPACE_NAME.test(name)) bad(`${at}: a namespace name is two or more lowercase letters, digits, - or _, starting with a letter`);
+      else if (name === 'file') bad(`${at}: file is the namespace of bare globs; pick another name`);
+      if (!isMap(ns)) {
+        bad(`${at} must be an object with separator and escape`);
+        continue;
+      }
+      if (typeof ns.separator !== 'string' || !ns.separator) bad(`${at}.separator must be a non-empty string`);
+      if (typeof ns.escape !== 'string' || [...ns.escape].length !== 1) bad(`${at}.escape must be one character`);
+    }
+  }
+  const editTools = c.editTools ?? {};
+  if (!isMap(editTools)) return bad('editTools must be an object of { namespace, path, after } by tool name');
+  const FIELD = /^tool_input\.\S+$/;
+  for (const [tool, t] of Object.entries(editTools)) {
+    const at = `editTools.${tool}`;
+    if (!/^\S+$/.test(tool)) bad(`${at}: a tool name has no spaces`);
+    if (!isMap(t)) {
+      bad(`${at} must be an object with namespace, path and after`);
+      continue;
+    }
+    if (!isMap(namespaces) || typeof t.namespace !== 'string' || !Object.hasOwn(namespaces, t.namespace)) {
+      bad(`${at}.namespace names ${t.namespace ?? 'nothing'}, which namespaces doesn't declare`);
+    }
+    if (typeof t.path !== 'string' || !FIELD.test(t.path)) bad(`${at}.path must be tool_input.<field>`);
+    if (t.after !== undefined && (typeof t.after !== 'string' || !FIELD.test(t.after))) bad(`${at}.after must be tool_input.<field>`);
   }
 }
 
@@ -393,8 +438,8 @@ function lintPage(n, watched, add) {
     if (dated != null && !validDay(dated)) add('error', n.rel, 'source_date must be a date as YYYY-MM-DD');
     else if (dated > today()) add('error', n.rel, `source_date ${dated} is in the future`);
   }
-  if (!n.topic) add('warn', n.rel, 'no topic. Give it one, so the index lists it with the rules on its topic');
-  if (!n.summary) add('warn', n.rel, 'no summary. Give it one line, so the index says what the page holds');
+  if (!n.topic && n.author !== 'user') add('warn', n.rel, 'no topic. Give it one, so the index lists it with the rules on its topic');
+  if (!n.summary && n.author !== 'user') add('warn', n.rel, 'no summary. Give it one line, so the index says what the page holds');
   if (!PAGE_KINDS.includes(n.kind)) add('warn', n.rel, `a page needs kind: ${joinList(PAGE_KINDS, 'or')}`);
   if (isSourcePage(n) && source == null) add('warn', n.rel, 'no source. A source page names the file under raw/ or the URL it is about');
   const needs = SECTIONS[n.kind] ?? [];

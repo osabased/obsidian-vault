@@ -17,11 +17,13 @@ export const vaultPath = (...xs) => path.join(ROOT, ...xs);
 export const toolsPath = (...xs) => path.join(import.meta.dirname, '..', ...xs);
 
 const DEFAULTS = {
-  delivery: { maxRulesPerEdit: 3, maxRuleChars: 300, maxBlockChars: 1200, maxPromptExcerpts: 3, maxPages: 3, activeMaxLines: 60, activeMaxBytes: 4096, settleSeconds: 60 },
+  delivery: { maxRulesPerEdit: 3, maxRuleChars: 300, maxKnowledgeRuleChars: 600, maxBlockChars: 1200, maxPromptExcerpts: 3, maxPages: 3, activeMaxLines: 60, activeMaxBytes: 4096, settleSeconds: 60 },
   knowledge: { staleAfterDays: 180 },
   lint: { remindAfterDays: 14, remindAfterNotes: 10 },
   picks: { maxSheetBytes: 3_000_000 },
   reach: { markerDepth: 3 },
+  namespaces: {},
+  editTools: {},
 };
 
 const strings = xs => (Array.isArray(xs) ? xs.filter(x => typeof x === 'string' && x.trim()) : []);
