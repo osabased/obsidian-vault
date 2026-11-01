@@ -1,12 +1,13 @@
 import fs from 'node:fs';
-import { runHook, config, domainsFor, everywhereDomains, inside, vaultRel, toPosix, cwdOf, FILE_TOOLS, toolFile, shortHash, lf } from '../lib/vault.mjs';
+import { runHook, config, domainsFor, everywhereDomains, vaultRel, toPosix, cwdOf, FILE_TOOLS, toolFile, shortHash, lf } from '../lib/vault.mjs';
 import {
-  loadNotes, settledNotes, liveRules, livePages, ruleLine, rulePointer, pageLine, fitContext, tryRegex, cmp, clip, parseNote, QUOTED, agentNotesSpan, authoredByUser, AGENT_NOTES, TOP_HEADING, isMap,
+  loadNotes, settledNotes, liveRules, livePages, ruleLine, rulePointer, pageLine, fitContext, cmp, clip, parseNote, QUOTED, agentNotesSpan, authoredByUser, AGENT_NOTES, TOP_HEADING, isMap,
 } from '../lib/rules.mjs';
-import { bestMatch, matchTarget, targetNames, specificity, bySpecificity } from '../lib/glob.mjs';
+import { matchTarget, targetNames, specificity, bySpecificity } from '../lib/glob.mjs';
+import { matcher, fileScope, fires, dueRules, gatedFile } from '../lib/scope.mjs';
 import { parse } from '../lib/frontmatter.mjs';
 import { extension } from '../lib/ext.mjs';
-import { marked, mark, markMany, markShown, markPages, agentKey, sessionHits } from '../lib/sessions.mjs';
+import { mark, markMany, markShown, markPages, agentKey, sessionHits } from '../lib/sessions.mjs';
 
 function vaultGuard(file, cwd) {
   const rel = vaultRel(file, cwd);
@@ -177,24 +178,6 @@ function newText(tool, ti) {
   return String(ti.new_string ?? '');
 }
 
-// Global's globs are read from the file's first project folder, or from the session's folder when no domain has the file.
-// An everywhere domain's pages reach every edit, read as global's when its reach doesn't take in the file; its rules
-// gate only where its reach does.
-function matcher(file, cwd) {
-  const doms = domainsFor(file, cwd);
-  const fallback = doms[0]?.rel ?? inside(cwd, file, cwd);
-  const everywhere = everywhereDomains();
-  return (notes, pages = false) => Object.entries(notes).flatMap(([key, note]) => {
-    const own = doms.find(d => d.domain === note.domain)?.rel;
-    const rel = note.domain === 'global' || (pages && own === undefined && everywhere.includes(note.domain)) ? fallback : own;
-    if (!note.applies_to?.length || typeof rel !== 'string') return [];
-    const glob = bestMatch(note.applies_to, rel);
-    return glob ? [{ key, note, rel, place: rel.toLowerCase(), spec: specificity(glob) }] : [];
-  });
-}
-
-const fileScope = (file, cwd) => ({ domains: [...domainsFor(file, cwd).map(d => d.domain), 'global', ...everywhereDomains()], matching: matcher(file, cwd) });
-
 // The file each project root's alias for the namespace maps the name to. An alias, tools/ext/aliases/<name>.mjs,
 // exports toFile(names, root): given the name's parts, escapes read, and a project root, it returns the file's path,
 // absolute or from the root, or null where the project lacks what it reads.
@@ -233,26 +216,10 @@ function nameScope(input, t, cwd) {
   };
 }
 
-// A note with triggers comes up only on an edit whose new text matches one.
-const fires = (note, text) => !note.triggers?.length || note.triggers.some(t => tryRegex(t)?.test(text));
-
-// The rules due on this edit, most specific first: the ones this session was not yet refused with on this file.
-function dueRules(input, matched, text) {
-  const hits = [];
-  for (const { key, note, rel, place, spec } of matched) {
-    const triggered = note.triggers?.length > 0;
-    if (!fires(note, text)) continue;
-    // The hash is in the id, so a reworded rule is refused once more on files it already gated.
-    const id = agentKey(input, `${key}|${note.hash}|${place}`);
-    if (!marked('gate', input.session_id, id)) hits.push({ key, note, rel, id, triggered, spec });
-  }
-  return hits.sort((a, b) => Number(b.triggered) - Number(a.triggered) || bySpecificity(a.spec, b.spec) || cmp(a.key, b.key));
-}
-
 // One refusal carries everything due on the file, so the retry goes through. The top rules come in full, up to
 // maxRulesPerEdit and maxBlockChars; the other rules and the pages past maxPages come as one line each, and whatever
 // the output budget has no room for is named in its overflow line. Everything due counts as shown either way.
-function refusal(input, hits, pages) {
+function refusal(input, hits, pages, written) {
   const { maxRulesPerEdit, maxBlockChars, maxPages } = config().delivery;
   const sid = input.session_id;
   const rel = (hits[0] ?? pages[0]).rel;
@@ -269,7 +236,7 @@ function refusal(input, hits, pages) {
     { noun: 'rule pointer', head: 'Also due, in brief. Open the ones that bear on this edit:', items: hits.slice(full.length).map(h => rulePointer(h.key, h.note)) },
     { noun: 'page', head: `Vault pages on ${rel}. Read the ones that bear on this work:`, items: pages.map((h, i) => pageLine(h.key, h.note, i >= maxPages)) },
   ], { tail: foot, gap: '\n' });
-  markMany('gate', sid, hits.map(h => h.id));
+  markMany('gate', sid, [...hits.map(h => h.id), ...written]);
   markShown(sid, full.slice(0, kept[0]).map(s => s.key));
   return text;
 }
@@ -289,8 +256,13 @@ runHook('edit', input => {
   const { domains, matching } = t.namespace === 'file' ? fileScope(t.path, cwd) : nameScope(input, t, cwd);
   const notes = settledNotes(loadNotes(domains));
   const text = newText(input.tool_name, input.tool_input ?? {});
-  const hits = dueRules(input, matching(liveRules(notes)), text);
+  const matched = matching(liveRules(notes));
+  const hits = dueRules(input, matched, text);
   // A page is told of once per session, so the refusal marks every page due, not only the first maxPages.
   const pages = markPages(input, matching(livePages(notes), true).filter(m => fires(m.note, text)).sort((a, b) => bySpecificity(a.spec, b.spec) || cmp(a.key, b.key)), Infinity);
-  return hits.length || pages.length ? deny(refusal(input, hits, pages)) : null;
+  // Only a file some rule covers can matter to the Stop hook, so the others cost no write.
+  const written = t.namespace === 'file' && matched.length ? [gatedFile(t.path, cwd)] : [];
+  if (hits.length || pages.length) return deny(refusal(input, hits, pages, written));
+  markMany('gate', input.session_id, written);
+  return null;
 });
