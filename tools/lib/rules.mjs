@@ -3,7 +3,7 @@ import path from 'node:path';
 import v8 from 'node:v8';
 import { parse, yamlQuote } from './frontmatter.mjs';
 import { validGlob, overlapping, entryParts, globListProblems } from './glob.mjs';
-import { config, vaultPath, shortHash, toPosix, today, inside, plural, isVaultOnly, memo, readJson, statePath, logError, FILE_TOOLS, EDIT_HOOK_MATCHER } from './vault.mjs';
+import { config, vaultPath, shortHash, toPosix, today, inside, plural, isVaultOnly, memo, readJson, statePath, logError, FILE_TOOLS, EDIT_HOOK_MATCHER, hookedTool } from './vault.mjs';
 import { cachedNotes, cleanFromGit } from './cache.mjs';
 import { SEMVER, SCHEMES, fitOf, projectVersions } from './versions.mjs';
 import { checkDeadline } from './deadline.mjs';
@@ -195,9 +195,8 @@ function listErrors(n) {
   ];
 }
 
-const hooked = new RegExp(`^(?:${EDIT_HOOK_MATCHER})$`);
 const toolError = x => (FILE_TOOLS.includes(x) ? [`tools names ${x}, which edits a file; give the rule applies_to instead`]
-  : hooked.test(x) ? [] : [`tools names ${x}, which the edit hook's matcher, ${EDIT_HOOK_MATCHER}, never sends to the hook, so it would never bring the rule up`]);
+  : hookedTool(x) ? [] : [`tools names ${x}, which the edit hook's matcher, ${EDIT_HOOK_MATCHER}, never sends to the hook, so it would never bring the rule up`]);
 
 export const hasChannel = n => n.always === true || ['applies_to', 'keywords', 'tools'].some(f => n[f]?.length);
 

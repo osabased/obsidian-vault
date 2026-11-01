@@ -2,7 +2,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { isBuiltin } from 'node:module';
 import {
-  config, vaultPath, plural, today, daysBetween, datedFiles, filesIn, pickRows, proposalRows, rewriteText, lf, readJson, readJsonSafe, toPosix, memo, statePath, isVaultOnly, isMarkerName, clock, FILE_TOOLS, EDIT_HOOK_MATCHER,
+  config, vaultPath, plural, today, daysBetween, datedFiles, filesIn, pickRows, proposalRows, rewriteText, lf, readJson, readJsonSafe, toPosix, memo, statePath, isVaultOnly, isMarkerName, clock, FILE_TOOLS, EDIT_HOOK_MATCHER, hookedTool,
 } from './vault.mjs';
 import {
   vaultFile, loadNotes, noteErrors, ruleText, ruleTextParts, liveRules, knownDomain, alwaysSize, isUrl, validDay, normTopic, topicNotes, rawFile, toKey, resolver, linksUnder, noteLinks, byTopic, isTopicPage, isSourcePage, PAGE_KINDS, joinList,
@@ -268,12 +268,11 @@ export function lintConfig(add) {
   const editTools = c.editTools ?? {};
   if (!isMap(editTools)) return bad('editTools must be an object of { namespace, path, after } by tool name');
   const FIELD = /^tool_input\.\S+$/;
-  const hooked = new RegExp(`^(?:${EDIT_HOOK_MATCHER})$`);
   for (const [tool, t] of Object.entries(editTools)) {
     const at = `editTools.${tool}`;
     if (!/^\S+$/.test(tool)) bad(`${at}: a tool name has no spaces`);
     else if (FILE_TOOLS.includes(tool)) bad(`${at}: ${tool} edits a file, which the edit hook reads from the call itself; take it out of editTools`);
-    else if (!hooked.test(tool)) bad(`${at}: the edit hook's matcher, ${EDIT_HOOK_MATCHER}, never sends ${tool} to the hook, so it would never be gated`);
+    else if (!hookedTool(tool)) bad(`${at}: the edit hook's matcher, ${EDIT_HOOK_MATCHER}, never sends ${tool} to the hook, so it would never be gated`);
     if (!isMap(t)) {
       bad(`${at} must be an object with namespace, path and after`);
       continue;

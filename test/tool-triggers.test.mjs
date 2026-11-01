@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { makeVault, ruleNote, sessionId, denied, lintFound } from './fixture.mjs';
+import { makeVault, ruleNote, pageNote, sessionId, denied, lintFound } from './fixture.mjs';
 
 const ask = (v, sid, question = 'Which card layout?', opts) => v.edit(sid, 'AskUserQuestion', { questions: [{
   question, header: 'Layout', multiSelect: false,
@@ -65,6 +65,30 @@ test('a mapped MCP tool reached by a glob and by tools refuses once', t => {
   assert.equal(set('B.A.C'), null);
 });
 
+test('a rule a glob and tools both reach fires when its trigger matches the target or the whole input', t => {
+  const v = makeVault(t, { presets: ['glim'] });
+  v.write('wiki/glim/rules/tree-tool.md', ruleNote({ applies_to: ['glim-tree:A.**'], triggers: ['A\\.B'], extra: ['tools:', '  - mcp__fixture__set_property'], doLine: 'Name nodes plainly.' }));
+  const sid = sessionId();
+  v.startSession(sid);
+  const set = name => v.edit(sid, 'mcp__fixture__set_property', { path: name, value: 'x' });
+  assert.deepEqual(named(set('Z.A.B')), ['glim/tree-tool'], 'tools alone reaches it, and the input holds A.B');
+  assert.deepEqual(named(set('A.B.C')), ['glim/tree-tool'], 'both reach it, and only the input holds A.B');
+  assert.equal(set('A.B.C'), null, 'the retry goes through');
+  assert.equal(set('Z.A.B'), null);
+});
+
+test('a mapped call refused by a tools rule reads as a call, with its pages on the target', t => {
+  const v = makeVault(t, { presets: ['glim'] });
+  v.write('wiki/glim/rules/tree-tool.md', ruleNote({ extra: ['tools:', '  - mcp__fixture__set_property'], doLine: 'Name nodes plainly.' }));
+  v.write('wiki/glim/concepts/tree-page.md', pageNote({ kind: 'concept', summary: "'The tree.'", applies_to: ['glim-tree:A.**'] }));
+  const sid = sessionId();
+  v.startSession(sid);
+  const out = denied(v.edit(sid, 'mcp__fixture__set_property', { path: 'A.B.C', value: 'x' })) ?? '';
+  assert.match(out, /^Taste rules apply to mcp__fixture__set_property:\n/);
+  assert.match(out, /\nVault pages on glim-tree:A\.B\.C\. Read the ones that bear on this work:\n/);
+  assert.match(out, /\nRevise this call to follow them and the pages, then retry\. The retry is allowed\.$/);
+});
+
 test('a call with no rule on its name passes', t => {
   const v = makeVault(t, { presets: ['glim'] });
   const sid = sessionId();
@@ -81,8 +105,10 @@ test('lint errors on a tools name the matcher never sends and on one that edits 
   const v = makeVault(t);
   v.write('wiki/glim/rules/shell.md', ruleNote({ extra: ['tools: [Bash]'] }));
   v.write('wiki/glim/rules/file.md', ruleNote({ extra: ['tools: [Edit]'] }));
+  v.write('wiki/glim/rules/todo.md', ruleNote({ extra: ['tools: [TodoWrite]'] }));
   assert.deepEqual((await lintFound(v, /^tools names/)).map(f => [f.level, f.file, f.msg]), [
     ['error', 'wiki/glim/rules/file.md', 'tools names Edit, which edits a file; give the rule applies_to instead'],
-    ['error', 'wiki/glim/rules/shell.md', "tools names Bash, which the edit hook's matcher, Edit|Write|MultiEdit|NotebookEdit|AskUserQuestion|mcp__.*, never sends to the hook, so it would never bring the rule up"],
+    ['error', 'wiki/glim/rules/shell.md', "tools names Bash, which the edit hook's matcher, ^(?:Edit|Write|MultiEdit|NotebookEdit|AskUserQuestion|mcp__.*)$, never sends to the hook, so it would never bring the rule up"],
+    ['error', 'wiki/glim/rules/todo.md', "tools names TodoWrite, which the edit hook's matcher, ^(?:Edit|Write|MultiEdit|NotebookEdit|AskUserQuestion|mcp__.*)$, never sends to the hook, so it would never bring the rule up"],
   ]);
 });
