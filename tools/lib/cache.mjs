@@ -25,8 +25,12 @@ const bucketOf = rel => {
 // Names starting with a dot are never walked, so .root and .refs, which holds the copies in raw/refs/, can't be a folder's file.
 const REFS_BUCKET = '.refs';
 const cacheFile = b => vaultPath(...CACHE, `${b === '' ? '.root' : b === REFS_BUCKET || /^[\p{L}\p{N}_-]+$/u.test(b) ? b : shortHash(b)}.json`);
+// A hand edit or a bad sync merge can leave an entry without its times, which would otherwise fail every call until the
+// cache is deleted, so an entry of the wrong shape is a miss.
+const sound = e => e !== null && typeof e === 'object' && [e.m, e.s, e.at].every(Number.isFinite);
 const readBucket = (b, stamp, c = readJsonSafe(cacheFile(b))) => {
-  return c?.stamp === stamp && c.notes && typeof c.notes === 'object' ? c.notes : {};
+  if (c?.stamp !== stamp || !c.notes || typeof c.notes !== 'object') return {};
+  return Object.fromEntries(Object.entries(c.notes).filter(([, e]) => sound(e)));
 };
 
 // The cache only saves reading time, so a write that fails (a read-only .state, a full disk, a file another program
@@ -143,8 +147,9 @@ export function cachedNotes(buckets, read, stamp, pre) {
 // What read(rel) gave for each file named, from .state/cache/.refs.json while the file's size and mtime hold, as a Map in
 // the order given. Reading every copy in raw/refs/ costs seconds at thousands of copies, so only the ones that changed are
 // read. read returns null for a file it can't use, which is never kept, so read sees it again on every call. lstat keys
-// the cache, so a file that becomes a link is read again.
-export function cachedFiles(rels, read, stamp) {
+// the cache, so a file that becomes a link is read again, and so is one whose lstat fails, since read meets the file
+// itself. A kept value that fits(value) refuses is read again too.
+export function cachedFiles(rels, read, stamp, fits = v => v !== null && typeof v === 'object') {
   const old = readBucket(REFS_BUCKET, stamp);
   const found = {};
   const out = new Map();
@@ -154,8 +159,9 @@ export function cachedFiles(rels, read, stamp) {
     for (const rel of rels) {
       checkDeadline();
       const e = old[rel];
-      const st = fs.lstatSync(vaultPath(...rel.split('/')), { throwIfNoEntry: false });
-      if (st && e && e.m === st.mtimeMs && e.s === st.size && !isRacy(e.at, e.m)) {
+      let st = null;
+      try { st = fs.lstatSync(vaultPath(...rel.split('/'))); } catch {}
+      if (st && e && fits(e.value) && e.m === st.mtimeMs && e.s === st.size && !isRacy(e.at, e.m)) {
         found[rel] = e;
         out.set(rel, e.value);
         continue;
