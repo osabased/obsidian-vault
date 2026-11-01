@@ -285,7 +285,7 @@ Phase-3 notes then need no migration, even where the tooling lands later.
 - *Design.*
   - **One cache.** Parsed notes are cached in `.state/cache/<folder>.json`, one file per folder of `wiki/` (`cache.mjs`), keyed on path, mtime and size, with each note's body hash. A note is read and hashed only when its stat changes. Settling (6.6d) uses the same cache.
     - Folders are matched to config domains by their NFC names, since the config names domains in NFC and a file system may store a folder NFD.
-    - The cache's stamp hashes `frontmatter.mjs`, `cache.mjs` and the reader that parses each note (`rules.mjs`), so a change to any of them reads every note again.
+    - The cache's stamp hashes `frontmatter.mjs`, `cache.mjs` and the source of the `parsed` reader in `rules.mjs`, so a change to any of them reads every note again.
     - The cache only saves reading time, so its writes are best effort: a failed write is logged once, and the call goes on with what it read.
     - A note that fails to read keeps its old entry. A note with no entry rethrows, so it is never dropped silently.
     - A walk stopped at the deadline saves what it read, and drops none of the notes it didn't reach, so the next call goes further.
@@ -409,7 +409,7 @@ Phase-3 notes then need no migration, even where the tooling lands later.
   - The first refusal shows the top rules in full, the rest as one-line pointers, and the due pages as pointers with summaries (decision 6), all within the budget (6.6e).
   - It gates every due rule and page on the file, so the retry passes. It counts as shown only what `fitContext` kept, rule pointers included.
   - Rules the budget cut stay gated after the refusal. This is a trade-off the user chose: gating only the kept rules would bring back repeat refusals. The overflow line says how many it left out and points to `index.md`, which lists them.
-  - Pages are gated per file, and told of once per agent. A page the budget cut isn't marked, so it comes up on the next file it covers.
+  - Pages are gated per file, and told of once per agent. A page the budget cut is gated on that file but not marked as told of, so it comes up on the next file it covers.
   - The other hooks follow the same rule: each counts as shown, and marks delivered, only what survived `fitContext`.
     - The exception is the always rules that session start's block cut for its own cap. They are marked, since the block points to `active.md` for them.
     - A session-start always block that the budget drops whole marks nothing, so the next prompt delivers it.
