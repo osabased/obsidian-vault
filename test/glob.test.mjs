@@ -276,6 +276,15 @@ test('matchTarget: an undeclared or broken namespace matches nothing', () => {
   assert.equal(matchTarget(['ghost:**'], { namespace: 'ghost', path: 'A' }, NS), null);
   assert.equal(matchTarget(['ghost:**'], { namespace: 'ghost', path: 'A' }), null);
   assert.equal(matchTarget(['bad:**'], { namespace: 'bad', path: 'A' }, { bad: { separator: '.', escape: '' } }), null);
+  assert.equal(matchTarget(['bad:**'], { namespace: 'bad', path: 'A' }, { bad: { separator: '.', escape: 'ab' } }), null);
+});
+
+test('matchTarget: an escape outside the BMP is one character, as lint counts it', () => {
+  const ns = { 'demo-tree': { separator: '.', escape: '𝄞' } };
+  assert.equal(validGlob('demo-tree:Shop𝄞.a.{x,y}', ns), true);
+  assert.equal(matchTarget(['demo-tree:Shop𝄞.a.**'], { namespace: 'demo-tree', path: 'Shop𝄞.a.Buy' }, ns), 'demo-tree:Shop𝄞.a.**');
+  assert.equal(matchTarget(['demo-tree:Shop.a.**'], { namespace: 'demo-tree', path: 'Shop𝄞.a.Buy' }, ns), null);
+  assert.equal(matchTarget(['demo-tree:{Shop𝄞,a,b}.*'], { namespace: 'demo-tree', path: 'Shop𝄞,a.Buy' }, ns), 'demo-tree:{Shop𝄞,a,b}.*');
 });
 
 test('matchTarget: a file target keeps the file rules', () => {

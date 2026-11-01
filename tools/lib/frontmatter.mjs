@@ -145,10 +145,22 @@ const PLAIN_NOT_TEXT = /^(?:[-+]?(?:\d[\d_]*(?:\.\d*)?|\.\d+)(?:e[-+]?\d+)?|[-+]
 const plainSafe = s => s !== '' && s === s.trim() && !/[\r\n\t]/.test(s) && !/^[-?:,[\]{}#&*!|>'"%@`]/.test(s)
   && !/: | #|:$/.test(s) && !PLAIN_NOT_TEXT.test(s) && value(s) === s;
 
-// Sets a scalar on the line parse reads it from, the last one with its key, keeping the line's ending. The whole old
-// value goes, quotes and comment too. The new one is written plain when it reads back as itself and was plain before,
-// single-quoted otherwise. Text without frontmatter, without the key, or whose key holds a nested block comes back as
-// it was.
+// Where a value written after `key: ` ends: after its closing quote, or where a comment starts in a plain one.
+function valueEnd(rest) {
+  const q = rest[0];
+  if (q !== "'" && q !== '"') return rest.search(/[ \t]+#|$/);
+  for (let i = 1; i < rest.length; i++) {
+    if (q === '"' && rest[i] === '\\') i++;
+    else if (q === "'" && rest[i] === "'" && rest[i + 1] === "'") i++;
+    else if (rest[i] === q) return i + 1;
+  }
+  return rest.length;
+}
+
+// Sets a scalar on the line parse reads it from, the last one with its key, keeping the line's ending and a trailing
+// comment, which is the user's note. The old value goes whole, quotes too. The new one is written plain when it reads
+// back as itself and was plain before, single-quoted otherwise. Text without frontmatter, without the key, or whose
+// key holds a nested block comes back as it was.
 export function setField(text, key, val) {
   const lines = text.split('\n');
   const end = closing(lines);
@@ -157,8 +169,10 @@ export function setField(text, key, val) {
   const [, head, old, eol] = lines[at].match(/^([^:]*:[ \t]*)(.*?)(\r?)$/);
   const next = lines.slice(at + 1, end).find(l => l.trim() && !/^\s*#/.test(l));
   if ((!old.trim() || old.startsWith('#')) && next && /^(?:\s|-)/.test(next)) return text;
+  const tail = old.slice(valueEnd(old));
+  const comment = /^[ \t]+#/.test(tail) ? tail : '';
   const s = String(val);
   const written = plainSafe(s) && !/^['"]/.test(old) ? s : `'${s.replace(/'/g, "''")}'`;
-  lines[at] = `${/\s$/.test(head) ? head : `${head} `}${written}${eol}`;
+  lines[at] = `${/\s$/.test(head) ? head : `${head} `}${written}${comment}${eol}`;
   return lines.join('\n');
 }
