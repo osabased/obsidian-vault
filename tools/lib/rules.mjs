@@ -3,7 +3,7 @@ import path from 'node:path';
 import v8 from 'node:v8';
 import { parse, yamlQuote } from './frontmatter.mjs';
 import { validGlob, overlapping, entryParts, globListProblems } from './glob.mjs';
-import { config, vaultPath, shortHash, toPosix, today, inside, plural, isVaultOnly, memo, readJson, statePath } from './vault.mjs';
+import { config, vaultPath, shortHash, toPosix, today, inside, plural, isVaultOnly, memo, readJson, statePath, logError } from './vault.mjs';
 import { cachedNotes, cleanFromGit } from './cache.mjs';
 import { SEMVER, fitOf, projectVersions } from './versions.mjs';
 
@@ -334,7 +334,7 @@ export function liveRules(notes = loadNotes()) {
       // Only the delivered wording counts, so an edit to a rule's evidence or globs doesn't deliver it again.
       hash: shortHash(text),
       kind: n.kind, always: n.always, applies_to: n.applies_to, triggers: n.triggers, keywords: n.keywords,
-      requires: n.requires, mtime: n.saved, size: n.size,
+      requires: n.requires, contentHash: n.contentHash,
     };
   }
   return rules;
@@ -361,7 +361,7 @@ export function livePages(notes = loadNotes()) {
     if (n.type !== 'page' || !(n.keywords?.length || n.applies_to?.length) || undelivered(n)) continue;
     pages[n.key] = {
       rel: n.rel, domain: n.domain, kind: n.kind, summary: n.summary, keywords: n.keywords, applies_to: n.applies_to, triggers: n.triggers,
-      requires: n.requires, mtime: n.saved, size: n.size,
+      requires: n.requires, contentHash: n.contentHash,
     };
   }
   return pages;
@@ -372,21 +372,38 @@ export const kindLabel = kind => (PAGE_KINDS.includes(kind) ? `${kind} page` : '
 // A bare line leaves out the summary, for the pages past what a refusal describes.
 export const pageLine = (k, p, bare = false) => `- ${k} (${kindLabel(p.kind)}): ${p.summary && !bare ? `${clip(sentence(p.summary), 150)} ` : ''}${toPosix(vaultPath(...p.rel.split('/')))}${labelled(p)}`;
 
+let corrupt = false;
+
+// .state/derived.json, or null when it is missing. Refresh and build write it, and build rewrites a corrupt one, so a
+// corrupt one reads as missing and is logged once, by name, rather than fail every hook until the user finds the file.
+export function readDerived() {
+  const file = statePath('derived.json');
+  try {
+    const got = readJson(file, null);
+    if (got === null || isMap(got)) return got;
+    throw new Error('not a JSON object');
+  } catch (e) {
+    if (!corrupt) logError(`.state/derived.json is corrupt, so it is read as empty until a build rewrites it`, e);
+    corrupt = true;
+    return null;
+  }
+}
+
 // What a project's lockfiles and .state/derived.json say of the notes a hook matched, read only when a note asks.
-// Refresh and build write derived.json; a missing one means nothing is unverified, and a corrupt one throws.
+// A missing derived.json means nothing is unverified.
 export function deliveryFor(hits) {
   let versions;
   let derived;
   return {
     get versions() { return (versions ??= projectVersions(hits)); },
-    get derived() { return (derived ??= readJson(statePath('derived.json'), {})); },
+    get derived() { return (derived ??= readDerived() ?? {}); },
   };
 }
 
 // The notes a project gets, as [key, note] entries, { key, note } items or a map of notes by key: those its lockfile
 // rules out are dropped, and the rest carry labels for a version the lockfile can't settle and for a source that changed
 // since the note's copy. A label changes a rule's hash, which the markers hold, so a rule shown before is shown again.
-// An unverified entry holds only while the note's file has the mtime and size derived.json recorded.
+// An unverified entry holds only while the note's text is what derived.json recorded, as unverifiedNow reads it.
 export function deliverable(items, ctx = deliveryFor([])) {
   const one = (key, note) => {
     const fit = note.requires ? fitOf(note.requires, note.domain, ctx.versions) : null;
@@ -395,7 +412,7 @@ export function deliverable(items, ctx = deliveryFor([])) {
     const u = isMap(unverified) && Object.hasOwn(unverified, key) ? unverified[key] : null;
     const labels = [
       ...(fit?.fit === 'unknown' ? ['version unknown'] : []),
-      ...(isMap(u) && u.mtime === note.mtime && u.size === note.size && filled(u.since) ? [`source changed on ${u.since}`] : []),
+      ...(isMap(u) && typeof u.contentHash === 'string' && u.contentHash === note.contentHash && filled(u.since) ? [`source changed on ${u.since}`] : []),
     ];
     if (!fit && !labels.length) return note;
     const hash = labels.length ? { hash: shortHash(`${note.text ?? note.rel}\0${labels.join(' · ')}`) } : {};
@@ -761,30 +778,42 @@ export function footnotes(n) {
   return { defs, cited };
 }
 
-// A file whose name holds a # is taken whole, so only a target that names no such file is split at it.
-export const locate = d => (isUrl(d.target) || !rawFile(d.target) ? { base: d.base, fragment: d.fragment } : { base: d.target, fragment: null });
+// A file whose name holds a # is taken whole, so only a target that names no such file is split at it. A caller that
+// locates many footnotes passes a memo of rawFile, since each lookup costs a realpath.
+export const locate = (d, fileOf = rawFile) => (isUrl(d.target) || !fileOf(d.target) ? { base: d.base, fragment: d.fragment } : { base: d.target, fragment: null });
 
 const isFileAt = (...xs) => fs.statSync(vaultPath(...xs), { throwIfNoEntry: false })?.isFile() ?? false;
 
 // A folder under raw/refs/ holding a manifest such as llms.txt and no source.md is a doc set: one source, whose pages
 // each have their own url and copies.
 export const manifestNames = () => [].concat(config().docSets?.manifests ?? []).filter(m => filled(m) && !/[\\/]/.test(m));
-export const isDocSet = folder => !isFileAt(...folder.split('/'), 'source.md') && manifestNames().some(m => isFileAt(...folder.split('/'), m));
+// The names in a folder, read once per folder for one caller. stat ignores case on Windows and macOS, and a manifest
+// counts only under the name the config gives it, as isManifest in sources.mjs reads it.
+export const folderNames = () => memo(dir => {
+  try { return new Set(fs.readdirSync(vaultPath(...dir.split('/')))); } catch { return new Set(); }
+});
+const hasManifest = (dir, names) => manifestNames().some(m => isFileAt(...dir.split('/'), m) && names(dir).has(m));
+export const isDocSet = (folder, names = folderNames()) => !isFileAt(...folder.split('/'), 'source.md') && hasManifest(folder, names);
 
 // A folder under raw/refs/ holding a source.md is one source, a bundle, and so is a doc set; so is the outermost such
 // folder around a path in it. The path may be a file, the folder, or the folder with a slash or a different case; the
 // folder comes back as the disk spells it, or null when the path is in no bundle or doc set.
-export function bundleOf(ref) {
+export function bundleOf(ref, names = folderNames()) {
   if (typeof ref !== 'string' || !ref) return null;
   let real;
   try { real = fs.realpathSync.native(vaultPath(ref)); } catch { return null; }
   const parts = path.relative(rootOnDisk(), real).split(path.sep);
   if (parts[0] !== 'raw' || parts[1] !== 'refs') return null;
   const dirs = fs.statSync(real).isDirectory() ? parts : parts.slice(0, -1);
-  const manifests = manifestNames();
+  return bundleAbove(dirs.join('/'), names);
+}
+
+// The outermost bundle or doc set at or above a folder under raw/refs/ spelled as the disk spells it, or null.
+export function bundleAbove(folder, names = folderNames()) {
+  const dirs = folder.split('/');
   for (let i = 3; i <= dirs.length; i++) {
-    const dir = dirs.slice(0, i);
-    if (isFileAt(...dir, 'source.md') || manifests.some(m => isFileAt(...dir, m))) return dir.join('/');
+    const dir = dirs.slice(0, i).join('/');
+    if (isFileAt(dir, 'source.md') || hasManifest(dir, names)) return dir;
   }
   return null;
 }

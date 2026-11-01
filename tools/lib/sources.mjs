@@ -3,8 +3,9 @@ import path from 'node:path';
 import { createHash } from 'node:crypto';
 import { parse } from './frontmatter.mjs';
 import { filesIn, vaultPath, memo, config } from './vault.mjs';
+import { checkDeadline } from './deadline.mjs';
 import {
-  isUrl, validDay, rawFile, bundleOf, isDocSet, manifestNames, filled, parsedFile, normUrl, evidenceSources, footnotes, locate, linkedKeys,
+  isUrl, validDay, rawFile, bundleOf, bundleAbove, folderNames, isDocSet, manifestNames, filled, parsedFile, normUrl, evidenceSources, footnotes, locate, linkedKeys,
   isSourcePage, undelivered, resolver, cmp, isMap, joinList,
 } from './rules.mjs';
 
@@ -248,9 +249,13 @@ export function sourceChains() {
   const files = new Map();
   const unreadable = [];
   const names = manifestNames();
-  const setOf = memo(folder => (folder && isDocSet(folder) ? folder : null));
+  const listed = folderNames();
+  // The walk spells each path as the disk does, so a file's bundle goes by its folder, looked up once per folder.
+  const bundleAt = memo(dir => bundleAbove(dir, listed));
+  const setOf = memo(folder => (folder && isDocSet(folder, listed) ? folder : null));
   for (const f of filesIn(vaultPath('raw', 'refs'), '', 'raw/refs')) {
-    const bundle = bundleOf(f);
+    checkDeadline();
+    const bundle = bundleAt(path.posix.dirname(f));
     const set = setOf(bundle);
     if (bundle && !set) continue;
     const manifest = Boolean(set) && path.posix.dirname(f) === set && isManifest(f, names);
@@ -285,22 +290,32 @@ export function noteCitations(notes, chains) {
   const pages = new Map(notes.filter(isSourcePage).map(n => [n.key, n]));
   const at = new Map();
   for (const [id, rels] of chains.chains) rels.forEach((r, i) => at.set(r, [id, i]));
+  const fileOf = memo(rawFile);
+  const listed = folderNames();
   const placeOf = memo(ref => {
-    const file = rawFile(ref);
+    const file = fileOf(ref);
     if (file && at.has(file)) return { file: at.get(file), set: chains.files.get(file)?.set ?? null };
-    return { file: null, set: bundleOf(ref) };
+    return { file: null, set: bundleOf(ref, listed) };
   });
+  const asOfPlace = (id, day) => Math.max(0, chains.chains.get(id).findLastIndex(r => {
+    const { fetched } = chains.files.get(r).data;
+    return validDay(fetched) && fetched <= day;
+  }));
   return n => {
     const refs = [
       ...evidenceSources(n),
-      ...footnotes(n).defs.flatMap(d => (d.target ? [locate(d).base] : [])),
+      ...footnotes(n).defs.flatMap(d => (d.target ? [locate(d, fileOf).base] : [])),
       ...linkedKeys(n, resolve).flatMap(k => (typeof pages.get(k)?.data.source === 'string' ? [pages.get(k).data.source] : [])),
     ];
     const ids = new Set();
     const latest = new Map();
     for (const ref of refs) {
       if (isUrl(ref)) {
-        if (chains.chains.has(normUrl(ref))) ids.add(normUrl(ref));
+        const id = normUrl(ref);
+        if (!chains.chains.has(id)) continue;
+        ids.add(id);
+        // A URL names no copy, so the note read the last one fetched by its as_of, or the first when all came after.
+        if (validDay(n.as_of)) latest.set(id, Math.max(latest.get(id) ?? -1, asOfPlace(id, n.as_of)));
         continue;
       }
       const { file, set } = placeOf(ref);
@@ -317,7 +332,7 @@ export function noteCitations(notes, chains) {
 // The copies later in a source's chain than place i that aren't a baseline, so a note citing copy i hasn't seen them.
 export const newerCopies = (chains, id, i) => chains.chains.get(id).slice(i + 1).filter(r => chains.files.get(r).data.baseline !== true);
 
-// .state/derived.json from raw/refs/ and the notes (design §8 item 4): each source's chain and the check refresh last
+// .state/derived.json from raw/refs/ and the notes: each source's chain and the check refresh last
 // recorded for it, the delivered notes a changed source has left unverified, and per domain the sources its delivered
 // notes cite. checked is the later of the check on record and the latest copy's fetched day, since a fetch is a check.
 export function derive(notes, old = {}, chains = sourceChains()) {
@@ -336,6 +351,7 @@ export function derive(notes, old = {}, chains = sourceChains()) {
   const unverified = {};
   const domains = {};
   for (const n of notes) {
+    checkDeadline();
     if (n.superseded_by || undelivered(n)) continue;
     const { ids, latest } = cites(n);
     for (const id of ids) (domains[n.domain] ??= new Set()).add(id);
@@ -345,17 +361,18 @@ export function derive(notes, old = {}, chains = sourceChains()) {
     });
     if (!changed.length) continue;
     unverified[n.key] = {
-      mtime: n.saved, size: n.size, since: changed.map(c => c.day).filter(validDay).sort()[0] ?? null, sources: changed.map(c => c.id).sort(cmp),
+      contentHash: n.contentHash, since: changed.map(c => c.day).filter(validDay).sort()[0] ?? null, sources: changed.map(c => c.id).sort(cmp),
     };
   }
   const byName = ([a], [b]) => cmp(a, b);
   return { version: 1, sources, unverified, domains: Object.fromEntries(Object.entries(domains).sort(byName).map(([d, ids]) => [d, [...ids].sort(cmp)])) };
 }
 
-// A note's unverified entry holds only while the note is as build read it, so an edit to cite the new copy clears it at once.
+// A note's unverified entry holds only while the note says what build read, so an edit to cite the new copy clears it at
+// once and a save that leaves the text as it was keeps it.
 export const unverifiedNow = (derived, n) => {
   const e = derived?.unverified?.[n.key];
-  return isMap(e) && e.mtime === n.saved && e.size === n.size ? e : null;
+  return isMap(e) && typeof e.contentHash === 'string' && e.contentHash === n.contentHash ? e : null;
 };
 
 // The day counts for a domain: knowledge in vault.config.json, then the domain's own knowledge fields.
