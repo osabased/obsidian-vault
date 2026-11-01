@@ -271,3 +271,28 @@ test('a build waits for one already running, and session start skips its build r
   v.startSession(sessionId());
   assert.ok(v.exists('index.md'), 'the next start builds');
 });
+
+test('lint refuses more of lib/git.mjs than changedFiles in lib/ and ext/ too, re-exported or through import()', async t => {
+  const v = makeVault(t);
+  const run = "import { runHook } from '../lib/vault.mjs';\nrunHook('x', () => null);\n";
+  const cases = {
+    'tools/hooks/p-dynamic.mjs': `${run}const { fetchOrigin } = await import('../lib/git.mjs');\nexport const go = () => fetchOrigin;\n`,
+    'tools/hooks/p-reexport.mjs': `export { fetchOrigin } from '../lib/git.mjs';\n${run}`,
+    'tools/hooks/p-ns.mjs': `import * as g from '../lib/git.mjs';\n${run}export const go = () => g;\n`,
+    'tools/lib/p-wrap.mjs': "import { fetchOrigin } from './git.mjs';\nexport const pull = d => fetchOrigin(d, {});\n",
+    'tools/lib/p-all.mjs': "export * from './git.mjs';\n",
+    'tools/ext/readers/p-reader.mjs': "import { changedFiles, clone } from '../../lib/git.mjs';\nexport const read = () => [changedFiles, clone];\n",
+    'tools/lib/p-ok.mjs': "import { changedFiles } from './git.mjs';\nexport { changedFiles } from './git.mjs';\nexport const dirty = d => changedFiles(d);\n",
+  };
+  for (const [rel, src] of Object.entries(cases)) v.write(rel, src);
+  const { lint } = await v.import('lib/lint.mjs');
+  const found = lint().filter(f => f.file in cases && /lib\/git\.mjs/.test(f.msg)).map(f => [f.file, f.msg]).sort();
+  assert.deepEqual(found, [
+    ['tools/ext/readers/p-reader.mjs', 'imports clone from lib/git.mjs; hooks call only changedFiles from it'],
+    ['tools/hooks/p-dynamic.mjs', 'imports lib/git.mjs with import(); hooks call only changedFiles from it, through a static import'],
+    ['tools/hooks/p-ns.mjs', 'imports g from lib/git.mjs; hooks call only changedFiles from it'],
+    ['tools/hooks/p-reexport.mjs', 'exports fetchOrigin from lib/git.mjs; hooks call only changedFiles from it'],
+    ['tools/lib/p-all.mjs', 'exports * from lib/git.mjs; hooks call only changedFiles from it'],
+    ['tools/lib/p-wrap.mjs', 'imports fetchOrigin from lib/git.mjs; hooks call only changedFiles from it'],
+  ]);
+});

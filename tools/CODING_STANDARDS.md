@@ -37,7 +37,7 @@ These keep the hooks safe to run in every session. Follow them when you change a
 - Every file in `hooks/` calls `runHook`.
 - Nothing in `hooks/`, `lib/` or `ext/` prints (`console.*`, `process.stdout.write`, `process.stderr.write`) except `lib/vault.mjs`, where `runHook` prints. Scripts directly in `tools/` may print.
 - Only `lib/vault.mjs` and `lib/sessions.mjs` call fs functions that change files: write, append, rename, remove, make folders, copy, open for writing or write streams, sync or async, as `fs.x(` or imported by name. Anywhere else, use or add a helper in `lib/vault.mjs`.
-- Nothing but `lib/git.mjs` imports `node:child_process`, and nothing in `hooks/` imports anything but `changedFiles` from it. Nothing in `hooks/`, `lib/` or `ext/` imports `node:http`, `node:https`, `node:http2`, `node:net`, `node:tls` or `node:dgram`, or calls `fetch(`.
+- Nothing but `lib/git.mjs` imports `node:child_process`, and nothing in `hooks/`, `lib/` or `ext/` imports or re-exports anything but `changedFiles` from it, or imports it with `import()`. Nothing in `hooks/`, `lib/` or `ext/` imports `node:http`, `node:https`, `node:http2`, `node:net`, `node:tls` or `node:dgram`, or calls `fetch(`.
 - `process.cwd()` appears only in `lib/vault.mjs`.
 - No TODO, FIXME, XXX or HACK comments, no `/**` docstrings, and no banner comments such as `// ===`, `// ---`, `// Step 1` or `// Note:`.
 

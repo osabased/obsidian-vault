@@ -1,6 +1,6 @@
 import fs from 'node:fs';
 import path from 'node:path';
-import { vaultPath, readJsonSafe, writeText, shortHash, toPosix, logError, config } from './vault.mjs';
+import { vaultPath, readJsonSafe, writeText, shortHash, toPosix, logError, config, filesIn } from './vault.mjs';
 import { checkDeadline } from './deadline.mjs';
 import { changedFiles } from './git.mjs';
 
@@ -12,6 +12,8 @@ const CACHE = ['.state', 'cache'];
 // A file saved within this long of being read may change again within the same mtime on a coarse file system, so it
 // is read once more on a later call.
 export const RACY_MS = 2000;
+// Whether a file stat'ed at `at` with this mtime may yet change and keep it, so it must be read again.
+export const isRacy = (at, mtimeMs) => Math.abs(at - mtimeMs) < RACY_MS;
 
 // The config names domains in NFC and a folder may be stored NFD, so a folder goes by its NFC name.
 const nfc = s => s.normalize('NFC');
@@ -90,7 +92,7 @@ export function cachedNotes(buckets, read, stamp) {
           st = fs.statSync(full, { throwIfNoEntry: false });
           if (!st) continue;
           // A file dated in the future would otherwise never be trusted.
-          if (e && e.m === st.mtimeMs && e.s === st.size && Math.abs(e.at - e.m) >= RACY_MS) {
+          if (e && e.m === st.mtimeMs && e.s === st.size && !isRacy(e.at, e.m)) {
             found[rel] = e;
             continue;
           }
@@ -155,26 +157,41 @@ export function cleanFromGit(notes, stamp) {
 // A dot name, so no folder of wiki/ shares the file.
 const BUILT = () => vaultPath(...CACHE, '.built.json');
 const CONFIG = '.config';
+const REFS = '.refs';
 
-// What each folder of wiki/ held, as one hash per folder of its notes' paths and texts, and the config a build reads.
-// A domain's paths differ per machine and shape no generated file.
-function fingerprints(notes) {
+// The path, size and mtime of each file in raw/refs/, hashed. Derive reads every copy there, and a copy pulled from
+// another machine changes no note, so a build skips derive only while this holds too.
+export function refStats() {
+  const root = vaultPath('raw', 'refs');
+  const lines = [];
+  for (const rel of filesIn(root)) {
+    checkDeadline();
+    const st = fs.statSync(path.join(root, ...rel.split('/')), { throwIfNoEntry: false });
+    if (st) lines.push(`${rel}\0${st.size}\0${st.mtimeMs}`);
+  }
+  return shortHash(lines.sort().join('\n'));
+}
+
+// What each folder of wiki/ held, as one hash per folder of its notes' paths and texts, the config a build reads, and
+// raw/refs/ as refStats gives it. A domain's paths differ per machine and shape no generated file.
+function fingerprints(notes, refs) {
   const c = config();
   const domains = Object.fromEntries(Object.entries(c.domains).map(([d, { paths, ...x }]) => [d, x]));
   const by = Map.groupBy(notes, n => bucketOf(n.rel));
   return new Map([
     [CONFIG, shortHash(JSON.stringify({ ...c, domains }))],
+    [REFS, refs],
     ...[...by].map(([b, ns]) => [b, shortHash(ns.map(n => `${n.rel}\0${n.contentHash}`).sort().join('\n'))]),
   ]);
 }
 
-// Whether the config, or a note in the folders walked, changed since the last build that markBuilt recorded.
-export function changedSinceBuild(notes, buckets) {
+// Whether the config, raw/refs/, or a note in the folders walked, changed since the last build that markBuilt recorded.
+export function changedSinceBuild(notes, buckets, refs = refStats()) {
   const built = readJsonSafe(BUILT());
   if (!built || typeof built !== 'object') return true;
-  const now = fingerprints(notes);
-  const names = buckets ? new Set([CONFIG, ...buckets.map(nfc)]) : new Set([...Object.keys(built), ...now.keys()]);
+  const now = fingerprints(notes, refs);
+  const names = buckets ? new Set([CONFIG, REFS, ...buckets.map(nfc)]) : new Set([...Object.keys(built), ...now.keys()]);
   return [...names].some(b => (built[b] ?? '') !== (now.get(b) ?? ''));
 }
 
-export const markBuilt = notes => writeText(BUILT(), JSON.stringify(Object.fromEntries(fingerprints(notes))));
+export const markBuilt = (notes, refs = refStats()) => writeText(BUILT(), JSON.stringify(Object.fromEntries(fingerprints(notes, refs))));
