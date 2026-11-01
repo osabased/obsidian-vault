@@ -8,14 +8,14 @@ const ranked = r => [...r.stdout.matchAll(/^\d+\. (\S+)/gm)].map(m => m[1]);
 
 test('notes rank by where the words are: a name or keyword beats a passing mention in the body', t => {
   const v = makeVault(t);
-  v.write('wiki/glim/concepts/tween-easing.md', page({ kind: 'concept', summary: "'How tweens ease.'" }));
+  v.write('wiki/glim/concepts/fade-easing.md', page({ kind: 'concept', summary: "'How fades ease.'" }));
   v.write('wiki/glim/concepts/motion.md', page({ kind: 'concept', keywords: ['easing'], summary: "'Motion on screens.'" }));
   v.write('wiki/glim/concepts/layout-grid.md', page({ kind: 'concept', body: ['Cards sit on a grid. Easing is out of scope here.'] }));
   v.write('wiki/glim/concepts/colors.md', page({ kind: 'concept', body: ['Nothing on the subject.'] }));
   const r = search(v, 'easing');
   assert.equal(r.code, 0, r.stderr);
   const order = ranked(r);
-  assert.deepEqual(order.slice(0, 2).sort(), ['glim/motion', 'glim/tween-easing']);
+  assert.deepEqual(order.slice(0, 2).sort(), ['glim/fade-easing', 'glim/motion']);
   assert.deepEqual(order.slice(2), ['glim/layout-grid']);
 });
 
@@ -28,18 +28,18 @@ test("a rule's Do line counts less than its keywords", t => {
 
 test('a result gives its kind, topic, summary or Do line, path and the line that matched', t => {
   const v = makeVault(t);
-  v.write('wiki/glim/concepts/luau-types.md', page({ kind: 'concept', summary: "'What the type checker does.'", body: ['Intro.', '', 'The checker runs in strict mode on save.'] }));
-  v.write('wiki/glim/rules/strict.md', ruleNote({ keywords: ['strict'], doLine: 'Start scripts with --!strict.' }));
+  v.write('wiki/glim/concepts/lit-types.md', page({ kind: 'concept', summary: "'What the type checker does.'", body: ['Intro.', '', 'The checker runs in strict mode on save.'] }));
+  v.write('wiki/glim/rules/strict.md', ruleNote({ keywords: ['strict'], doLine: 'Start files with a purpose line.' }));
   const r = search(v, 'strict');
   assert.equal(r.code, 0, r.stderr);
   const path = rel => v.at(...rel.split('/')).replace(/\\/g, '/');
   assert.equal(r.stdout, [
     '1. glim/strict · rule · topic code',
-    '   Do: Start scripts with --!strict.',
+    '   Do: Start files with a purpose line.',
     `   ${path('wiki/glim/rules/strict.md')}`,
-    '2. glim/luau-types · concept page · topic code',
+    '2. glim/lit-types · concept page · topic code',
     '   What the type checker does.',
-    `   ${path('wiki/glim/concepts/luau-types.md')}`,
+    `   ${path('wiki/glim/concepts/lit-types.md')}`,
     '   > The checker runs in strict mode on save.',
     '',
   ].join('\n'));

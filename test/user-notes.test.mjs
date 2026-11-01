@@ -19,18 +19,29 @@ function vault(t, { text = mine(), rel = REL } = {}) {
 const edit = (v, tool, toolInput, rel = REL) => v.edit(SID, tool, { file_path: v.at(...rel.split('/')), ...toolInput });
 const change = (old_string, new_string) => ({ old_string, new_string });
 
-test("an Edit that changes the body of a user's page is denied, with no retry", t => {
-  const v = vault(t);
-  const out = edit(v, 'Edit', change('Tabs should never feel cramped.', 'Tabs may feel cramped.'));
-  assert.match(denied(out) ?? '', /wiki\/glim\/concepts\/journal\.md is the user's own writing[\s\S]*new lines under ## Agent notes/);
+// The journal preset's page is the user's own, with an empty ## Agent notes section.
+const JOURNAL = 'wiki/journal/concepts/morning-pages.md';
+const journal = t => {
+  const v = makeVault(t, { presets: ['journal'] });
+  v.startSession(SID, { cwd: v.projects.journal });
+  return v;
+};
+
+test("6.1f: an Edit that changes the body of a user's page is denied, with no retry", t => {
+  const v = journal(t);
+  const bad = change('three pages before', 'two pages before');
+  const out = edit(v, 'Edit', bad, JOURNAL);
+  assert.match(denied(out) ?? '', /wiki\/journal\/concepts\/morning-pages\.md is the user's own writing[\s\S]*new lines under ## Agent notes/);
   assert.doesNotMatch(denied(out), /retry/);
-  assert.ok(denied(edit(v, 'Edit', change('Tabs should never feel cramped.', 'Tabs may feel cramped.'))));
+  assert.ok(denied(edit(v, 'Edit', bad, JOURNAL)));
 });
 
-test('an Edit that adds a line under ## Agent notes passes', t => {
-  const v = vault(t);
-  assert.equal(denied(edit(v, 'Edit', change(SEEN, `${SEEN}\n- the grid is 12px`))), null);
-  assert.equal(denied(edit(v, 'MultiEdit', { edits: [change(SEEN, `${SEEN}\n- first`), change('- first', '- first\n- second')] })), null);
+test('6.1f: an Edit that adds a line under ## Agent notes passes', t => {
+  const v = journal(t);
+  const heading = '## Agent notes\n';
+  assert.equal(denied(edit(v, 'Edit', change(heading, `${heading}- she writes by hand\n`), JOURNAL)), null);
+  v.write(JOURNAL, v.read(JOURNAL).replace(heading, `${heading}- she writes by hand\n`));
+  assert.equal(denied(edit(v, 'MultiEdit', { edits: [change('by hand', 'by hand\n- first'), change('- first', '- first\n- second')] }, JOURNAL)), null);
 });
 
 test('a Write that keeps the page and adds lines under ## Agent notes passes', t => {
@@ -95,7 +106,7 @@ test('a page without author: user is edited as before', t => {
 
 const rule = (extra = {}) => ({
   domain: 'glim', slug: 'roomy-cards', topic: 'layout', basis: 'stated', page: REL, quote: 'Cards need room to breathe',
-  do: 'Leave 12px around cards.', not: 'Pack cards edge to edge.', because: '', applies_to: ['src/**/*.luau'], ...extra,
+  do: 'Leave 12px around cards.', not: 'Pack cards edge to edge.', because: '', applies_to: ['src/**/*.zq'], ...extra,
 });
 
 function proposer(t, opts) {
@@ -125,12 +136,15 @@ test('a knowledge rule may cite the page the same way', t => {
   assert.match(v.read('wiki/glim/rules/card-spacing.md'), / · stated · wiki\/glim\/concepts\/journal\.md · "Tabs should never feel cramped"/);
 });
 
-test('a quote the page does not hold is refused', t => {
-  const v = proposer(t);
-  const r = v.propose(SID, rule({ quote: 'Cards want a drop shadow' }));
+test('6.1f: a quote the user note does not hold is refused', t => {
+  const v = journal(t);
+  const mine = { domain: 'journal', slug: 'pages-first', topic: 'days', basis: 'stated', page: JOURNAL, do: 'Leave mail until after the pages.', not: 'Open mail first.', because: '', applies_to: ['notes/**'] };
+  const ok = v.propose(SID, { ...mine, quote: 'three pages before I open any mail' });
+  assert.equal(ok.code, 0, ok.stderr);
+  const r = v.propose(SID, { ...mine, slug: 'no-mail', quote: 'I never open mail' });
   assert.equal(r.code, 1);
-  assert.match(r.stderr, /the quote isn't in wiki\/glim\/concepts\/journal\.md/);
-  assert.equal(v.exists('wiki/glim/rules/roomy-cards.md'), false);
+  assert.match(r.stderr, /the quote isn't in wiki\/journal\/concepts\/morning-pages\.md/);
+  assert.equal(v.exists('wiki/journal/rules/no-mail.md'), false);
 });
 
 test("a quote only in ## Agent notes, or only in the page's frontmatter, is refused", t => {

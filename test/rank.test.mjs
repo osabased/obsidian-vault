@@ -37,7 +37,7 @@ test('propose ranks the new rule against the rules whose globs it overlaps', t =
   const sid = sessionId();
   v.startSession(sid);
   v.write('wiki/glim/rules/said.md', ruleNote({ applies_to: ['src/new/**'] }));
-  v.write('wiki/glim/rules/read.md', ruleNote({ basis: 'reading', applies_to: ['src/new/*.lua'], doLine: 'Other thing.', notLine: 'Other skip.' }));
+  v.write('wiki/glim/rules/read.md', ruleNote({ basis: 'reading', applies_to: ['src/new/*.zq'], doLine: 'Other thing.', notLine: 'Other skip.' }));
   const proposal = {
     domain: 'glim', slug: 'new-rule', topic: 'code', basis: 'reading', reading: 'The user rewrote the screen twice.',
     do: 'Zebra quartz mango.', not: 'Plover lantern ember.', applies_to: ['src/new/**'],
