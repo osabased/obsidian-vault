@@ -17,7 +17,7 @@ function filesUnder(p) {
     .map(e => path.join(e.parentPath, e.name));
 }
 
-test('no configured domain\'s key or multi-word title appears in the core, skills, tests or AGENTS.md', { todo: '§3', skip: !fs.existsSync(CONFIG) && 'no vault.config.json' }, () => {
+test('no configured domain\'s key or multi-word title appears in the core, skills, tests or AGENTS.md', { skip: !fs.existsSync(CONFIG) && 'no vault.config.json' }, () => {
   const domains = JSON.parse(fs.readFileSync(CONFIG, 'utf8').replace(/^﻿/, '')).domains ?? {};
   const terms = Object.entries(domains).flatMap(([key, d]) => {
     const words = String(d.title ?? '').trim().split(/\s+/).filter(Boolean);
