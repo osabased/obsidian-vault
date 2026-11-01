@@ -3,6 +3,7 @@ import http from 'node:http';
 import os from 'node:os';
 import path from 'node:path';
 import { execFileSync } from 'node:child_process';
+import { pathToFileURL } from 'node:url';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { makeVault, sessionId, filesUnder, ruleNote, sourcePage, sha256, sectionOf, withFields, serve, gitRepo, cleanEnv, LEDGER_GUIDE } from './fixture.mjs';
@@ -401,4 +402,31 @@ test('refresh takes no arguments', t => {
   const r = v.run('refresh.mjs', ['--all']);
   assert.equal(r.code, 2);
   assert.equal(r.stderr, 'usage: node tools/refresh.mjs\n');
+});
+
+test('a copy another program holds fails the refresh as unreadable, whether or not the chains cached it before', async t => {
+  const repo = gitRepo(t, { 'docs/a.md': 'Alpha.\n' });
+  for (const warm of [false, true]) {
+    const v = makeVault(t);
+    saved(v, 'raw/refs/g.md', { repo: repo.dir, path: 'docs/a.md', commit: repo.commit, fetched: '2026-10-01' }, 'Alpha.\n');
+    if (warm) (await v.import('lib/sources.mjs')).sourceChains();
+    const hold = pathToFileURL(path.join(import.meta.dirname, 'hold-reads.mjs')).href;
+    const r = await v.runAsync('refresh.mjs', [], { env: { NODE_OPTIONS: `--import ${hold}`, HOLD: 'raw/refs/g.md' } });
+    assert.equal(r.code, 1, `warm ${warm}: ${r.stdout}`);
+    assert.match(r.stderr, /refresh failed: can't read raw\/refs\/g\.md/);
+    assert.equal(v.exists('.state/derived.json'), false, `warm ${warm}: a refresh that stopped wrote derived.json`);
+  }
+});
+
+test("a check takes the latest copy's frontmatter from the file as it is now, not from a cached read of it", async t => {
+  const repo = gitRepo(t, { 'docs/a.md': 'Alpha.\n' });
+  const v = makeVault(t);
+  const copy = commit => withFields({ repo: repo.dir, path: 'docs/a.md', commit, fetched: '2026-10-01' }, 'Alpha.\n');
+  const old = new Date(Date.now() - 3600e3);
+  v.write('raw/refs/a.md', copy('e'.repeat(40)), { saved: old });
+  (await v.import('lib/sources.mjs')).sourceChains();
+  // Same size and mtime, as a swap by rename or an archive extract leaves it.
+  v.write('raw/refs/a.md', copy('f'.repeat(40)), { saved: old });
+  const r = await refresh(v);
+  assert.ok(lines(r).includes(`failed ${repo.dir} docs/a.md: commit ${'f'.repeat(40)} isn't in ${repo.dir}`), r.stdout);
 });

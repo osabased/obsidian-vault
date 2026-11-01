@@ -219,6 +219,68 @@ test('a copy in raw/refs/ is read again when its size or mtime changes, or when 
   assert.deepEqual(ids(), ['https://pkg.invalid/fourth'], 'a new size');
 });
 
+const refsCopy = word => withFields({ url: `https://pkg.invalid/${word}`, fetched: '2026-10-01' }, 'hello\n');
+const refsCache = v => JSON.parse(v.read('.state/cache/.refs.json'));
+
+test('a copy whose lstat is refused is unreadable, as when its read is, and the rest of raw/refs/ is still chained', async t => {
+  const v = makeVault(t);
+  const { sourceChains } = await v.import('lib/sources.mjs');
+  v.write('raw/refs/a.md', refsCopy('one'));
+  v.write('raw/refs/b.md', refsCopy('two'));
+  for (const method of ['lstatSync', 'readFileSync']) {
+    const orig = fs[method];
+    t.mock.method(fs, method, function (p, ...rest) {
+      if (path.basename(String(p)) === 'a.md') throw Object.assign(new Error('EPERM: operation not permitted'), { code: 'EPERM' });
+      return orig.call(this, p, ...rest);
+    });
+  }
+  const got = sourceChains();
+  assert.deepEqual(got.unreadable, ['raw/refs/a.md']);
+  assert.deepEqual([...got.chains.keys()], ['https://pkg.invalid/two']);
+});
+
+test('a .refs.json entry of the wrong shape is read again, not trusted', async t => {
+  const v = makeVault(t);
+  const { sourceChains } = await v.import('lib/sources.mjs');
+  v.write('raw/refs/a.md', refsCopy('one'));
+  sourceChains();
+  const file = v.at('.state', 'cache', '.refs.json');
+  const good = refsCache(v);
+  const damage = {
+    'no value': e => { delete e.value; },
+    'null value': e => { e.value = null; },
+    'empty value': e => { e.value = {}; },
+    'data a number': e => { e.value.data = 5; },
+    'no mtime': e => { delete e.m; },
+  };
+  for (const [name, f] of Object.entries(damage)) {
+    const c = structuredClone(good);
+    f(c.notes['raw/refs/a.md']);
+    fs.writeFileSync(file, JSON.stringify(c));
+    assert.deepEqual([...sourceChains().chains.keys()], ['https://pkg.invalid/one'], name);
+    assert.equal(refsCache(v).notes['raw/refs/a.md'].value.data.url, 'https://pkg.invalid/one', `${name}: the entry is saved whole again`);
+  }
+  for (const entry of [null, 'x', 7]) {
+    fs.writeFileSync(file, JSON.stringify({ ...good, notes: { 'raw/refs/a.md': entry } }));
+    assert.deepEqual([...sourceChains().chains.keys()], ['https://pkg.invalid/one'], String(entry));
+  }
+});
+
+test('a copy deleted from raw/refs/ leaves .refs.json, and a change to the code that parses a copy reads every copy again', async t => {
+  const v = makeVault(t);
+  const { sourceChains } = await v.import('lib/sources.mjs');
+  v.write('raw/refs/a.md', refsCopy('one'));
+  v.write('raw/refs/b.md', refsCopy('two'));
+  sourceChains();
+  fs.rmSync(v.at('raw', 'refs', 'a.md'));
+  assert.deepEqual([...sourceChains().chains.keys()], ['https://pkg.invalid/two']);
+  assert.deepEqual(Object.keys(refsCache(v).notes), ['raw/refs/b.md']);
+  const stamp = refsCache(v).stamp;
+  fs.appendFileSync(v.at('tools', 'lib', 'frontmatter.mjs'), '\n// another shape\n');
+  sourceChains();
+  assert.notEqual(refsCache(v).stamp, stamp);
+});
+
 test('a manifest goes by its exact name, so LLMS.txt makes no doc set on any machine, and lint warns on it', async t => {
   for (const name of ['llms.txt', 'LLMS.txt']) {
     const v = makeVault(t);
