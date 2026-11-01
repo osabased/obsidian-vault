@@ -1,4 +1,4 @@
-const ESCAPES = { n: '\n', t: '\t', '"': '"', '\\': '\\' };
+const ESCAPES = { n: '\n', r: '\r', t: '\t', '"': '"', '\\': '\\' };
 
 function quoted(s) {
   const q = s[0];
@@ -78,8 +78,66 @@ function value(raw) {
 }
 
 const closing = lines => (lines[0].trim() === '---' ? lines.findIndex((l, i) => i > 0 && /^---\s*$/.test(l)) : -1);
-const KV = /^([^\s#'"-][^:]*?)\s*:(?:\s+(.*))?$/;
-const ITEM = /^-(?:[ \t]+(.*))?$/;
+const KV = /^([^\s#'"-][^:]*?)\s*:(?:\s+([^]*))?$/;
+const ITEM = /^-(?:[ \t]+([^]*))?$/;
+
+// Where a quote opened at the start of a value closes: the index just past it, or -1 when the text ends first.
+function closeAt(s, q, from) {
+  for (let i = from; i < s.length; i++) {
+    if (q === '"' && s[i] === '\\') i++;
+    else if (q === "'" && s[i] === q && s[i + 1] === q) i++;
+    else if (s[i] === q) return i + 1;
+  }
+  return -1;
+}
+
+// A line that opens a quote after `key: ` or `- `, with the text before the quote.
+const OPEN = /^(\s*(?:-\s+)*(?:[^\s#'"[{-][^:]*?\s*:\s+)?)(['"])/;
+const escapesBreak = s => (/\\+$/.exec(s)?.[0].length ?? 0) % 2 === 1;
+
+// A quoted scalar that runs over several lines, folded as YAML does: each break is a space, an empty line is a newline,
+// the white space around a break goes, and in double quotes a backslash at a line end drops the break. Returns the one
+// line that holds the folded text and how many lines it took, or null when the quote never closes.
+function fold(lines, i, to, line, q) {
+  let esc = q === '"' && escapesBreak(line);
+  let text = esc ? line.slice(0, -1) : line.trimEnd();
+  let blanks = 0;
+  for (let j = i + 1; j < to; j++) {
+    const t = lines[j].trim();
+    if (!t) {
+      blanks++;
+      continue;
+    }
+    text += (blanks ? '\n'.repeat(blanks) : esc ? '' : ' ') + t;
+    if (closeAt(t, q, 0) >= 0) return { text, n: j - i + 1 };
+    esc = q === '"' && escapesBreak(t);
+    if (esc) text = text.slice(0, -1);
+    blanks = 0;
+  }
+  return null;
+}
+
+// The logical lines from..to: blank and comment lines skipped, a quoted scalar over several lines as one. A quote that
+// never closes leaves its first line as it is and adds a message to errors.
+function scan(lines, from, to, errors = []) {
+  const out = [];
+  for (let i = from; i < to; i++) {
+    const line = lines[i].replace(/\r$/, '');
+    if (!line.trim() || /^\s*#/.test(line)) continue;
+    const open = line.match(OPEN);
+    let one = { text: line, n: 1 };
+    if (open && closeAt(line, open[2], open[1].length + 1) < 0) {
+      one = fold(lines, i, to, line, open[2]) ?? one;
+      if (one.n === 1) {
+        const key = open[1].replace(/^[\s-]+/, '').replace(/\s*:\s*$/, '') || 'a list item';
+        errors.push(`${key}: the ${open[2]} quote opened on line ${i + 1} never closes. Close it with a matching ${open[2]}`);
+      }
+    }
+    out.push({ i, ...one });
+    i += one.n - 1;
+  }
+  return out;
+}
 
 // A key with no value takes the lines below it that are indented further, or are list items at its own indent.
 const childrenEnd = (rows, i, level) => {
@@ -143,9 +201,10 @@ function sequence(rows) {
 export function parse(text) {
   const lines = String(text).replace(/^﻿/, '').split(/\r?\n/);
   const end = closing(lines);
-  if (end < 0) return { data: {}, body: lines.join('\n'), ok: false };
-  const rows = lines.slice(1, end).filter(l => l.trim() && !/^\s*#/.test(l)).map(l => ({ indent: l.match(/^\s*/)[0].length, text: l.trim() }));
-  return { data: mapping(rows, 0) ?? {}, body: lines.slice(end + 1).join('\n'), ok: true };
+  if (end < 0) return { data: {}, body: lines.join('\n'), ok: false, errors: [] };
+  const errors = [];
+  const rows = scan(lines, 1, end, errors).map(e => ({ indent: e.text.match(/^\s*/)[0].length, text: e.text.trim() }));
+  return { data: mapping(rows, 0) ?? {}, body: lines.slice(end + 1).join('\n'), ok: true, errors };
 }
 
 // YAML reads these plain as something other than the text: a number, a boolean or null in the YAML other tools use,
@@ -154,7 +213,10 @@ const PLAIN_NOT_TEXT = /^(?:[-+]?(?:\d[\d_]*(?:\.\d*)?|\.\d+)(?:e[-+]?\d+)?|[-+]
 export const plainSafe = s => s !== '' && s === s.trim() && !/[\r\n\t]/.test(s) && !/^[-?:,[\]{}#&*!|>'"%@`]/.test(s)
   && !/: | #|:$/.test(s) && !PLAIN_NOT_TEXT.test(s) && value(s) === s;
 
-export const yamlQuote = s => `'${String(s).replace(/'/g, "''")}'`;
+// Single quotes fold a line break to a space, so a value with one is double-quoted.
+export const yamlQuote = s => (/[\r\n]/.test(s)
+  ? `"${String(s).replace(/[\\"]/g, '\\$&').replace(/\n/g, '\\n').replace(/\r/g, '\\r')}"`
+  : `'${String(s).replace(/'/g, "''")}'`);
 
 // Where a value written after `key: ` ends: after its closing quote, or where a comment starts in a plain one.
 function valueEnd(rest) {
@@ -175,16 +237,17 @@ function valueEnd(rest) {
 export function setField(text, key, val) {
   const lines = text.split('\n');
   const end = closing(lines);
-  const at = lines.findLastIndex((l, i) => i > 0 && i < end && l.replace(/\r$/, '').match(KV)?.[1] === key);
-  if (at < 0) return text;
-  const [, head, old, eol] = lines[at].match(/^([^:]*:[ \t]*)(.*?)(\r?)$/);
-  const next = lines.slice(at + 1, end).find(l => l.trim() && !/^\s*#/.test(l));
+  const at = scan(lines, 1, Math.max(end, 1)).findLast(e => e.text.match(KV)?.[1] === key);
+  if (!at) return text;
+  const [, head, old] = at.text.match(/^([^:]*:[ \t]*)([^]*)$/);
+  const eol = lines[at.i + at.n - 1].endsWith('\r') ? '\r' : '';
+  const next = lines.slice(at.i + at.n, end).find(l => l.trim() && !/^\s*#/.test(l));
   if (BLOCK_SCALAR.test(old)) return text;
   if ((!old.trim() || old.startsWith('#')) && next && /^(?:\s|-)/.test(next)) return text;
   const tail = old.slice(valueEnd(old));
   const comment = /^[ \t]+#/.test(tail) ? tail : '';
   const s = String(val);
   const written = plainSafe(s) && !/^['"]/.test(old) ? s : yamlQuote(s);
-  lines[at] = `${/\s$/.test(head) ? head : `${head} `}${written}${comment}${eol}`;
+  lines.splice(at.i, at.n, `${/\s$/.test(head) ? head : `${head} `}${written}${comment}${eol}`);
   return lines.join('\n');
 }

@@ -104,7 +104,7 @@ function field(lead, name) {
 
 export const parseNote = (text, rel) => noteFrom(parse(text), rel);
 
-function noteFrom({ data, body, ok }, rel) {
+function noteFrom({ data, body, ok, errors = [] }, rel) {
   const parts = nfc(rel).replace(/^wiki\//i, '').replace(/\.md$/i, '').split('/');
   const lead = body.split(/^## /m)[0];
   const successor = single(data.superseded_by);
@@ -116,6 +116,7 @@ function noteFrom({ data, body, ok }, rel) {
     slug: parts.at(-1),
     depth: parts.length,
     ok,
+    parseErrors: errors,
     data,
     body,
     type: data.type,
@@ -227,6 +228,7 @@ const alwaysErrors = n => (n.data.always != null && typeof n.data.always !== 'bo
 function checkNote(n) {
   const errs = n.clash ? [`${joinList(n.clash, 'and')} ${n.clash.length > 1 ? 'have' : 'has'} this note's name too. Rename one: each name is used once in a domain`] : [];
   if (!n.ok) return [...errs, 'no frontmatter'];
+  errs.push(...n.parseErrors);
   if (!KEBAB.test(n.slug) || (n.domain && !KEBAB.test(n.domain))) errs.push('file and folder names must be lowercase-kebab-case');
   if (n.type !== 'rule' && n.type !== 'page') errs.push('type must be rule or page');
   if (n.domain && n.data.domain !== undefined && (typeof n.data.domain === 'string' ? nfc(n.data.domain) : n.data.domain) !== n.domain) errs.push(`domain is ${n.data.domain} but the note is in wiki/${n.domain}/`);
@@ -258,8 +260,8 @@ function checkNote(n) {
 }
 
 const parsed = (rel, text) => {
-  const { data, body, ok } = parse(text);
-  return { data, body, ok };
+  const { data, body, ok, errors } = parse(text);
+  return { data, body, ok, errors };
 };
 // The cache keeps what parsed() read, in cache.mjs's shape, so a change to either, or to frontmatter.mjs, makes it read
 // every note again.
