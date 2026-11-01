@@ -1,6 +1,6 @@
 import fs from 'node:fs';
 import { runHook, vaultRel, vaultOwn, cwdOf, plainText } from '../lib/vault.mjs';
-import { loadNotes, settledNotes, liveRules, deliverable, deliveryFor, ruleLine, fitContext } from '../lib/rules.mjs';
+import { loadNotesAsync, settledNotes, liveRules, deliverable, deliveryFor, ruleLine, fitContext } from '../lib/rules.mjs';
 import { changedFiles } from '../lib/git.mjs';
 import { checkDeadline } from '../lib/deadline.mjs';
 import { fileScope, dueRules, gatedFile } from '../lib/scope.mjs';
@@ -31,7 +31,7 @@ function shellWritten(input, cwd, since) {
 // Every rule due is marked gated on its file, so the next stop, and a later edit of that file, pass. The markers alone
 // keep it to one continuation per file, so stop_hook_active is not consulted: a file a continuation writes still gets
 // its rules, and Claude Code ends the turn after 8 continuations in a row whatever the hook says.
-runHook('stop', input => {
+runHook('stop', async input => {
   const sid = input.session_id;
   const since = sid ? turnStart(sid) : null;
   if (since === null) return null;
@@ -39,7 +39,7 @@ runHook('stop', input => {
   const files = shellWritten(input, cwd, since);
   if (!files.length) return null;
   const scoped = files.map(f => ({ ...f, ...fileScope(f.file, cwd) }));
-  const rules = liveRules(settledNotes(loadNotes([...new Set(scoped.flatMap(s => s.domains))])));
+  const rules = liveRules(settledNotes(await loadNotesAsync([...new Set(scoped.flatMap(s => s.domains))])));
   const listed = new Set();
   const sections = [];
   const shared = deliveryFor([]);

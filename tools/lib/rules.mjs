@@ -4,7 +4,7 @@ import v8 from 'node:v8';
 import { parse, yamlQuote } from './frontmatter.mjs';
 import { validGlob, overlapping, entryParts, globListProblems } from './glob.mjs';
 import { config, vaultPath, shortHash, toPosix, today, inside, plural, isVaultOnly, memo, readJson, statePath, logError } from './vault.mjs';
-import { cachedNotes, cleanFromGit } from './cache.mjs';
+import { cachedNotes, cleanFromGit, noteStats } from './cache.mjs';
 import { SEMVER, SCHEMES, fitOf, projectVersions } from './versions.mjs';
 import { checkDeadline } from './deadline.mjs';
 
@@ -270,9 +270,9 @@ const stamp = () => (parserStamp ??= shortHash([
   String(parsed),
 ].join('\0')));
 
-// The notes under wiki/<domain>/ for each domain given, or every note in wiki/.
-export function loadNotes(domains) {
-  const notes = cachedNotes(domains ?? null, parsed, stamp())
+// The notes under wiki/<domain>/ for each domain given, or every note in wiki/. pre is noteStats() of the same domains.
+export function loadNotes(domains, pre) {
+  const notes = cachedNotes(domains ?? null, parsed, stamp(), pre)
     .map(e => ({ ...noteFrom(e.note, e.rel), saved: e.m, size: e.s, seen: e.seen, clean: e.clean, contentHash: e.h }));
   // A key names one note, so two notes in two folders of a domain with one name would each answer for the other.
   const rels = new Map();
@@ -282,6 +282,9 @@ export function loadNotes(domains) {
   for (const n of notes) if (n.superseded_by) n.superseded_by = resolve(n.superseded_by);
   return notes.sort((a, b) => cmp(a.key, b.key));
 }
+
+// loadNotes with every note stat'ed at once, which a hook awaits.
+export const loadNotesAsync = async domains => loadNotes(domains, await noteStats(domains ?? null));
 
 export function readNote(key, notes = loadNotes()) {
   const k = nfc(key);
