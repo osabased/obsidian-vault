@@ -66,13 +66,15 @@ export function lint(notes = loadNotes(), chains = sourceChains()) {
     const file = transcriptFor(prefix);
     return file ? typedMessages(file) : null;
   });
-  // A file another program holds open can't be read for now, so its lines pass.
+  // A file that can't be hashed for now is skipped, not reported as changed.
+  const hashOf = memo(rel => { try { return hashFile(rel); } catch { return null; } });
+  // A file another program holds open can't be read for now, so its lines pass. One too large to hold is a binary, which
+  // quoteTexts tells apart, so only a read that may succeed later reaches the catch. A skipped hash is tried again there
+  // to throw.
   const textsOf = memo(rel => {
-    try { return quoteTexts(rel); } catch { return { texts: null }; }
+    try { return quoteTexts(rel, r => hashOf(r) ?? hashFile(r)); } catch { return { texts: null }; }
   });
   const pageTextsOf = memo(userPageTexts);
-  // Likewise a file that can't be hashed for now is skipped, not reported as changed.
-  const hashOf = memo(rel => { try { return hashFile(rel); } catch { return null; } });
   const lines = memo(lineCount);
   const anchors = memo(rel => { const hash = hashOf(rel); return hash && derivedAnchors(hash); });
   let rows;
@@ -511,7 +513,7 @@ function lintEvidence(n, ctx, add) {
       const { texts, why } = rel ? textsOf(rel) : {};
       if (!rel) add('warn', n.rel, `an Evidence line cites ${source}. Cite a URL or a file under raw/ that exists`);
       else if (why === 'image') add('warn', n.rel, `an Evidence line quotes ${rel}, an image, as a source. What an image shows is a reading: give it basis reading`);
-      else if (why) add('warn', n.rel, `"${quote}" can't be checked: ${rel} has no derived text. Run node tools/extract.mjs ${rel}`);
+      else if (why) add('warn', n.rel, `"${quote}" can't be checked: ${rel} has no derived text. Run node tools/extract.mjs ${rel}, or save it as UTF-8`);
       else if (texts && !saidIn(quote, texts)) add('warn', n.rel, `"${quote}" isn't in ${rel}. Quote the file's own words, with … where you leave some out`);
     } else {
       unchecked.push({ note: n.rel, cites: source, quote });

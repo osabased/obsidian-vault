@@ -284,8 +284,8 @@ test('lint warns once per quote it cannot check against a binary with no derived
   const v = makeVault(t, { presets: ['archive'] });
   v.write('wiki/glim/rules/talk-rule.md', sourceRule('talk', 'raw/refs/talk.mp4 · dated 2026-10-01 · "the talk opens on cells"', 'raw/refs/talk.mp4 · dated 2026-10-01 · "and closes on grids"'));
   assert.deepEqual(await evidenceWarnings(v, 'wiki/glim/rules/talk-rule.md'), [
-    '"the talk opens on cells" can\'t be checked: raw/refs/talk.mp4 has no derived text. Run node tools/extract.mjs raw/refs/talk.mp4',
-    '"and closes on grids" can\'t be checked: raw/refs/talk.mp4 has no derived text. Run node tools/extract.mjs raw/refs/talk.mp4',
+    '"the talk opens on cells" can\'t be checked: raw/refs/talk.mp4 has no derived text. Run node tools/extract.mjs raw/refs/talk.mp4, or save it as UTF-8',
+    '"and closes on grids" can\'t be checked: raw/refs/talk.mp4 has no derived text. Run node tools/extract.mjs raw/refs/talk.mp4, or save it as UTF-8',
   ]);
 });
 
@@ -303,4 +303,78 @@ test('lint warns once per line that quotes an image as a source', async t => {
   v.write('wiki/glim/rules/shot-rule.md', sourceRule('shot', 'raw/refs/shot.png · dated 2026-10-01 · "the tabs sit on top"', 'raw/refs/shot.png · dated 2026-10-01 · "the cards are wide"'));
   const warning = 'an Evidence line quotes raw/refs/shot.png, an image, as a source. What an image shows is a reading: give it basis reading';
   assert.deepEqual(await evidenceWarnings(v, 'wiki/glim/rules/shot-rule.md'), [warning, warning]);
+});
+
+// A file no buffer holds (2 GiB) can't be written in a test, so the read that fails on it is stubbed.
+function readFails(t, name, code) {
+  const real = fs.readFileSync;
+  t.mock.method(fs, 'readFileSync', function (p, ...rest) {
+    if (String(p).endsWith(name)) throw Object.assign(new Error(`${code}: stubbed`), { code });
+    return real.call(this, p, ...rest);
+  });
+}
+
+test('a binary is told from its first bytes, and never read whole', async t => {
+  const v = makeVault(t, { presets: ['archive'] });
+  v.write('raw/refs/clip.dat', Buffer.concat([Buffer.from('RIFF'), Buffer.alloc(100), Buffer.from('tail')]));
+  v.write('raw/refs/latin.txt', Buffer.from([0x63, 0x61, 0x66, 0xe9, 0x20, 0x61, 0x75, 0x20, 0x6c, 0x61, 0x69, 0x74]));
+  const { fileText } = await v.import('lib/sources.mjs');
+  readFails(t, 'clip.dat', 'EIO');
+  readFails(t, 'latin.txt', 'EIO');
+  assert.equal(fileText(v.at('raw', 'refs', 'clip.dat')), null);
+  assert.equal(fileText(v.at('raw', 'refs', 'latin.txt')), null);
+});
+
+test('a character cut by the end of the first bytes is not mistaken for a binary', async t => {
+  const v = makeVault(t, { presets: ['archive'] });
+  const text = `${'a'.repeat(8191)}é and more\n`;
+  v.write('raw/refs/long.txt', text);
+  const { fileText, lineCount } = await v.import('lib/sources.mjs');
+  assert.equal(fileText(v.at('raw', 'refs', 'long.txt')), text);
+  assert.equal(lineCount('raw/refs/long.txt'), 1);
+});
+
+test('a file too large to read whole is a binary: no text, no derived text, and lint says so', async t => {
+  const v = makeVault(t, { presets: ['archive'] });
+  v.write('raw/refs/huge.txt', 'the log is long\n');
+  v.write('wiki/glim/rules/huge-rule.md', sourceRule('huge', 'raw/refs/huge.txt · dated 2026-10-01 · "the log is long"'));
+  readFails(t, 'huge.txt', 'ERR_FS_FILE_TOO_LARGE');
+  const { sourceTexts, quoteTexts } = await v.import('lib/quotes.mjs');
+  const { lineCount } = await v.import('lib/sources.mjs');
+  assert.equal(sourceTexts('raw/refs/huge.txt'), null);
+  assert.deepEqual(quoteTexts('raw/refs/huge.txt'), { why: 'no derived text' });
+  assert.equal(lineCount('raw/refs/huge.txt'), null);
+  assert.deepEqual(await evidenceWarnings(v, 'wiki/glim/rules/huge-rule.md'), [
+    '"the log is long" can\'t be checked: raw/refs/huge.txt has no derived text. Run node tools/extract.mjs raw/refs/huge.txt, or save it as UTF-8',
+  ]);
+});
+
+test("a file another program holds open still passes lint's quote check, as a transient failure", async t => {
+  const v = makeVault(t, { presets: ['archive'] });
+  v.write('raw/refs/busy.txt', 'the log is long\n');
+  v.write('wiki/glim/rules/busy-rule.md', sourceRule('busy', 'raw/refs/busy.txt · dated 2026-10-01 · "the log is long"'));
+  readFails(t, 'busy.txt', 'EBUSY');
+  assert.deepEqual(await evidenceWarnings(v, 'wiki/glim/rules/busy-rule.md'), []);
+});
+
+test('quoteTexts hashes a binary through the hash its caller gives it', async t => {
+  const v = makeVault(t, { presets: ['archive'] });
+  const { quoteTexts } = await v.import('lib/quotes.mjs');
+  const hash = 'ab'.repeat(32);
+  v.write(`derived/${hash}.md`, "---\nkind: pdf\nextractor: fixture\nextractor_version: '1.0'\nsource: raw/refs/talk.mp4\n---\n[p. 1]\nA stated line.\n");
+  const asked = [];
+  const got = quoteTexts('raw/refs/talk.mp4', rel => { asked.push(rel); return hash; });
+  assert.deepEqual(asked, ['raw/refs/talk.mp4']);
+  assert.equal(got.texts.length, 1);
+  assert.match(got.texts[0], /A stated line\./);
+  assert.doesNotMatch(got.texts[0], /\[p\. 1\]/);
+});
+
+test('a gif, bmp or tiff quote is an image, not a file to extract', async t => {
+  const v = makeVault(t, { presets: ['archive'] });
+  const { quoteTexts } = await v.import('lib/quotes.mjs');
+  for (const name of ['shot.gif', 'shot.bmp', 'shot.tif', 'shot.tiff', 'shot.GIF']) {
+    v.write(`raw/refs/${name}`, Buffer.from([0xff, 0x00, 0x01]));
+    assert.deepEqual(quoteTexts(`raw/refs/${name}`), { why: 'image' }, name);
+  }
 });

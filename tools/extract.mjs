@@ -1,8 +1,8 @@
 import path from 'node:path';
-import { config, vaultPath, vaultRel, writeText, plural } from './lib/vault.mjs';
+import { config, vaultPath, writeText, plural, fromRoot } from './lib/vault.mjs';
 import { rawFile, clip } from './lib/rules.mjs';
 import { plainSafe, yamlQuote } from './lib/frontmatter.mjs';
-import { hashFile, derivedText, clockTime, isAnchor } from './lib/sources.mjs';
+import { hashFile, derivedText, clockTime, isAnchor, startsLikeAnchor } from './lib/sources.mjs';
 import { sourceTexts } from './lib/quotes.mjs';
 import { loadExtractor } from './lib/extractors.mjs';
 import { unallowedSecrets, secretLine } from './lib/secrets.mjs';
@@ -14,7 +14,6 @@ extractors that reads its extension. --force extracts again when the text is alr
 // A bad result from an extractor: its line is failed, and nothing is written for that file.
 class Failed extends Error {}
 
-const fromRoot = ref => (path.isAbsolute(ref) && vaultRel(ref)) || ref;
 const field = s => (plainSafe(s) ? s : yamlQuote(s));
 
 // The parts of one shape, with pages or times that rise, so the anchors the core writes are ones lint can read back.
@@ -25,33 +24,45 @@ function checked(name, mod, result) {
   if (!Array.isArray(parts) || !parts.length) throw new Failed(`${name} returned no parts`);
   let shape;
   let last = -1;
+  const kept = [];
   for (const p of parts) {
     if (!p || typeof p !== 'object' || typeof p.text !== 'string') throw new Failed(`${name} returned a part with no text`);
     if ('page' in p && 't' in p) throw new Failed(`${name} returned a part with both page and t`);
     const s = 'page' in p ? 'page' : 't' in p ? 't' : 'text';
     if (shape && s !== shape) throw new Failed(`${name} returned parts of more than one shape`);
     shape = s;
-    if (s === 'page' && !(Number.isInteger(p.page) && p.page >= 1)) throw new Failed(`${name} returned page ${p.page}`);
-    if (s === 't' && !(Number.isInteger(p.t) && p.t >= 0)) throw new Failed(`${name} returned t=${p.t}, not whole seconds`);
+    if (s === 'page' && !(Number.isSafeInteger(p.page) && p.page >= 1)) throw new Failed(`${name} returned page ${p.page}`);
+    if (s === 't' && !(Number.isSafeInteger(p.t) && p.t >= 0)) throw new Failed(`${name} returned t=${p.t}, not whole seconds`);
     const at = p[s];
     if (s !== 'text' && at <= last) throw new Failed(`${name} returned ${s === 'page' ? `page ${at} after page ${last}` : `t=${at} after t=${last}`}`);
     last = at;
-    const anchor = p.text.split(/\r?\n/).find(isAnchor);
-    if (anchor !== undefined) throw new Failed(`${name} returned text with a line that reads as an anchor: ${clip(anchor.trim(), 40)}`);
+    // Line ends are made \n first, since lint splits on \n alone and a lone \r would otherwise start a line there.
+    const text = p.text.replace(/\r\n?/g, '\n');
+    const anchor = text.split('\n').find(startsLikeAnchor);
+    if (anchor !== undefined) throw new Failed(`${name} returned text with a line that ${isAnchor(anchor) ? 'reads as' : 'starts like'} an anchor: ${clip(anchor.trim(), 40)}`);
+    kept.push({ ...p, text });
   }
-  return { kind, parts, shape };
+  return { kind, parts: kept, shape };
 }
 
 function rendered(name, version, rel, { kind, parts }) {
   const head = ['---', `kind: ${field(kind)}`, `extractor: ${field(name)}`, `extractor_version: ${yamlQuote(version)}`, `source: ${field(rel)}`, '---', ''];
   const body = parts.map(p => {
     const anchor = 'page' in p ? `[p. ${p.page}]\n` : 't' in p ? `[t=${clockTime(p.t)}]\n` : '';
-    return `${anchor}${p.text.replace(/\r\n?/g, '\n')}\n`;
+    return `${anchor}${p.text}\n`;
   });
   return head.join('\n') + body.join('');
 }
 
 async function extractOne(rel, extractors, force) {
+  try {
+    return await extractFile(rel, extractors, force);
+  } catch (e) {
+    return `failed ${rel}: ${e?.message ?? e}`;
+  }
+}
+
+async function extractFile(rel, extractors, force) {
   if (sourceTexts(rel)) return `skipped ${rel}: it is text, so quotes are checked against it as it is`;
   const ext = path.posix.extname(rel).toLowerCase();
   const chosen = extractors.find(x => x.mod.extensions.includes(ext));
@@ -111,18 +122,19 @@ async function main(args) {
     }
     rels.push(rel);
   }
-  const names = config().extractors;
-  const loaded = (Array.isArray(names) ? names : []).map(name => ({ name, ...loadExtractor(name) }));
+  const loaded = config().extractors.map(name => ({ name, ...loadExtractor(name) }));
   const problems = loaded.flatMap(x => x.problems ?? []);
   if (problems.length) {
     console.error(`${problems.join('\n')}\nFix vault.config.json's extractors, which node tools/lint.mjs checks, then extract again.`);
     process.exitCode = 1;
     return;
   }
-  const lines = [];
-  for (const rel of rels) lines.push(await extractOne(rel, loaded, flags.includes('--force')));
-  console.log(lines.join('\n'));
-  if (lines.some(l => l.startsWith('failed '))) process.exitCode = 1;
+  // Each line prints as its file finishes, so a file written before a later one fails keeps its line.
+  for (const rel of rels) {
+    const result = await extractOne(rel, loaded, flags.includes('--force'));
+    console.log(result);
+    if (result.startsWith('failed ')) process.exitCode = 1;
+  }
 }
 
 try {

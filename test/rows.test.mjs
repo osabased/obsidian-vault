@@ -304,7 +304,7 @@ test('a PDF sheet with derived text is taken, and one without is refused', async
   const sheet = v.write('raw/refs/cards.pdf', Buffer.concat([Buffer.from('%PDF-1.4\n'), Buffer.from('Flat cards.\fRaised cards.\n'), Buffer.from([0xff, 0xfe])]));
   const refused = pick(v, sid, provisional({ sheet }));
   assert.equal(refused.code, 1);
-  assert.match(refused.stderr, /sheet must be a \.png, \.jpg, \.jpeg or \.webp image, or a file with derived text \(node tools\/extract\.mjs\)\./);
+  assert.match(refused.stderr, /sheet must be a \.png, \.jpg, \.jpeg or \.webp image, or a file with derived text\. Save the file in raw\/refs\/ and run node tools\/extract\.mjs on it\./);
   assert.equal(fs.existsSync(v.at('raw', 'picks')) ? fs.readdirSync(v.at('raw', 'picks')).length : 0, 0);
   const hash = (await v.import('lib/sources.mjs')).hashPath(sheet);
   v.write(`derived/${hash}.md`, '---\nkind: pdf\nextractor: fixture\nextractor_version: \'1.0\'\nsource: raw/refs/cards.pdf\n---\n[p. 1]\nFlat cards.\n[p. 2]\nRaised cards.\n');
@@ -313,4 +313,21 @@ test('a PDF sheet with derived text is taken, and one without is refused', async
   const [row] = rowsIn(v, 'picks');
   assert.match(row.sheet, /^raw\/picks\/\d{4}-\d\d-\d\d-cards\.pdf$/);
   assert.equal((await v.import('lib/sources.mjs')).hashFile(row.sheet), hash);
+});
+
+test('an oversize sheet is refused for its size before it is read to look for derived text', t => {
+  const v = vault(t, { config: { picks: { maxSheetBytes: 1000 } } });
+  const sid = sessionId();
+  v.startSession(sid);
+  const sheet = v.write('raw/refs/deck.pdf', Buffer.concat([Buffer.from('%PDF-1.4\n'), Buffer.alloc(2000, 1), Buffer.from([0xff])]));
+  const r = pick(v, sid, provisional({ sheet }));
+  assert.equal(r.code, 1);
+  assert.match(r.stderr, /^Not recorded: sheet is 0\.0 MB; keep it under 0\.0 MB/);
+});
+
+test('--help says which sheets pick takes and how a file without an image type gets one', t => {
+  const v = makeVault(t);
+  const r = v.run('pick.mjs', ['--help']);
+  assert.equal(r.code, 0);
+  assert.match(r.stdout, /an image \(\.png, \.jpg, \.jpeg or \.webp\), or a file whose text node tools\/extract\.mjs has extracted, which\s+needs a copy in raw\/refs\//);
 });
