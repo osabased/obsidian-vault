@@ -45,6 +45,13 @@ const domainsIn = (entry, cwd) => {
 // The domains session start found for this session's folder, or, in a folder it didn't scan, that folder's own.
 export const sessionDomains = (sid, cwd) => domainsIn(sid ? readJsonSafe(registry(safeId(sid))) : null, cwd);
 
+// The same domains, each with its project root.
+export function sessionHits(sid, cwd) {
+  const { roots } = recorded(sid ? readJsonSafe(registry(safeId(sid))) : null, cwd);
+  return Array.isArray(roots) ? roots.filter(r => typeof r?.domain === 'string' && typeof r?.root === 'string')
+    : domainsFor(cwd).map(({ domain, root }) => ({ domain, root }));
+}
+
 // Each of a registered session's domains with its project root: those the latest session start found, which compaction
 // or a resume in another folder replaces, and those of the folder the session began in, so pick.mjs and propose.mjs
 // reach the same domains. An entry without roots, written by older tools, finds them again.
@@ -102,11 +109,12 @@ export function markFirst(kind, sid, items, max, keyOf) {
   return due;
 }
 
+// A subagent's context is its own, so what it was shown is marked apart from the agent that started it. The agent goes
+// first, so carryMarkers still finds a rule's key and the hash after it.
+export const agentKey = (input, key) => (input.agent_id ? `${input.agent_id}|${key}` : key);
+
 // Both hooks mark a page under one kind, so an agent hears of each page once, whichever hook brings it up.
-// A subagent's context is its own, so it hears of a page apart from the agent that started it.
-export const markPages = (input, ranked, max = config().delivery.maxPages) => markFirst(
-  'pages', input.session_id, ranked, max, h => (input.agent_id ? `${input.agent_id}|${h.key}` : h.key),
-);
+export const markPages = (input, ranked, max = config().delivery.maxPages) => markFirst('pages', input.session_id, ranked, max, h => agentKey(input, h.key));
 
 // Two markers, both keyed by the rule alone, so a rule reworded since still counts as shown. The delivered one is
 // kept through compaction, so /lint can tell a rule a session was shown from one nothing brought up; the excerpt one

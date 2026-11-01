@@ -28,8 +28,8 @@ Global reaches every session. A domain that isn't vault-only and reaches no proj
 
 A note `tools/propose.mjs` writes applies at once. A note saved any other way applies once it has gone `delivery.settleSeconds` (60 by default, in `vault.config.json`) without another save, so a rule being typed in Obsidian doesn't reach sessions half-written. The hooks read each note as it is now:
 
-- `always: true` rules load at the start of every session the domain reaches, and a session already running gets one with its next prompt.
-- Rules with `applies_to` refuse the first matching edit to each file in a session. The one refusal carries every rule and page due on that file: the first `delivery.maxRulesPerEdit` rules (3 by default) in full, the rest as one-line pointers. The retry goes through.
+- `always: true` rules load at the start of every session the domain reaches and of each subagent in it, and a session already running gets one with its next prompt.
+- Rules with `applies_to` refuse the first matching edit to each file by each agent in a session, the session's own and each subagent. The one refusal carries every rule and page due on that file: the first `delivery.maxRulesPerEdit` rules (3 by default) in full, the rest as one-line pointers. The retry goes through.
 - Rules with `keywords` are shown when a prompt mentions one of them.
 
 Taste and knowledge rules arrive the same three ways.
@@ -83,10 +83,12 @@ updated: 2026-10-19
 - `applies_to`: globs relative to the domain's project root; global's are read from the file's project root, or from the session's folder when no domain has the file. `**` crosses folders, `*` doesn't, `{a,b}` picks one. Matching ignores case and worktree folders.
   - An entry starting with `!` excludes the files it matches. Entries apply in order, as in a `.gitignore`: the last one that matches a file decides. A list with no plain entry matches nothing, and lint reports a `!` entry with nothing before it to exclude from as an error.
   - `'<namespace>:<glob>'` matches names in a namespace other than files, such as objects in a running app. `namespaces` in `vault.config.json` declares each, with its `separator` and `escape` character, and lint reports an undeclared one as an error. The `escape` is one character, not a glob character (`* ? [ ] { } , !`) and not in the `separator`. `file:` is the same as no prefix. Names in a namespace match with case; file globs ignore it.
+  - A tool other than Edit, Write, MultiEdit and NotebookEdit edits names once `editTools` in `vault.config.json` maps it, as `{ "<tool>": { "namespace": "<ns>", "path": "tool_input.<field>", "after": "tool_input.<field>" } }`: `path` is the input field holding the name it edits, and `after` the one holding the new text `triggers` test. A name takes the session's domains, since it has no project folder. Lint reports an entry for a file tool, or for a tool the edit hook's matcher never sends it, as an error.
+  - A domain's `aliases`, `{ "<ns>": "<name>" }`, maps a name in the namespace to a file through `tools/ext/aliases/<name>.mjs`, in projects that have what it reads. The edit then matches the file's globs too, so one rule can cover both.
 - `triggers`: optional regexes tested against the new text of an edit. When present, the rule applies only if one matches.
 - `keywords`: optional words or phrases that bring the rule up from a prompt.
 - `tools`: optional, exact tool names, such as `AskUserQuestion` or an MCP tool's full name.
-- Every rule needs `always`, `applies_to`, `keywords` or `tools`; lint reports one with none as an error. Nothing delivers on `tools` or namespaced globs yet: a rule reached only through them is valid and reaches no session until a later phase builds that.
+- Every rule needs `always`, `applies_to`, `keywords` or `tools`; lint reports one with none as an error. Nothing delivers on `tools` yet: a rule reached only through it is valid and reaches no session until a later phase builds that.
 - `superseded_by`: optional, the note that replaces this one, as a link or a key like `example-ui/new-slug`. The old note stays in the vault and the index, and the hooks stop delivering it. Deleting a note retires its rule too.
 - Single-quote globs and regexes so Obsidian reads them as text and keeps a namespace's backslash escapes.
 - Single-quote any list item that holds `: ` or would read as a number or `true`. YAML reads the first as a key and value and the second as no text, and lint reports either as the note's error, so the note isn't delivered.
@@ -182,7 +184,7 @@ A pick is the user's choice between options the agent showed them for one piece 
 - `status`: `user` when the user picked, `provisional` when the agent picked alone while they were away. `notes` is the user's words verbatim, so a provisional pick has none; `reason` is the agent's own.
 - `replaces`: the id of the pick this one reverses. A provisional pick can replace only another provisional pick. `confirms`: the id of the provisional pick the user agreed with; the row repeats its question, options, pick and sheet, and its reason unless it gives one. Either one ends the earlier row's turn: a row is live until a later row names it, and only a live row can be named.
 - A comment row has `subject` and `text`, the user's words about the piece, and no options.
-- `node tools/pick.mjs show <session-id> <subject> [domain [project]]` prints the live picks and comments on the subject in that project, newest first, then the domain's delivered taste rules, leaving out the topics in the domain's `showSkipTopics` in `vault.config.json`. The rules it prints count as shown to the session. The builder runs it before building or reviewing the piece and pastes its output into the reviewer's prompt.
+- `node tools/pick.mjs show <session-id> <subject> [domain [project]]` prints the live picks and comments on the subject in that project, newest first, then the delivered taste and knowledge rules of the domain and of every other domain whose project holds that one, each leaving out the topics in its `showSkipTopics` in `vault.config.json`. The rules it prints count as shown to the session. The builder runs it before building or reviewing the piece and pastes its output into the reviewer's prompt.
 - A sheet is copied into `raw/picks/`, refused over `picks.maxSheetBytes` (3 MB by default, in `vault.config.json`).
 - A provisional, replaced or confirmed pick backs no rule; propose from the live row instead.
 - `review.mjs status` lists provisional picks not yet confirmed. Lint warns on a `replaces` or `confirms` that names no row, and on a sheet that doesn't exist.

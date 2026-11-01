@@ -486,6 +486,20 @@ export function alwaysContext(domains, rules = liveRules()) {
   return { text: [...out, ...tail(shown)].join('\n'), keys: keys.slice(0, shown) };
 }
 
+// The topics a session start names, which a subagent hears too.
+export function scopeTopics(scope, notes) {
+  const all = domainTopics(notes);
+  return [...new Set(scope.flatMap(d => all.get(d) ?? []))];
+}
+
+export function indexNote(topics) {
+  if (!topics.length) return '';
+  return [
+    `Taste vault: when the task touches ${joinList(topics, 'or')}, read \`${toPosix(vaultPath('index.md'))}\` and the pages it lists under those topics.`,
+    `File a useful answer that draws on the vault back as a page, as \`${toPosix(vaultPath('AGENTS.md'))}\` says under Pages.`,
+  ].join(' ');
+}
+
 export function renderActive(rules) {
   const out = [
     '# Always-on rules',

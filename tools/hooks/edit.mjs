@@ -1,11 +1,12 @@
 import fs from 'node:fs';
 import { runHook, config, domainsFor, everywhereDomains, inside, vaultRel, toPosix, cwdOf, FILE_TOOLS, toolFile, shortHash, lf } from '../lib/vault.mjs';
 import {
-  loadNotes, settledNotes, liveRules, livePages, ruleLine, rulePointer, pageLine, fitContext, tryRegex, cmp, clip, parseNote, QUOTED, agentNotesSpan, authoredByUser, AGENT_NOTES, TOP_HEADING,
+  loadNotes, settledNotes, liveRules, livePages, ruleLine, rulePointer, pageLine, fitContext, tryRegex, cmp, clip, parseNote, QUOTED, agentNotesSpan, authoredByUser, AGENT_NOTES, TOP_HEADING, isMap,
 } from '../lib/rules.mjs';
-import { bestMatch, specificity, bySpecificity } from '../lib/glob.mjs';
+import { bestMatch, matchTarget, targetNames, specificity, bySpecificity } from '../lib/glob.mjs';
 import { parse } from '../lib/frontmatter.mjs';
-import { marked, mark, markShown, markPages } from '../lib/sessions.mjs';
+import { extension } from '../lib/ext.mjs';
+import { marked, mark, markShown, markPages, agentKey, sessionHits } from '../lib/sessions.mjs';
 
 function vaultGuard(file, cwd) {
   const rel = vaultRel(file, cwd);
@@ -135,11 +136,41 @@ function noteGuard(input, file, cwd) {
     const ratio = after.trim().length / Math.max(1, before.trim().length);
     if (ratio < PAGE_KEEPS) why.push(`This edit cuts ${rel} to ${Math.round(ratio * 100)}% of its length. Add to the page or fix it in place instead.`);
   }
-  if (!why.length || !mark('notes', input.session_id, `${rel.toLowerCase()}|${shortHash(after)}`)) return null;
+  if (!why.length || !mark('notes', input.session_id, agentKey(input, `${rel.toLowerCase()}|${shortHash(after)}`))) return null;
   return [...why, 'If the user asked for this, retry the same edit. The retry is allowed.'].join('\n');
 }
 
+// A tool that edits something other than files is gated once config maps it to a namespace, naming the fields of its
+// input that hold the target's path and the new text.
+function mapped(tool) {
+  if (FILE_TOOLS.includes(tool)) return null;
+  const tools = config().editTools;
+  return isMap(tools) && Object.hasOwn(tools, tool) && isMap(tools[tool]) ? tools[tool] : null;
+}
+
+const inputAt = (ti, field) => String(field).replace(/^tool_input\./, '').split('.')
+  .reduce((x, k) => (x !== null && typeof x === 'object' && Object.hasOwn(x, k) ? x[k] : undefined), ti);
+const asText = x => (x === undefined || x === null ? '' : typeof x === 'string' ? x : JSON.stringify(x));
+
+// What the edit changes: a file, or a name in the namespace config maps the tool to. A mapped call without the path
+// would pass ungated, so it fails loudly instead.
+function target(input) {
+  const tool = input.tool_name;
+  const ti = input.tool_input ?? {};
+  if (FILE_TOOLS.includes(tool)) {
+    const file = toolFile(tool, ti);
+    return file ? { namespace: 'file', path: file } : null;
+  }
+  const m = mapped(tool);
+  if (!m) return null;
+  const path = inputAt(ti, m.path);
+  if (typeof path !== 'string' || !path) throw new Error(`editTools.${tool}.path is ${m.path}, which this call's input doesn't hold as text`);
+  return { namespace: m.namespace, path };
+}
+
 function newText(tool, ti) {
+  const m = mapped(tool);
+  if (m) return m.after ? asText(inputAt(ti, m.after)) : '';
   if (tool === 'Write') return String(ti.content ?? '');
   if (tool === 'MultiEdit') return (ti.edits ?? []).map(e => e.new_string ?? '').join('\n');
   if (tool === 'NotebookEdit') return String(ti.new_source ?? '');
@@ -158,8 +189,48 @@ function matcher(file, cwd) {
     const rel = note.domain === 'global' || (pages && own === undefined && everywhere.includes(note.domain)) ? fallback : own;
     if (!note.applies_to?.length || typeof rel !== 'string') return [];
     const glob = bestMatch(note.applies_to, rel);
-    return glob ? [{ key, note, rel, spec: specificity(glob) }] : [];
+    return glob ? [{ key, note, rel, place: rel.toLowerCase(), spec: specificity(glob) }] : [];
   });
+}
+
+const fileScope = (file, cwd) => ({ domains: [...domainsFor(file, cwd).map(d => d.domain), 'global', ...everywhereDomains()], matching: matcher(file, cwd) });
+
+// The file each project root's alias for the namespace maps the name to. An alias, tools/ext/aliases/<name>.mjs,
+// exports toFile(names, root): given the name's parts, escapes read, and a project root, it returns the file's path,
+// absolute or from the root, or null where the project lacks what it reads.
+function aliasedFiles(t, hits, namespaces) {
+  const names = targetNames(t, namespaces);
+  if (!names) return [];
+  const files = hits.flatMap(({ domain, root }) => {
+    const aliases = config().domains[domain]?.aliases;
+    const name = isMap(aliases) && Object.hasOwn(aliases, t.namespace) ? aliases[t.namespace] : null;
+    if (name === null) return [];
+    const file = extension('aliases', name, ['toFile']).toFile(names, root);
+    return typeof file === 'string' && file ? [toPosix(file, root)] : [];
+  });
+  return [...new Set(files)];
+}
+
+// A name has no folder to take domains from, so it takes the session's. Through an alias it also matches the globs of
+// the file it maps to, and a rule both match refuses once.
+function nameScope(input, t, cwd) {
+  const { namespaces } = config();
+  const hits = sessionHits(input.session_id, cwd);
+  const doms = [...new Set(hits.map(h => h.domain))];
+  const files = aliasedFiles(t, hits, namespaces);
+  const everywhere = everywhereDomains();
+  const place = `${t.namespace}:${t.path}`;
+  const own = (notes, pages) => Object.entries(notes).flatMap(([key, note]) => {
+    if (note.domain !== 'global' && !doms.includes(note.domain) && !(pages && everywhere.includes(note.domain))) return [];
+    const glob = note.applies_to?.length ? matchTarget(note.applies_to, t, namespaces) : null;
+    return glob ? [{ key, note, rel: place, place, spec: specificity(glob, namespaces) }] : [];
+  });
+  const viaFiles = files.map(f => matcher(f, cwd));
+  return {
+    domains: [...doms, ...files.flatMap(f => domainsFor(f, cwd).map(d => d.domain)), 'global', ...everywhere],
+    matching: (notes, pages = false) => [...own(notes, pages), ...viaFiles.flatMap(m => m(notes, pages))]
+      .filter((m, i, all) => all.findIndex(x => x.key === m.key) === i),
+  };
 }
 
 // A note with triggers comes up only on an edit whose new text matches one.
@@ -168,11 +239,11 @@ const fires = (note, text) => !note.triggers?.length || note.triggers.some(t => 
 // The rules due on this edit, most specific first: the ones this session was not yet refused with on this file.
 function dueRules(input, matched, text) {
   const hits = [];
-  for (const { key, note, rel, spec } of matched) {
+  for (const { key, note, rel, place, spec } of matched) {
     const triggered = note.triggers?.length > 0;
     if (!fires(note, text)) continue;
     // The hash is in the id, so a reworded rule is refused once more on files it already gated.
-    const id = `${key}|${note.hash}|${rel.toLowerCase()}`;
+    const id = agentKey(input, `${key}|${note.hash}|${place}`);
     if (!marked('gate', input.session_id, id)) hits.push({ key, note, rel, id, triggered, spec });
   }
   return hits.sort((a, b) => Number(b.triggered) - Number(a.triggered) || bySpecificity(a.spec, b.spec) || cmp(a.key, b.key));
@@ -206,16 +277,17 @@ function refusal(input, hits, pages) {
 const deny = why => ({ hookSpecificOutput: { hookEventName: 'PreToolUse', permissionDecision: 'deny', permissionDecisionReason: why } });
 
 runHook('edit', input => {
-  if (!FILE_TOOLS.includes(input.tool_name)) return null;
-  const file = toolFile(input.tool_name, input.tool_input ?? {});
-  if (!file) return null;
+  const t = target(input);
+  if (!t) return null;
   const cwd = cwdOf(input);
-  const why = vaultGuard(file, cwd) ?? noteGuard(input, file, cwd);
-  if (why) return deny(why);
-  // The vault's notes and sources are the user's taste, not project work, so no rule gates them and no page applies.
-  if (/^(?:wiki|raw)\//i.test(vaultRel(file, cwd) ?? '')) return null;
-  const notes = settledNotes(loadNotes([...domainsFor(file, cwd).map(d => d.domain), 'global', ...everywhereDomains()]));
-  const matching = matcher(file, cwd);
+  if (t.namespace === 'file') {
+    const why = vaultGuard(t.path, cwd) ?? noteGuard(input, t.path, cwd);
+    if (why) return deny(why);
+    // The vault's notes and sources are the user's taste, not project work, so no rule gates them and no page applies.
+    if (/^(?:wiki|raw)\//i.test(vaultRel(t.path, cwd) ?? '')) return null;
+  }
+  const { domains, matching } = t.namespace === 'file' ? fileScope(t.path, cwd) : nameScope(input, t, cwd);
+  const notes = settledNotes(loadNotes(domains));
   const text = newText(input.tool_name, input.tool_input ?? {});
   const hits = dueRules(input, matching(liveRules(notes)), text);
   // A page is told of once per session, so the refusal marks every page due, not only the first maxPages.

@@ -1,5 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { makeVault, ruleNote, pageNote, denied, sessionId, editFile as edit, prompt } from './fixture.mjs';
@@ -193,7 +194,7 @@ const gatedOnTxt = t => {
   return v;
 };
 
-test('a subagent editing a file its parent was gated on is refused once more', { todo: '6.3a' }, t => {
+test('a subagent editing a file its parent was gated on is refused once more', t => {
   const v = gatedOnTxt(t);
   const sid = sessionId();
   assert.ok(denied(edit(v, sid, 'src/a.txt')), 'the parent is gated');
@@ -202,7 +203,7 @@ test('a subagent editing a file its parent was gated on is refused once more', {
   assert.equal(edit(v, sid, 'src/a.txt', { agent: 'agent-1' }), null, 'the subagent retry goes through');
 });
 
-test('each agent is gated on a file once, whichever agent edited it first', { todo: '6.3a' }, t => {
+test('each agent is gated on a file once, whichever agent edited it first', t => {
   const v = gatedOnTxt(t);
   const sid = sessionId();
   assert.ok(denied(edit(v, sid, 'src/b.txt', { agent: 'agent-2' })), 'the first subagent is gated');
@@ -211,6 +212,24 @@ test('each agent is gated on a file once, whichever agent edited it first', { to
   assert.equal(edit(v, sid, 'src/b.txt', { agent: 'agent-3' }), null, 'the second subagent retry goes through');
   assert.ok(denied(edit(v, sid, 'src/b.txt')), 'the parent is gated');
   assert.equal(edit(v, sid, 'src/b.txt'), null, 'the parent retry goes through');
+});
+
+test("a subagent's first context holds the session's always rules and topics", t => {
+  const v = makeVault(t);
+  const sid = sessionId();
+  v.write('wiki/demo/always-rule.md', ruleNote({ always: true, doLine: 'Be brief.', notLine: 'Ramble.' }));
+  v.startSession(sid);
+  const start = { session_id: sid, cwd: v.project, hook_event_name: 'SubagentStart', agent_type: 'general-purpose' };
+  for (const agent_id of ['agent-1', 'agent-2']) {
+    const out = v.hook('subagent-start', { ...start, agent_id }).hookSpecificOutput;
+    assert.equal(out.hookEventName, 'SubagentStart');
+    assert.match(out.additionalContext, /^# Taste rules\n[\s\S]*## demo\n- demo\/always-rule: Do: Be brief\. Not: Ramble\./, agent_id);
+    assert.match(out.additionalContext, /Taste vault: when the task touches .*, read `[^`]*index\.md`/, agent_id);
+    assert.ok(!out.additionalContext.includes('propose a rule'), agent_id);
+  }
+  v.write('wiki/demo/late-rule.md', ruleNote({ always: true, doLine: 'Be late.', notLine: 'Be early.' }));
+  v.hook('subagent-start', { ...start, agent_id: 'agent-3' });
+  assert.match(prompt(v, sid, 'hello').hookSpecificOutput.additionalContext, /demo\/late-rule/, "the parent still gets a rule a subagent was shown");
 });
 
 const checkedOut = (t, name, rule) => {
@@ -319,4 +338,65 @@ test('an edit that goes through carries no page pointer', t => {
   assert.match(denied(edit(v, sid, 'src/a.txt')), /demo\/grid/);
   assert.equal(edit(v, sid, 'src/a.txt'), null);
   assert.equal(edit(v, sid, 'src/b.txt'), null);
+});
+
+// A fixture namespace and an MCP tool that sets a property on a name in it.
+const TREE = { namespaces: { 'demo-tree': { separator: '.', escape: '\\' } }, editTools: { mcp__demo__set_property: { namespace: 'demo-tree', path: 'tool_input.path', after: 'tool_input.value' } } };
+const setProperty = (v, sid, name, value = 'x', opts) => v.edit(sid, 'mcp__demo__set_property', { path: name, value }, opts);
+
+test('a mapped call on a name is refused once by a rule on its namespace, then goes through', t => {
+  const v = makeVault(t, { config: TREE });
+  const sid = sessionId();
+  v.startSession(sid);
+  v.write('wiki/demo/tree-rule.md', ruleNote({ applies_to: ['demo-tree:A.**'], doLine: 'Name nodes plainly.' }));
+  assert.match(denied(setProperty(v, sid, 'A.B.C')), /^Taste rules apply to demo-tree:A\.B\.C:\n- demo\/tree-rule: Do: Name nodes plainly\./);
+  assert.equal(setProperty(v, sid, 'A.B.C'), null, 'the retry goes through');
+  assert.equal(setProperty(v, sid, 'B.A.C'), null, 'a name outside the glob is not gated');
+  assert.equal(setProperty(v, sid, 'a.B.C'), null, 'names match with case');
+  assert.ok(denied(setProperty(v, sid, 'A.B.C', 'x', { agent: 'agent-1' })), 'a subagent is gated once more');
+});
+
+test("a mapped call's triggers test the new text the map names", t => {
+  const v = makeVault(t, { config: TREE });
+  const sid = sessionId();
+  v.write('wiki/demo/tree-rule.md', withTriggers(ruleNote({ applies_to: ['demo-tree:A.**'] }), 'Color'));
+  assert.equal(setProperty(v, sid, 'A.B', 'Size'), null);
+  assert.ok(denied(setProperty(v, sid, 'A.B', { Color: 1 })), 'a value that is not text is matched as JSON');
+});
+
+test('through a fixture alias a mapped call is also refused by a rule on the file the name maps to', t => {
+  const domains = { demo: { title: 'Demo', topics: ['code'], aliases: { 'demo-tree': 'fixture' } } };
+  const v = makeVault(t, { config: TREE, domains });
+  v.write('tools/ext/aliases/fixture.mjs', [
+    "import fs from 'node:fs';",
+    "import path from 'node:path';",
+    'export function toFile(names, root) {',
+    "  const map = path.join(root, 'tree.json');",
+    '  if (!fs.existsSync(map)) return null;',
+    "  const folder = JSON.parse(fs.readFileSync(map, 'utf8'))[names[0]];",
+    "  return folder ? `${path.join(root, folder, ...names.slice(1))}.txt` : null;",
+    '}',
+    '',
+  ].join('\n'));
+  const sid = sessionId();
+  v.startSession(sid);
+  v.write('wiki/demo/file-rule.md', ruleNote({ applies_to: ['src/**/*.txt'], doLine: 'Keep files short.' }));
+  v.write('wiki/demo/both-rule.md', ruleNote({ applies_to: ['demo-tree:A.**', 'src/**'], doLine: 'Both ways.' }));
+  const before = denied(setProperty(v, sid, 'A.B.C'));
+  assert.doesNotMatch(before, /file-rule/, 'the alias maps nothing where the project lacks what it reads');
+  assert.match(before, /demo\/both-rule/);
+  fs.writeFileSync(path.join(v.project, 'tree.json'), JSON.stringify({ A: 'src' }));
+  const why = denied(setProperty(v, sid, 'A.B.D'));
+  assert.match(why, /demo\/file-rule: Do: Keep files short\./);
+  assert.equal(why.match(/demo\/both-rule/g)?.length, 1, 'a rule both namespaces match refuses once');
+  assert.equal(setProperty(v, sid, 'A.B.D'), null, 'the retry goes through');
+});
+
+test('an unmapped MCP call returns at once without reading notes, and a mapped call without its path fails loudly', t => {
+  const v = makeVault(t, { config: TREE });
+  const sid = sessionId();
+  v.write('wiki/demo/tree-rule.md', ruleNote({ applies_to: ['demo-tree:**', '**'] }));
+  assert.equal(v.edit(sid, 'mcp__other__set_property', { path: 'A.B', value: 'x' }), null);
+  assert.equal(v.exists('.state/cache'), false, 'no note was read');
+  assert.throws(() => v.edit(sid, 'mcp__demo__set_property', { value: 'x' }), /editTools\.mcp__demo__set_property\.path is tool_input\.path, which this call's input doesn't hold as text/);
 });

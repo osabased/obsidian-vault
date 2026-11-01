@@ -266,6 +266,31 @@ test('lintConfig checks namespaces and editTools, naming the key', async t => {
   assert.deepEqual(await lintOf({ editTools: { mcp__a__b: 'x' } }), ['editTools.mcp__a__b must be an object with namespace, path and after']);
 });
 
+test("lintConfig refuses an editTools entry the edit hook never sees or reads itself, and an alias it can't load", async t => {
+  const ns = { 'demo-tree': { separator: '.', escape: '\\' } };
+  const lintOf = async (config, domains = {}) => {
+    const v = makeVault(t, { config: { namespaces: ns, ...config }, domains });
+    v.write('tools/ext/aliases/fixture.mjs', 'export function toFile() { return null; }\n');
+    const found = [];
+    (await v.import('lib/lint.mjs')).lintConfig((level, file, msg) => found.push(`${level} ${file} ${msg}`));
+    return found;
+  };
+  const entry = { namespace: 'demo-tree', path: 'tool_input.path' };
+  assert.deepEqual(await lintOf({ editTools: { Write: entry, set_property: entry } }), [
+    'error vault.config.json editTools.Write: Write edits a file, which the edit hook reads from the call itself; take it out of editTools',
+    "error vault.config.json editTools.set_property: the edit hook's matcher, Edit|Write|MultiEdit|NotebookEdit|AskUserQuestion|mcp__.*, never sends set_property to the hook, so it would never be gated",
+  ]);
+  const demo = aliases => ({ demo: { title: 'Demo', topics: ['code'], aliases } });
+  assert.deepEqual(await lintOf({}, demo({ 'demo-tree': 'fixture' })), []);
+  assert.deepEqual(await lintOf({}, demo('fixture')), ['error vault.config.json demo.aliases must be an object of alias extension names by namespace']);
+  assert.deepEqual(await lintOf({}, demo({ file: 'fixture', 'demo-tree': 'missing', ghost: '../x' })), [
+    "error vault.config.json demo.aliases.file: file isn't a namespace that vault.config.json declares under namespaces",
+    "error vault.config.json demo.aliases.demo-tree names missing, and tools/ext/aliases/missing.mjs doesn't exist",
+    "error vault.config.json demo.aliases.ghost: ghost isn't a namespace that vault.config.json declares under namespaces",
+    'error vault.config.json demo.aliases.ghost must name an extension in lowercase letters, digits, - or _',
+  ]);
+});
+
 test('setField writes a value that reads back exactly, replacing only the old value and keeping a trailing comment', () => {
   const cases = [
     ["source: 'raw\\refs\\Designer''s shop.png'", "raw/refs/Designer's shop.png", "source: 'raw/refs/Designer''s shop.png'"],

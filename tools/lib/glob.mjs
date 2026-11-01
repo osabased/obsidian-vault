@@ -229,9 +229,7 @@ function select(list, namespace, namespaces, subject) {
 export const bestMatch = (globs, rel) => select(globs, 'file', undefined, rel);
 
 // A target's path is written with its namespace's escape character; its segments are compared as names.
-export function matchTarget(list, { namespace = 'file', path }, namespaces) {
-  const ns = declOf(namespace, namespaces);
-  if (!ns) return null;
+function subjectOf(path, ns) {
   let subject = '';
   for (let i = 0; i < path.length; i++) {
     if (escAt(path, i, ns) && i + ns.escape.length < path.length) {
@@ -242,7 +240,18 @@ export function matchTarget(list, { namespace = 'file', path }, namespaces) {
       i += ns.separator.length - 1;
     } else subject += path[i];
   }
-  return select(list, namespace, namespaces, subject);
+  return subject;
+}
+
+export function matchTarget(list, { namespace = 'file', path }, namespaces) {
+  const ns = declOf(namespace, namespaces);
+  return ns ? select(list, namespace, namespaces, subjectOf(path, ns)) : null;
+}
+
+// The names a target's path holds, with the escapes read, or null in a namespace the config doesn't declare.
+export function targetNames({ namespace = 'file', path }, namespaces) {
+  const ns = declOf(namespace, namespaces);
+  return ns ? subjectOf(path, ns).split(ns.mark) : null;
 }
 
 // What lint should show about a whole list, beyond each entry: a ! entry that has no earlier entry in its namespace to
