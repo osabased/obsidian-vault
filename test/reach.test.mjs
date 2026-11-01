@@ -179,9 +179,12 @@ test('a folder\'s domains are the nearest marker folder\'s and the paths that ho
 test('a session in the vault folder takes no domain from a marker inside raw/refs', t => {
   const v = makeVault(t, { domains: { alpha: ALPHA } });
   v.write('raw/refs/somerepo/alpha.project', '');
+  v.write('wiki/alpha/rules/alpha-always.md', ruleNote({ domain: 'alpha', topic: 'code', always: true, doLine: 'Open each alpha file with its purpose.' }));
   const sid = sessionId();
-  v.startSession(sid, { cwd: v.root });
-  assert.deepEqual(JSON.parse(v.read(`.state/sessions/${sid}.json`)).reach.domains, []);
+  const out = v.startSession(sid, { cwd: v.root });
+  assert.doesNotMatch(out?.hookSpecificOutput?.additionalContext ?? '', /alpha\/alpha-always/);
+  assert.deepEqual(JSON.parse(v.read(`.state/sessions/${sid}.json`)).reach?.domains ?? [], []);
+  assert.doesNotMatch(prompt(v, sid, 'next step', { cwd: v.root })?.hookSpecificOutput?.additionalContext ?? '', /alpha\/alpha-always/);
   const below = sessionId();
   v.startSession(below, { cwd: folder(t, ['sub/alpha.project']) });
   assert.deepEqual(JSON.parse(v.read(`.state/sessions/${below}.json`)).reach.domains, ['alpha']);
@@ -228,7 +231,7 @@ test('in the vault folder propose takes any domain but a vault-only one', t => {
   const sid = sessionId();
   v.startSession(sid, { cwd: v.root });
   const r = v.propose(sid, widgetRule('nope'));
-  assert.equal(r.stderr, 'Not proposed: domain must be glim, alpha or global.\n');
+  assert.match(r.stderr, /^Not proposed: domain must be glim, alpha or global\. [^\n]*domain\.mjs[^\n]*\n$/);
 });
 
 test('a marker in a worktree of a project makes the main checkout the project root', async t => {

@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 import { execFileSync } from 'node:child_process';
 import { makeVault, ruleNote, sessionId, cleanEnv } from './fixture.mjs';
@@ -49,6 +50,14 @@ for (const d of [claudeCode, codex]) {
     const text = d.context(d.start(vault(t), sessionId())) ?? '';
     assert.match(text, /Leave out what the project's own agent instructions already say; a compiled taste-vault section in them is the vault's copy\./);
     assert.doesNotMatch(text, /CLAUDE\.md|\.claude\/rules/);
+  });
+
+  test(`${d.name}: a session start in a folder no domain reaches sends the line on proposing to global and starting a domain`, t => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'vault-uncovered-'));
+    t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+    const text = d.context(d.start(vault(t), sessionId(), { cwd: dir })) ?? '';
+    assert.match(text, /Taste vault: this project is in no domain./);
+    assert.match(text, /domain.mjs/);
   });
 
   test(`${d.name}: a prompt with a keyword gets the excerpt once`, t => {
