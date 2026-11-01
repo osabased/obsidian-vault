@@ -7,7 +7,7 @@ const SID = '9f8e7d6c-0000-4000-8000-000000000001';
 
 const rule = (extra = {}) => ({
   domain: 'glim', slug: 'strict-scripts', topic: 'code', basis: 'stated',
-  do: 'Start scripts with --!strict.', not: 'Leave scripts nonstrict.', because: '', applies_to: ['src/**/*.luau'], ...extra,
+  do: 'Open each file with a purpose line.', not: 'Start a file straight with code.', because: '', applies_to: ['src/**/*.zq'], ...extra,
 });
 
 function session(t, entries) {
@@ -127,7 +127,7 @@ test('a session whose transcript can\'t be read cannot back a stated rule', t =>
 
 test('a reading needs no transcript', t => {
   const v = session(t, null);
-  assert.equal(v.propose(SID, rule({ basis: 'reading', reading: 'the UI scripts all start with --!strict' })).code, 0);
+  assert.equal(v.propose(SID, rule({ basis: 'reading', reading: 'the UI files all open with a purpose line' })).code, 0);
 });
 
 const knowledge = (source, quote, extra = {}) => rule({ kind: 'knowledge', basis: 'source', source, source_date: '2026-10-01', quote, ...extra });

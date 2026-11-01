@@ -10,7 +10,7 @@ const READING = 'Cards sit on a 12px grid with roomy padding; the tab bar packs 
 const PAGE = [
   '---', 'type: page', 'domain: glim', 'kind: source', 'topic: layout', 'summary: Shop screens where the tabs feel cramped.', 'source: raw/refs/shop.png',
   'created: 2026-10-01', 'updated: 2026-10-01', '---', '',
-  '## You said', SAID, '- 2026-10-02 · session 1a2b3c4d · "more room between tabs"', '',
+  '## You said', SAID, '- 2026-10-02 · session 1a2b3c4d · "more room around tabs"', '',
   "## Agent's reading", READING, 'The shop header uses the same accent as the buy buttons, and the prices sit right-aligned.', '',
   '## Rules', '- [[wiki/glim/roomy-cards|roomy-cards]]', '',
 ].join('\n');

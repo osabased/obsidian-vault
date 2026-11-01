@@ -190,14 +190,14 @@ test('the session whose repeat moves as_of is not gated by the rule again, and o
   v.startSession(other);
   oldApi(v);
   for (const s of [sid, other]) {
-    assert.ok(denied(edit(v, s, 'src/a.lua')));
-    assert.equal(edit(v, s, 'src/a.lua'), null);
+    assert.ok(denied(edit(v, s, 'src/a.zq')));
+    assert.equal(edit(v, s, 'src/a.zq'), null);
   }
   const r = v.propose(sid, newerSource());
   assert.equal(r.code, 0, r.stderr);
-  assert.equal(edit(v, sid, 'src/a.lua'), null);
-  assert.ok(denied(edit(v, sid, 'src/b.lua')), 'a file it never gated still is');
-  assert.ok(denied(edit(v, other, 'src/a.lua')));
+  assert.equal(edit(v, sid, 'src/a.zq'), null);
+  assert.ok(denied(edit(v, sid, 'src/b.zq')), 'a file it never gated still is');
+  assert.ok(denied(edit(v, other, 'src/a.zq')));
 });
 
 test('repeats naming a rule that is not delivered is refused', t => {

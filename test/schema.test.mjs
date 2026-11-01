@@ -39,14 +39,14 @@ test('a global entry in vault.config.json is not a vault-only domain', async t =
 test('the index labels each page by its kind', async t => {
   const v = makeVault(t);
   v.write('wiki/glim/code.md', page({ kind: 'topic' }));
-  v.write('wiki/glim/luau-types.md', page({ kind: 'concept' }));
+  v.write('wiki/glim/lit-types.md', page({ kind: 'concept' }));
   v.write('wiki/glim/source-changelog.md', sourcePage({ source: 'https://example.com/changelog' }));
   v.write('wiki/glim/rule-kind.md', page({ kind: 'taste' }));
   v.write('wiki/glim/elsewhere.md', page({ kind: 'concept', domain: 'other' }));
   const rules = await v.import('lib/rules.mjs');
   const index = rules.renderIndex(rules.loadNotes());
   assert.match(index, /\|code\]\] · topic page · /);
-  assert.match(index, /\|luau-types\]\] · concept page · /);
+  assert.match(index, /\|lit-types\]\] · concept page · /);
   assert.match(index, /\|source-changelog\]\] · source page · /);
   assert.match(index, /\|rule-kind\]\] · page · /);
   assert.match(index, /\|elsewhere\]\] · concept page · no sources · not valid: domain is other but the note is in wiki\/glim\/ · /);
@@ -57,19 +57,19 @@ test('lint warns when a rule a page links changes after it, except on a source p
   v.write('wiki/glim/some-rule.md', ruleNote({ keywords: ['x'] }));
   // Saved before the fixture's updated date, so each page's day stays 2026-10-01 whenever the test runs.
   const saved = new Date(2026, 8, 1);
-  for (const [slug, kind] of [['code', 'topic'], ['luau-types', 'concept'], ['shop-answer', 'synthesis'], ['source-shop', 'source']]) {
+  for (const [slug, kind] of [['code', 'topic'], ['lit-types', 'concept'], ['shop-answer', 'synthesis'], ['source-shop', 'source']]) {
     const extra = kind === 'source' ? ['source: https://example.com/shop'] : [];
     fs.utimesSync(v.write(`wiki/glim/${slug}.md`, page({ kind, extra, body: ['## Rules', '- [[wiki/glim/some-rule|some-rule]]'] })), saved, saved);
   }
   const stale = await lintFound(v, /after this page/);
-  assert.deepEqual(stale.map(f => [f.level, f.file]), [['warn', 'wiki/glim/code.md'], ['warn', 'wiki/glim/luau-types.md'], ['warn', 'wiki/glim/shop-answer.md']]);
+  assert.deepEqual(stale.map(f => [f.level, f.file]), [['warn', 'wiki/glim/code.md'], ['warn', 'wiki/glim/lit-types.md'], ['warn', 'wiki/glim/shop-answer.md']]);
   assert.match(stale[0].msg, /^glim\/some-rule changed on \d{4}-\d\d-\d\d, after this page \(2026-10-01\)\. Check the page still matches it, then set updated$/);
 });
 
 test('lint warns on two topic pages on one topic, not on other pages sharing it', async t => {
   const v = makeVault(t);
   v.write('wiki/glim/code.md', page({ kind: 'topic' }));
-  v.write('wiki/glim/luau-types.md', page({ kind: 'concept' }));
+  v.write('wiki/glim/lit-types.md', page({ kind: 'concept' }));
   v.write('wiki/glim/strict-mode.md', page({ kind: 'concept' }));
   assert.deepEqual(await lintFound(v, /another topic page/), []);
   v.write('wiki/glim/code-notes.md', page({ kind: 'topic' }));
