@@ -87,12 +87,9 @@ runHook('session-start', input => {
   let propose = '';
   let pick = '';
   // Vault sessions register so /ingest can propose; the skill tells them how, so they get no note.
-  if (input.session_id && (doms.length || vaultFolder)) {
+  const registered = input.session_id && (doms.length || vaultFolder);
+  if (registered) {
     touchSession(input, hits);
-    // Only the rules that fit count as shown, but those cut for size are marked too, so the next prompt doesn't
-    // deliver what didn't fit here.
-    markShown(input.session_id, always.keys);
-    markAlways(input.session_id, alwaysIn(rules, scope));
     if (doms.length) {
       propose = proposeNote(input.session_id);
       pick = pickNote(input.session_id);
@@ -102,7 +99,7 @@ runHook('session-start', input => {
   const again = ['compact', 'clear'].includes(input.source);
   const errors = again ? [] : [guarded('hook errors', errorsNote), guarded('undelivered notes', () => undeliveredNote(readable, vaultFolder, ready))];
   // Errors rank first, then the always rules, the instructions for proposing and recording, and the topics.
-  const { text: context } = fitContext([
+  const { text: context, kept } = fitContext([
     ...errors,
     { noun: 'block of always rules', items: always.text ? [always.text] : [] },
     propose,
@@ -110,5 +107,11 @@ runHook('session-start', input => {
     { noun: 'topic', items: topics, render: indexNote },
     again ? '' : guarded('lint reminder', () => lintNote(notes)),
   ]);
+  // Only the rules in the block count as shown, but those the block cut for size are marked too, since it points to
+  // active.md for them. A block the output budget left out marks nothing, so the next prompt brings its rules.
+  if (registered && kept[errors.length]) {
+    markShown(input.session_id, always.keys);
+    markAlways(input.session_id, alwaysIn(rules, scope));
+  }
   return context ? { hookSpecificOutput: { hookEventName: 'SessionStart', additionalContext: context } } : null;
 });

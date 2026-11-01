@@ -69,6 +69,11 @@ export const vaultRel = (p, base) => {
   return rel === null ? null : stripWorktree(rel);
 };
 
+// The vault's notes and sources are the user's taste, and the rest are written by the tools or kept for this machine,
+// so no rule covers them, and the edit guard decides what may change.
+const VAULT_OWN = /^(?:wiki|raw|derived|\.state|\.live)(?:\/|$)|^(?:active\.md|index\.md|decisions\.md|vault\.local\.json)$/i;
+export const vaultOwn = rel => typeof rel === 'string' && VAULT_OWN.test(rel);
+
 const caseFolds = process.platform === 'win32' || process.platform === 'darwin';
 const fold = name => (caseFolds ? name.toLowerCase() : name);
 
@@ -228,6 +233,8 @@ export function writeText(file, text) {
 }
 
 export const lf = s => String(s ?? '').replace(/\r\n/g, '\n');
+// A BOM is the editor's, not the text's, so the guards and triggers read text without it.
+export const plainText = s => lf(s).replace(/^\uFEFF/, '');
 export const writeJson = (file, data) => writeText(file, `${JSON.stringify(data, null, 2)}\n`);
 
 // The hooks wait out delivery.settleSeconds after a save because Obsidian saves half-typed notes;

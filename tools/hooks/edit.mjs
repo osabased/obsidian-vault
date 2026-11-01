@@ -1,5 +1,5 @@
 import fs from 'node:fs';
-import { runHook, config, domainsFor, everywhereDomains, vaultRel, toPosix, cwdOf, FILE_TOOLS, toolFile, shortHash, lf } from '../lib/vault.mjs';
+import { runHook, config, domainsFor, everywhereDomains, vaultRel, vaultOwn, toPosix, cwdOf, FILE_TOOLS, toolFile, shortHash, lf, plainText } from '../lib/vault.mjs';
 import {
   loadNotes, settledNotes, liveRules, livePages, ruleLine, rulePointer, pageLine, fitContext, cmp, clip, parseNote, QUOTED, agentNotesSpan, authoredByUser, AGENT_NOTES, TOP_HEADING, isMap,
 } from '../lib/rules.mjs';
@@ -7,11 +7,11 @@ import { matchTarget, targetNames, specificity, bySpecificity } from '../lib/glo
 import { matcher, fileScope, fires, dueRules, gatedFile } from '../lib/scope.mjs';
 import { parse } from '../lib/frontmatter.mjs';
 import { extension } from '../lib/ext.mjs';
-import { mark, markMany, markShown, markPages, agentKey, sessionHits } from '../lib/sessions.mjs';
+import { mark, marked, markMany, markShown, markPages, duePages, agentKey, sessionHits, turnStart } from '../lib/sessions.mjs';
 
 function vaultGuard(file, cwd) {
   const rel = vaultRel(file, cwd);
-  if (rel === null) return null;
+  if (!vaultOwn(rel)) return null;
   const low = rel.toLowerCase();
   if (low === 'active.md' || low === 'index.md') return `${rel} is generated from the notes. Edit the notes instead, then run \`node tools/build.mjs\`.`;
   if (low === 'vault.local.json') return `${rel} lists this machine's project folders for each domain. Leave it to the user.`;
@@ -47,11 +47,8 @@ function replaced(text, e) {
   return parts.length > 2 && !e.replace_all ? null : parts.join(lf(e.new_string));
 }
 
-// A BOM is the editor's, not the text's, so the guards compare the files without it.
-const textOf = s => lf(s).replace(/^\uFEFF/, '');
-
 function textAfter(tool, ti, before) {
-  if (tool === 'Write') return textOf(ti.content);
+  if (tool === 'Write') return plainText(ti.content);
   const edits = tool === 'MultiEdit' ? ti.edits ?? [] : tool === 'Edit' ? [ti] : null;
   return edits && edits.reduce((text, e) => (text === null ? null : replaced(text, e)), before);
 }
@@ -116,7 +113,7 @@ function noteGuard(input, file, cwd) {
   if (!rel || !/^wiki\/.+\.md$/i.test(rel)) return null;
   let before = null;
   if (fs.existsSync(toPosix(file, cwd))) {
-    try { before = textOf(fs.readFileSync(toPosix(file, cwd), 'utf8')); } catch { return null; }
+    try { before = plainText(fs.readFileSync(toPosix(file, cwd), 'utf8')); } catch { return null; }
   }
   const after = textAfter(input.tool_name, input.tool_input ?? {}, before ?? '');
   // Claude Code refuses an edit it can't apply before the hook runs, so one the guard can't follow still applies.
@@ -218,7 +215,8 @@ function nameScope(input, t, cwd) {
 
 // One refusal carries everything due on the file, so the retry goes through. The top rules come in full, up to
 // maxRulesPerEdit and maxBlockChars; the other rules and the pages past maxPages come as one line each, and whatever
-// the output budget has no room for is named in its overflow line. Everything due counts as shown either way.
+// the output budget has no room for is named in its overflow line. Every rule and page due is gated on the file, so the
+// retry passes, but only what the refusal shows counts as shown, so a page left out still comes up on another file.
 function refusal(input, hits, pages, written) {
   const { maxRulesPerEdit, maxBlockChars, maxPages } = config().delivery;
   const sid = input.session_id;
@@ -236,8 +234,9 @@ function refusal(input, hits, pages, written) {
     { noun: 'rule pointer', head: 'Also due, in brief. Open the ones that bear on this edit:', items: hits.slice(full.length).map(h => rulePointer(h.key, h.note)) },
     { noun: 'page', head: `Vault pages on ${rel}. Read the ones that bear on this work:`, items: pages.map((h, i) => pageLine(h.key, h.note, i >= maxPages)) },
   ], { tail: foot, gap: '\n' });
-  markMany('gate', sid, [...hits.map(h => h.id), ...written]);
-  markShown(sid, full.slice(0, kept[0]).map(s => s.key));
+  markMany('gate', sid, [...hits.map(h => h.id), ...pages.map(p => p.id), ...written]);
+  markShown(sid, hits.slice(0, kept[0] + kept[1]).map(h => h.key));
+  markPages(input, pages.slice(0, kept[2]), Infinity);
   return text;
 }
 
@@ -250,18 +249,22 @@ runHook('edit', input => {
   if (t.namespace === 'file') {
     const why = vaultGuard(t.path, cwd) ?? noteGuard(input, t.path, cwd);
     if (why) return deny(why);
-    // The vault's notes and sources are the user's taste, not project work, so no rule gates them and no page applies.
-    if (/^(?:wiki|raw)\//i.test(vaultRel(t.path, cwd) ?? '')) return null;
+    if (vaultOwn(vaultRel(t.path, cwd))) return null;
   }
   const { domains, matching } = t.namespace === 'file' ? fileScope(t.path, cwd) : nameScope(input, t, cwd);
   const notes = settledNotes(loadNotes(domains));
-  const text = newText(input.tool_name, input.tool_input ?? {});
+  const text = plainText(newText(input.tool_name, input.tool_input ?? {}));
   const matched = matching(liveRules(notes));
   const hits = dueRules(input, matched, text);
-  // A page is told of once per session, so the refusal marks every page due, not only the first maxPages.
-  const pages = markPages(input, matching(livePages(notes), true).filter(m => fires(m.note, text)).sort((a, b) => bySpecificity(a.spec, b.spec) || cmp(a.key, b.key)), Infinity);
-  // Only a file some rule covers can matter to the Stop hook, so the others cost no write.
-  const written = t.namespace === 'file' && matched.length ? [gatedFile(t.path, cwd)] : [];
+  // A page is told of once per session wherever it comes up, and is gated on each file as a rule is, so a page the
+  // budget left out of a refusal doesn't refuse the retry.
+  const pages = duePages(input, matching(livePages(notes), true).filter(m => fires(m.note, text)).sort((a, b) => bySpecificity(a.spec, b.spec) || cmp(a.key, b.key)), Infinity)
+    .map(m => ({ ...m, id: agentKey(input, `page|${m.key}|${m.place}`) }))
+    .filter(m => !marked('gate', input.session_id, m.id));
+  // Only a file some rule covers can matter to the Stop hook, which checks a turn only once the prompt hook has stamped
+  // it, so the others cost no write.
+  const turn = t.namespace === 'file' && matched.length ? turnStart(input.session_id) : null;
+  const written = turn === null ? [] : [gatedFile(turn, t.path, cwd)];
   if (hits.length || pages.length) return deny(refusal(input, hits, pages, written));
   markMany('gate', input.session_id, written);
   return null;
