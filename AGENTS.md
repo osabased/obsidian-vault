@@ -14,7 +14,7 @@ The user's taste and knowledge, kept as a small wiki so an agent can apply and l
 - `log.md`: the notes `tools/propose.mjs` wrote or added evidence to, the operations `tools/log.mjs` logged (a page changed on its own, an ingest, an answer filed back) and each `/lint` run's tally, newest last. Older entries record confirmations, retirements, drops and review decisions from before rules went live on writing.
 - `.state/`: the hooks' bookkeeping, including which rules and pages each session was shown, `derived.json`, which refresh and build write, and `versions.json`, the versions read from each project's lockfile.
 - `tools/`: the hooks and scripts. `tools/adapters/<agent>/` holds what is one agent's, its hooks included; the rest of `tools/` is the core and the scripts. Read `tools/CODING_STANDARDS.md` before changing them. Sessions run the hooks from `.live/tools/`, a copy of `tools/` that `.githooks/post-commit` keeps at the last commit, and the start hook names the `propose.mjs` and `pick.mjs` in that copy, so a change to the tools reaches project sessions once it's committed.
-- `.agents/skills/`: copies of `.claude/skills/` for agents that read skills there. Edit a skill in `.claude/skills/`; lint reports a copy that differs other than in line endings, and `node tools/lint.mjs --fix` writes it. Lint also reports a copy whose skill is gone, for you to delete.
+- `.agents/skills/`: copies of `.claude/skills/` for agents that read skills there. Edit a skill in `.claude/skills/`; lint reports a copy that differs other than in line endings, and `node tools/lint.mjs --fix` writes it. Lint also reports a copy whose skill is gone, naming the folder to delete, which `--fix` leaves.
 
 ## How rules and pages reach the agent
 
