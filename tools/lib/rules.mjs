@@ -5,7 +5,9 @@ import { parse, yamlQuote } from './frontmatter.mjs';
 import { validGlob, overlapping, entryParts, globListProblems } from './glob.mjs';
 import { config, vaultPath, shortHash, toPosix, today, inside, plural, isVaultOnly, memo, readJson, statePath } from './vault.mjs';
 import { cachedNotes, cleanFromGit } from './cache.mjs';
-import { SEMVER, fitOf, projectVersions } from './versions.mjs';
+import { SEMVER, SCHEMES, fitOf, projectVersions } from './versions.mjs';
+import { unverifiedNow } from './sources.mjs';
+import { checkDeadline } from './deadline.mjs';
 
 export const LIST_FIELDS = ['applies_to', 'triggers', 'keywords', 'tools'];
 // Slugs and domains take lowercase letters, modifier letters (ー, 々, ʻ), letters of scripts with no case (CJK and the
@@ -212,7 +214,7 @@ function requiresErrors(req) {
     if (!isMap(r.package) || !filled(r.package.ecosystem) || !filled(r.package.name)) errs.push(`${at}: package needs an ecosystem and a name`);
     if (!Array.isArray(r.ranges) || !r.ranges.length || !r.ranges.every(isMap)) return [...errs, `${at}: ranges must be a list of { type, events }`];
     for (const { type, events } of r.ranges) {
-      if (!['SEMVER', 'ECOSYSTEM'].includes(type)) errs.push(`${at}: a range type must be SEMVER or ECOSYSTEM`);
+      if (!SCHEMES.includes(type)) errs.push(`${at}: a range type must be ${joinList(SCHEMES, 'or')}`);
       if (!Array.isArray(events) || !events.length || !events.every(oneEvent)) {
         errs.push(`${at}: each event is one of introduced, fixed, last_affected or limit, with a version`);
         continue;
@@ -334,7 +336,7 @@ export function liveRules(notes = loadNotes()) {
       // Only the delivered wording counts, so an edit to a rule's evidence or globs doesn't deliver it again.
       hash: shortHash(text),
       kind: n.kind, always: n.always, applies_to: n.applies_to, triggers: n.triggers, keywords: n.keywords,
-      requires: n.requires, mtime: n.saved, size: n.size,
+      requires: n.requires, mtime: n.saved, size: n.size, contentHash: n.contentHash,
     };
   }
   return rules;
@@ -361,7 +363,7 @@ export function livePages(notes = loadNotes()) {
     if (n.type !== 'page' || !(n.keywords?.length || n.applies_to?.length) || undelivered(n)) continue;
     pages[n.key] = {
       rel: n.rel, domain: n.domain, kind: n.kind, summary: n.summary, keywords: n.keywords, applies_to: n.applies_to, triggers: n.triggers,
-      requires: n.requires, mtime: n.saved, size: n.size,
+      requires: n.requires, mtime: n.saved, size: n.size, contentHash: n.contentHash,
     };
   }
   return pages;
@@ -373,29 +375,31 @@ export const kindLabel = kind => (PAGE_KINDS.includes(kind) ? `${kind} page` : '
 export const pageLine = (k, p, bare = false) => `- ${k} (${kindLabel(p.kind)}): ${p.summary && !bare ? `${clip(sentence(p.summary), 150)} ` : ''}${toPosix(vaultPath(...p.rel.split('/')))}${labelled(p)}`;
 
 // What a project's lockfiles and .state/derived.json say of the notes a hook matched, read only when a note asks.
-// Refresh and build write derived.json; a missing one means nothing is unverified, and a corrupt one throws.
-export function deliveryFor(hits) {
+// Refresh and build write derived.json; a missing one means nothing is unverified, and a corrupt one throws. A hook
+// that delivers for several projects passes the first one's context as shared, so derived.json is read once.
+export function deliveryFor(hits, shared) {
   let versions;
   let derived;
   return {
     get versions() { return (versions ??= projectVersions(hits)); },
-    get derived() { return (derived ??= readJson(statePath('derived.json'), {})); },
+    get derived() { return shared ? shared.derived : (derived ??= readJson(statePath('derived.json'), {})); },
   };
 }
 
 // The notes a project gets, as [key, note] entries, { key, note } items or a map of notes by key: those its lockfile
 // rules out are dropped, and the rest carry labels for a version the lockfile can't settle and for a source that changed
 // since the note's copy. A label changes a rule's hash, which the markers hold, so a rule shown before is shown again.
-// An unverified entry holds only while the note's file has the mtime and size derived.json recorded.
-export function deliverable(items, ctx = deliveryFor([])) {
+// An unverified entry holds as unverifiedNow says, the same test review lists them by. ctx is deliveryFor's, which
+// every caller passes, so none delivers without the labels.
+export function deliverable(items, ctx) {
   const one = (key, note) => {
+    checkDeadline();
     const fit = note.requires ? fitOf(note.requires, note.domain, ctx.versions) : null;
     if (fit?.fit === 'mismatch') return null;
-    const unverified = ctx.derived?.unverified;
-    const u = isMap(unverified) && Object.hasOwn(unverified, key) ? unverified[key] : null;
+    const u = unverifiedNow(ctx.derived, { key, saved: note.mtime, size: note.size, contentHash: note.contentHash });
     const labels = [
       ...(fit?.fit === 'unknown' ? ['version unknown'] : []),
-      ...(isMap(u) && u.mtime === note.mtime && u.size === note.size && filled(u.since) ? [`source changed on ${u.since}`] : []),
+      ...(u ? [validDay(u.since) ? `source changed on ${u.since}` : 'source changed'] : []),
     ];
     if (!fit && !labels.length) return note;
     const hash = labels.length ? { hash: shortHash(`${note.text ?? note.rel}\0${labels.join(' · ')}`) } : {};
@@ -464,7 +468,9 @@ export function fitContext(sections, { max = config().delivery.maxContextChars, 
   const join = parts => parts.filter(Boolean).join(gap);
   const body = (s, n) => (n ? (s.render ? s.render(s.items.slice(0, n)) : [s.head, ...s.items.slice(0, n)].filter(Boolean).join('\n')) : '');
   const overflow = kept => {
-    const left = all.flatMap((s, i) => (s.items.length > kept[i] ? [plural(s.items.length - kept[i], s.noun)] : []));
+    const counts = new Map();
+    all.forEach((s, i) => { if (s.items.length > kept[i]) counts.set(s.noun, (counts.get(s.noun) ?? 0) + s.items.length - kept[i]); });
+    const left = [...counts].map(([noun, n]) => plural(n, noun));
     return left.length ? `(Left out to stay within ${max} characters: ${joinList(left, 'and')}. \`${toPosix(vaultPath('index.md'))}\` lists the rest.)` : '';
   };
   const render = kept => join([...all.map((s, i) => body(s, kept[i])), overflow(kept), tail]);
@@ -653,13 +659,15 @@ const evidenceLines = n => [...sectionNamed(n, 'evidence').matchAll(/^- .*$/gm)]
   return { line: line.trim(), day: line.match(/^- (\d{4}-\d\d-\d\d)\b/)?.[1], kind: m?.[1].trim(), session: m?.[2], note: m?.[3], cite: m?.[4] ?? '' };
 });
 
-// The session prefixes the Evidence lines give, first seen first.
-// The fit of each note for the projects given, for rankPair.
+// The fit of each note for the projects given, for rankPair, or undefined when they hold no project root, so as_of
+// decides. The lockfiles are read at the first note asked about, so a ranking that never asks reads none.
 export function fitIn(hits) {
-  const versions = projectVersions(hits);
-  return n => fitOf(n.requires, n.domain, versions);
+  if (!hits.some(h => typeof h.root === 'string')) return undefined;
+  let versions;
+  return n => fitOf(n.requires, n.domain, (versions ??= projectVersions(hits)));
 }
 
+// The session prefixes the Evidence lines give, first seen first.
 export const evidenceSessions = n => [...new Set(evidenceLines(n).flatMap(e => e.session ?? []))];
 export const evidenceSources = n => evidenceLines(n).filter(e => e.kind === 'source').flatMap(e => e.cite.match(/^(.+?) · dated /)?.[1] ?? []);
 

@@ -342,6 +342,12 @@ test('sessions hear how many cited sources are past checkAfterDays until a refre
   assert.doesNotMatch(context('startup'), /haven't been checked/);
 });
 
+test('a session in the vault folder, which hears every domain, hears of their stale sources too', t => {
+  const v = makeVault(t, { presets: ['almanac'] });
+  const context = v.startSession(sessionId(), { cwd: v.root })?.hookSpecificOutput.additionalContext ?? '';
+  assert.match(context, /^Taste vault: 2 sources the almanac notes cite haven't been checked in 14 days\./m);
+});
+
 test("a domain's knowledge settings override the vault's, and a check that goes through keeps a rule from going stale", async t => {
   const server = await serve(t, { '/ledger': { body: LEDGER_GUIDE, etag: '"ledger-1"' } });
   const repo = gitRepo(t, { 'docs/ledger.md': 'openLedger returns the ledger it opened.\n' });

@@ -2,7 +2,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { isBuiltin } from 'node:module';
 import {
-  config, vaultPath, plural, today, datedFiles, filesIn, pickRows, rewriteText, lf, readJson, readJsonSafe, toPosix, memo, statePath, isVaultOnly, isMarkerName, clock, FILE_TOOLS, EDIT_HOOK_MATCHER,
+  config, vaultPath, plural, today, daysBetween, datedFiles, filesIn, pickRows, rewriteText, lf, readJson, readJsonSafe, toPosix, memo, statePath, isVaultOnly, isMarkerName, clock, FILE_TOOLS, EDIT_HOOK_MATCHER,
 } from './vault.mjs';
 import {
   vaultFile, loadNotes, noteErrors, ruleText, ruleTextParts, liveRules, knownDomain, alwaysSize, isUrl, validDay, normTopic, topicNotes, rawFile, toKey, resolver, linksUnder, noteLinks, byTopic, isTopicPage, isSourcePage, PAGE_KINDS, joinList,
@@ -108,7 +108,7 @@ export function lint(notes = loadNotes()) {
     if (n.kind === 'knowledge' && !n.superseded_by && validDay(n.as_of)) {
       const checked = lastChecked(n);
       const from = checked && checked > n.as_of ? checked : n.as_of;
-      const days = Math.round((Date.parse(today()) - Date.parse(from)) / 864e5);
+      const days = daysBetween(from);
       if (days > knowledgeDays(n.domain).staleAfterDays) {
         add('warn', n.rel, from === n.as_of
           ? `as_of is ${days} days old. If it still holds, set as_of to the day you checked; if not, delete the note`
