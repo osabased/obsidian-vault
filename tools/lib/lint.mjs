@@ -2,7 +2,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { isBuiltin } from 'node:module';
 import {
-  config, vaultPath, plural, today, daysBetween, datedFiles, filesIn, pickRows, proposalRows, rewriteText, lf, readJson, readJsonSafe, toPosix, memo, statePath, isVaultOnly, isMarkerName, clock,
+  config, vaultPath, plural, today, daysBetween, datedFiles, filesIn, pickRows, proposalRows, rewriteText, lf, readJson, readJsonSafe, toPosix, memo, statePath, isVaultOnly, isMarkerName, clock, inVaultFolder,
 } from './vault.mjs';
 import { editsFile, sentToHook, hookMatchers, typedFor, hasAgent, AGENT_NAME } from './agents.mjs';
 import {
@@ -10,6 +10,7 @@ import {
   hasSection, footnotes, youSaid, linkedKeys, clip, citedSources, evidenceQuotes, keyOf, kindFolder, kindLabel, linkTo, parseNote, noteLinkSpans, maxChars, bundleOf, locate,
   filled, isMap, sourceItem, authoredByUser, isUserPage, parsedFile, notTextError, manifestNames,
 } from './rules.mjs';
+import { hasFormat, reachOf, compileFor } from './compile.mjs';
 import { setField } from './frontmatter.mjs';
 import { NAMESPACE_NAME } from './glob.mjs';
 import { EXTENSION_NAME, hasExtension, extensionRel, extension } from './ext.mjs';
@@ -142,6 +143,7 @@ export function lint(notes = loadNotes(), chains = sourceChains()) {
   lintDerived(add, hashOf, lintExtractors(add));
   lintPrivacy(add);
   lintReach(add);
+  lintCompiled(notes, add);
   const rules = liveRules(notes);
   for (const d of Object.keys(domains)) {
     const size = alwaysSize(rules, ['global', d]);
@@ -271,6 +273,14 @@ export function lintConfig(add) {
     }
   }
   for (const [d, x] of Object.entries(isMap(c.domains) ? c.domains : {})) {
+    if (x?.compile === undefined) continue;
+    if (!Array.isArray(x.compile) || x.compile.some(name => typeof name !== 'string')) bad(`${d}.compile must be a list of adapter names`);
+    else for (const name of x.compile) if (!hasFormat(name)) bad(`${d}.compile names ${name}, and tools/adapters/${name}/compile.mjs doesn't exist`);
+  }
+  if (c.compile !== undefined && (!isMap(c.compile) || (c.compile.maxBytes !== undefined && !(Number.isInteger(c.compile.maxBytes) && c.compile.maxBytes > 0)))) {
+    bad('compile.maxBytes must be a whole number of bytes above 0');
+  }
+  for (const [d, x] of Object.entries(isMap(c.domains) ? c.domains : {})) {
     if (x?.feeds !== undefined) add('warn', 'vault.config.json', `${d}.feeds does nothing yet: no feed parser ships, so refresh reads no feeds`);
   }
   const editTools = c.editTools ?? {};
@@ -290,6 +300,28 @@ export function lintConfig(add) {
     }
     if (typeof t.path !== 'string' || !FIELD.test(t.path)) bad(`${at}.path must be tool_input.<field>`);
     if (t.after !== undefined && (typeof t.after !== 'string' || !FIELD.test(t.after))) bad(`${at}.after must be tool_input.<field>`);
+  }
+}
+
+// A compiled section is written once and read by sessions for as long as it stays in the project, so it is checked
+// against the rules the way a generated file in the vault is. Only the folders a domain lists under paths are found: a
+// project reached by a marker has no root to look in.
+function lintCompiled(notes, add) {
+  const listed = Object.values(config().domains).filter(x => Array.isArray(x.compile) && x.compile.length).flatMap(x => (Array.isArray(x.paths) ? x.paths : []));
+  for (const root of [...new Set(listed.map(p => toPosix(p)))].sort()) {
+    if (inVaultFolder(root) || !fs.statSync(root, { throwIfNoEntry: false })?.isDirectory()) continue;
+    const reach = reachOf(root);
+    if (!reach) continue;
+    const run = `node tools/compile.mjs ${/\s/.test(root) ? `"${root}"` : root}`;
+    for (const r of compileFor(root, reach, notes)) {
+      const msg = {
+        missing: `not compiled; run ${run}`,
+        stale: r.changed ? `stale: ${plural(r.changed, 'rule')} changed since it was compiled; run ${run}` : `stale: its wording changed since it was compiled; run ${run}`,
+        edited: 'edited by hand since it was compiled',
+        refused: r.refused,
+      }[r.state];
+      if (msg) add('warn', r.path, msg);
+    }
   }
 }
 
