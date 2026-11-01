@@ -9,7 +9,7 @@ import {
   sharedFiles, rankPair, maxChars,
 } from './lib/rules.mjs';
 import { build } from './lib/build.mjs';
-import { normGlob } from './lib/glob.mjs';
+import { entryKey } from './lib/glob.mjs';
 import { typedMessages, saidIn, normText, sourceTexts } from './lib/quotes.mjs';
 import { ownEntry, marked, mark, wasShown, carryMarkers } from './lib/sessions.mjs';
 import { setField } from './lib/frontmatter.mjs';
@@ -158,8 +158,6 @@ function overlap(x, y) {
   return shared / (x.size + y.size - shared || 1);
 }
 
-const globKey = g => normGlob(g).toLowerCase();
-
 const SHORTLIST = 5;
 const TOPIC_LIST = 20;
 
@@ -171,12 +169,12 @@ function onTopic(f, rules) {
 
 // Paraphrases share few words, so a shared glob or keyword lists a rule too; the agent judges which it repeats.
 function lookalikes(f, text, scope, rules) {
-  const globs = new Set(f.applies_to.map(globKey));
+  const globs = new Set(f.applies_to.map(entryKey));
   const mine = words(text);
   const close = [];
   for (const [k, r] of Object.entries(rules)) {
     if (!scope.includes(r.domain)) continue;
-    const glob = (r.applies_to ?? []).some(g => globs.has(globKey(g)));
+    const glob = (r.applies_to ?? []).some(g => globs.has(entryKey(g)));
     const theirs = [r.text, ...(r.keywords ?? [])].join('\n');
     const keyword = f.keywords.some(w => mentions(w, theirs));
     const share = overlap(mine, words(r.text));

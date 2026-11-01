@@ -1,7 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { parse } from './frontmatter.mjs';
-import { validGlob, overlapping } from './glob.mjs';
+import { validGlob, overlapping, entryParts, globListProblems } from './glob.mjs';
 import { config, vaultPath, shortHash, toPosix, today, inside, plural } from './vault.mjs';
 
 export const LIST_FIELDS = ['applies_to', 'triggers', 'keywords', 'tools'];
@@ -127,28 +127,24 @@ export function noteErrors(n) {
   return checked.get(n);
 }
 
-// An applies_to entry is '<namespace>:<glob>', or a bare glob over files, with any ! before the namespace. A prefix
-// holding a path or glob character belongs to a file glob.
-export function splitTarget(entry) {
-  const [, not, namespace = null, glob] = String(entry).match(/^(!?)(?:([^:/\\*?{}[\]!]+):)?(.*)$/s);
-  return { negated: not === '!', namespace, glob };
+function targetError(entry, namespaces) {
+  const namespace = typeof entry === 'string' ? entryParts(entry).namespace : 'file';
+  return namespace === 'file' || Object.hasOwn(namespaces, namespace)
+    ? `bad glob in applies_to: ${entry}`
+    : `applies_to names namespace ${namespace}, which vault.config.json doesn't declare under namespaces`;
 }
 
-export const fileGlobs = globs => globs.filter(g => !splitTarget(g).namespace);
-
-function targetErrors(g) {
-  const { namespace, glob } = splitTarget(g);
-  if (namespace === 'file') return ['applies_to: write a file glob bare, without file:'];
-  if (namespace && !Object.hasOwn(config().namespaces, namespace)) return [`applies_to names namespace ${namespace}, which vault.config.json doesn't declare under namespaces`];
-  return validGlob(namespace ? glob : g) ? [] : [`bad glob in applies_to: ${g}`];
+function listErrors(n, fields) {
+  const { namespaces } = config();
+  const globs = n.applies_to ?? [];
+  return [
+    ...fields.filter(f => n[f] === null).map(f => `${f} must be a list`),
+    ...globs.filter(g => !validGlob(g, namespaces)).map(g => targetError(g, namespaces)),
+    ...globListProblems(globs, namespaces),
+    ...(Array.isArray(n.data.tools) ? n.data.tools : []).filter(x => typeof x !== 'string' || !/^\S+$/.test(x))
+      .map(x => `tools must name each tool exactly, with no spaces: ${x === '' ? '(empty)' : x}`),
+  ];
 }
-
-const listErrors = (n, fields) => [
-  ...fields.filter(f => n[f] === null).map(f => `${f} must be a list`),
-  ...(n.applies_to ?? []).flatMap(targetErrors),
-  ...(Array.isArray(n.data.tools) ? n.data.tools : []).filter(x => typeof x !== 'string' || !/^\S+$/.test(x))
-    .map(x => `tools must name each tool exactly, with no spaces: ${x === '' ? '(empty)' : x}`),
-];
 
 // tools counts though nothing delivers on it yet, so a rule written for it now needs no change when that lands.
 export const hasChannel = n => n.always === true || ['applies_to', 'keywords', 'tools'].some(f => n[f]?.length);
@@ -295,8 +291,7 @@ export function liveRules(notes = loadNotes()) {
       domain: n.domain, topic: n.topic, text,
       // Only the delivered wording counts, so an edit to a rule's evidence or globs doesn't deliver it again.
       hash: shortHash(text),
-      // A glob over another namespace never matches a file edit, so the hooks get only file globs.
-      kind: n.kind, always: n.always, applies_to: fileGlobs(n.applies_to), triggers: n.triggers, keywords: n.keywords,
+      kind: n.kind, always: n.always, applies_to: n.applies_to, triggers: n.triggers, keywords: n.keywords,
     };
   }
   return rules;
@@ -316,7 +311,7 @@ export function livePages(notes = loadNotes()) {
   const pages = {};
   for (const n of notes) {
     if (n.type !== 'page' || !(n.keywords?.length || n.applies_to?.length) || undelivered(n)) continue;
-    pages[n.key] = { rel: n.rel, domain: n.domain, kind: n.kind, summary: n.summary, keywords: n.keywords, applies_to: fileGlobs(n.applies_to) };
+    pages[n.key] = { rel: n.rel, domain: n.domain, kind: n.kind, summary: n.summary, keywords: n.keywords, applies_to: n.applies_to };
   }
   return pages;
 }
@@ -347,10 +342,8 @@ function nestedFolders(da, db) {
 // and another domain's when their project folders nest.
 export function sharedFiles(a, b) {
   if (!a.topic || a.topic !== b.topic) return null;
-  const [as, bs] = [fileGlobs(a.applies_to ?? []), fileGlobs(b.applies_to ?? [])];
-  // A glob over another namespace keeps its prefix, so it meets only globs over the same namespace, and no folder applies.
-  const named = overlapping(...[a, b].map(x => (x.applies_to ?? []).filter(g => splitTarget(g).namespace)));
-  if (a.domain === b.domain || [a.domain, b.domain].includes('global')) return overlapping(as, bs) ?? named;
+  const [as, bs] = [a.applies_to ?? [], b.applies_to ?? []];
+  if (a.domain === b.domain || [a.domain, b.domain].includes('global')) return overlapping(as, bs);
   for (const folders of nestedFolders(a.domain, b.domain)) {
     const pair = overlapping(as, bs, folders);
     if (pair) return pair;
