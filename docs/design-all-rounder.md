@@ -1,6 +1,6 @@
 # All-rounder vault: design draft
 
-Status: draft, 2026-11-01. Phase 0 (checks), phase 1 (format) and phase 2 (delivery) are built and merged into main. Phase 3 (neutral fixtures) is built, reviewed and landed on `phase-3-delivery`, not yet merged into main. Phase 4 (knowledge mechanisms) is built, reviewed and fixed on `phase-4-integration`, not yet merged into main. Phase 5 (media and tool triggers) is built, reviewed and fixed on `phase-5-delivery`, with phase 4's perf pass (`p4-perf`) merged in, not yet merged into main.
+Status: draft, 2026-11-01. Phases 0 to 5 are built and merged into main: phase 0 (checks), phase 1 (format), phase 2 (delivery), phase 3 (neutral fixtures), phase 4 (knowledge mechanisms) with its perf pass, and phase 5 (media and tool triggers). Phases 3, 4 and 5 were each reviewed and fixed before merging.
 
 Scope: structure, design and architecture only. This design adds no knowledge to the vault. It names no domain, platform, package ecosystem or site as built in. Where it needs an example, it uses a placeholder.
 
