@@ -10,7 +10,7 @@ import {
 } from './lib/rules.mjs';
 import { build } from './lib/build.mjs';
 import { entryKey } from './lib/glob.mjs';
-import { typedMessages, saidIn, normText, sourceTexts, userPageTexts } from './lib/quotes.mjs';
+import { typedMessages, saidIn, normText, quoteTexts, userPageTexts } from './lib/quotes.mjs';
 import { ownEntry, marked, markMany, wasShown, carryMarkers, proposeDomains } from './lib/sessions.mjs';
 import { setField, yamlQuote, plainSafe } from './lib/frontmatter.mjs';
 import { subjectRows, laterRows, endedBy, otherLabels } from './lib/picks.mjs';
@@ -138,8 +138,13 @@ function checkQuote(session, e) {
     return;
   }
   if (e.kind === 'source') {
-    const texts = REFS.test(e.source) ? sourceTexts(e.source) : null;
-    if (texts && !saidIn(e.said, texts)) refuse(`the quote isn't in ${e.source}. Quote the file's own words.`);
+    if (!REFS.test(e.source)) return;
+    const { texts, why } = quoteTexts(e.source);
+    if (why === 'image') refuse(`${e.source} is an image, and what it shows is your reading. Give it as basis reading instead.`);
+    if (why) {
+      refuse(`${e.source} has no text propose.mjs can read: it isn't UTF-8 and has no derived text. Run node tools/extract.mjs ${e.source}, or save it as UTF-8, then propose again.`);
+    }
+    if (!saidIn(e.said, texts)) refuse(`the quote isn't in ${e.source}. Quote the file's own words.`);
     return;
   }
   if (e.pick || !['stated', 'correction'].includes(e.kind)) return;

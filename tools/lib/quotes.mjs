@@ -1,6 +1,7 @@
 import fs from 'node:fs';
 import { readJsonl, vaultPath } from './vault.mjs';
 import { escapeRegExp, isUserPage, parseNote, userWords } from './rules.mjs';
+import { IMAGE, derivedText, hashFile, isAnchor } from './sources.mjs';
 
 // Claude Code logs tool output, skill text, compaction summaries, injected context and prompts the app or a script
 // sent as user entries too, so only the text the user typed counts as their words: their prompts, queued or not, and
@@ -89,12 +90,29 @@ const markdownText = md => md
 // web page is quoted as it reads, not as its markup: inline tags sit inside words and other tags between them. Markdown
 // is quoted either as written or as it reads.
 export function sourceTexts(rel) {
-  const buf = fs.readFileSync(vaultPath(...rel.split('/')));
-  let text;
-  try { text = new TextDecoder('utf-8', { fatal: true }).decode(buf); } catch { return null; }
-  if (text.includes('\0')) return null;
+  const text = utf8Text(fs.readFileSync(vaultPath(...rel.split('/'))));
+  if (text === null) return null;
   if (/\.html?$/i.test(rel)) return [htmlText(text)];
   return /\.(?:md|markdown)$/i.test(rel) ? [text, markdownText(text)] : [text];
+}
+
+// The bytes as text, or null when they aren't UTF-8 or hold a NUL, as a binary does.
+export function utf8Text(buf) {
+  let text;
+  try { text = new TextDecoder('utf-8', { fatal: true }).decode(buf); } catch { return null; }
+  return text.includes('\0') ? null : text;
+}
+
+// What a quote from a file under raw/ is checked against: { texts }, or { why } when there is nothing to check it
+// against. A binary is read through its derived text without the anchor lines, so a quote may run across a page break.
+// What an image shows is a reading, whatever text was taken from it.
+export function quoteTexts(rel) {
+  const texts = sourceTexts(rel);
+  if (texts) return { texts };
+  const derived = derivedText(hashFile(rel));
+  if (derived ? derived.data.kind === 'image' : IMAGE.test(rel)) return { why: 'image' };
+  if (!derived) return { why: 'no derived text' };
+  return { texts: [derived.body.split('\n').filter(l => !isAnchor(l)).join('\n')] };
 }
 
 // A page of the user's is quoted by paragraph, as a message is, in the words it holds or as they read. Null when the

@@ -27,6 +27,8 @@ const DEFAULTS = {
   reach: { markerDepth: 3 },
   namespaces: {},
   editTools: {},
+  extractors: [],
+  privacy: { allow: [] },
 };
 
 const strings = xs => (Array.isArray(xs) ? xs.filter(x => typeof x === 'string' && x.trim()) : []);
@@ -39,7 +41,8 @@ export function config() {
     const c = readJson(vaultPath('vault.config.json'), {});
     const mine = local();
     const domains = Object.fromEntries(Object.entries(c.domains ?? {}).map(([d, x]) => [d, { ...x, paths: strings(mine?.[d]?.paths) }]));
-    loaded = { domains, ...Object.fromEntries(Object.entries(DEFAULTS).map(([k, d]) => [k, { ...d, ...c[k] }])) };
+    const fill = (k, d) => (Array.isArray(d) ? (Array.isArray(c[k]) ? c[k] : d) : { ...d, ...c[k] });
+    loaded = { domains, ...Object.fromEntries(Object.entries(DEFAULTS).map(([k, d]) => [k, fill(k, d)])) };
   }
   return loaded;
 }

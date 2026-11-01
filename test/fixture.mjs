@@ -299,7 +299,21 @@ const FIXTURE_READER = [
   '}',
   '',
 ].join('\n');
-export const LEDGER_GUIDE = '# Opening a ledger\n\nIn pkg 2, openLedger takes a path and returns the ledger.\nIn pkg 3, openLedger takes an options object with a path field.\n';
+// Reads the text between a PDF's first line and the bytes past ASCII, one page per form feed.
+export const FIXTURE_EXTRACTOR = [
+  "import fs from 'node:fs';",
+  "export const kinds = ['pdf'];",
+  "export const extensions = ['.pdf'];",
+  "export const version = '1.0';",
+  'export function extract(file) {',
+  '  const bytes = fs.readFileSync(file);',
+  "  if (bytes.subarray(0, 5).toString('latin1') !== '%PDF-') throw new Error(\"doesn't start %PDF-\");",
+  "  const text = Buffer.from(bytes.subarray(bytes.indexOf(0x0a) + 1).filter(b => b < 0x80)).toString('latin1');",
+  "  return { kind: 'pdf', parts: text.split('\\f').map((t, i) => ({ page: i + 1, text: t.trim() })) };",
+  '}',
+  '',
+].join('\n');
+export const LEDGER_GUIDE ='# Opening a ledger\n\nIn pkg 2, openLedger takes a path and returns the ledger.\nIn pkg 3, openLedger takes an options object with a path field.\n';
 export const LEDGER_REPO = 'openLedger returns the ledger it opened.\n';
 
 // The five shapes a domain can take (design §8 item 3). Each writes its notes and files into v and returns its share of
@@ -368,8 +382,9 @@ export const PRESETS = {
 
   // Research: pages only, read in the vault, over a binary source with derived text and one without.
   archive(v) {
-    const pdf = Buffer.concat([Buffer.from('%PDF-1.4\n'), Buffer.from([0xff, 0xfe, 0xc3, 0x28, 0x0a])]);
+    const pdf = Buffer.concat([Buffer.from('%PDF-1.4\n'), Buffer.from('The glimmer index counts each lit cell.\fA cell lit twice still counts once.\n'), Buffer.from([0xff, 0xfe])]);
     v.write('raw/refs/paper.pdf', pdf);
+    v.write('tools/ext/extractors/fixture.mjs', FIXTURE_EXTRACTOR);
     v.write('raw/refs/talk.mp4', Buffer.from([0x00, 0x00, 0x00, 0x18, 0x66, 0x74, 0x79, 0x70, 0xff]));
     v.write(`derived/${sha256(pdf)}.md`, withFields(
       { kind: 'pdf', extractor: 'fixture', extractor_version: "'1.0'", source: 'raw/refs/paper.pdf' },
@@ -381,7 +396,7 @@ export const PRESETS = {
       body: ['## You said', '', "## Agent's reading", 'A cell lit twice counts once.[^1]', '', '[^1]: raw/refs/paper.pdf#page=2', '', '## Rules'],
     }));
     v.write('wiki/archive/topics/papers.md', topicPage({ domain: 'archive', topic: 'papers', summary: "'Papers on lit cells.'", links: [paper] }));
-    return { domains: { archive: { title: 'Archive', topics: ['papers'], vaultOnly: true } } };
+    return { domains: { archive: { title: 'Archive', topics: ['papers'], vaultOnly: true } }, config: { extractors: ['fixture'] } };
   },
 
   // Personal, reached by a path in vault.local.json, with a page in the user's own words.

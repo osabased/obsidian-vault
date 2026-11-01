@@ -15,7 +15,8 @@ import { EXTENSION_NAME, hasExtension, extensionRel, extension } from './ext.mjs
 import { SCHEMES } from './versions.mjs';
 import { build } from './build.mjs';
 import { transcriptFor } from './sessions.mjs';
-import { typedMessages, saidIn, sourceTexts, userPageTexts } from './quotes.mjs';
+import { typedMessages, saidIn, quoteTexts, userPageTexts } from './quotes.mjs';
+import { loadExtractor } from './extractors.mjs';
 import {
   KINDS, LOCATORS, hashFile, lineCount, clockTime, parseLocator, anchorsIn, derivedAnchors, manifestLine, sourceProblems, refSources,
   sourceChains, noteCitations, knowledgeDays,
@@ -60,9 +61,9 @@ export function lint(notes = loadNotes()) {
     const file = transcriptFor(prefix);
     return file ? typedMessages(file) : null;
   });
-  // A file another program holds open can't be read for now, so its lines pass like a binary source's.
+  // A file another program holds open can't be read for now, so its lines pass.
   const textsOf = memo(rel => {
-    try { return sourceTexts(rel); } catch { return null; }
+    try { return quoteTexts(rel); } catch { return { texts: null }; }
   });
   const pageTextsOf = memo(userPageTexts);
   // Likewise a file that can't be hashed for now is skipped, not reported as changed.
@@ -125,7 +126,8 @@ export function lint(notes = loadNotes()) {
   lintPicks(add);
   lintSources(add, chains);
   lintBundles(add, hashOf);
-  lintDerived(add, hashOf);
+  lintDerived(add, hashOf, lintExtractors(add));
+  lintPrivacy(add);
   lintReach(add);
   const rules = liveRules(notes);
   for (const d of Object.keys(domains)) {
@@ -374,7 +376,7 @@ function lintBundles(add, hashOf) {
 }
 
 // Extraction writes derived text, so the file a name or source points at is what shows it is still current.
-function lintDerived(add, hashOf) {
+function lintDerived(add, hashOf, versions) {
   for (const f of filesIn(vaultPath('derived'), '', 'derived').sort()) {
     const name = f.slice('derived/'.length);
     const hash = /^[0-9a-f]{64}\.md$/.test(name) ? name.slice(0, 64) : null;
@@ -397,6 +399,40 @@ function lintDerived(add, hashOf) {
     else if (!rawFile(source)) add('warn', f, `source ${source} is gone, so the text can't be checked against it`);
     else if (hash && ![null, hash].includes(hashOf(rawFile(source)))) add('warn', f, `source ${rawFile(source)} has changed: its SHA-256 isn't ${hash}. Extract the text again for the new file`);
     for (const anchor of anchorsIn(body).bad) add('warn', f, `anchor ${anchor} isn't [p. N] or [t=hh:mm:ss]`);
+    const now = versions.get(data.extractor);
+    if (now !== undefined && String(data.extractor_version ?? '') !== now) {
+      add('warn', f, `made by ${data.extractor} ${data.extractor_version}, and ${data.extractor} is ${now} now. Run node tools/extract.mjs ${rawFile(source) ?? source}`);
+    }
+  }
+}
+
+// Each listed extractor, loaded as extract.mjs loads it, so one that would fail extraction fails lint first. Returns the
+// version of each that loads, which the derived text it made is checked against.
+function lintExtractors(add) {
+  const { extractors } = readJson(vaultPath('vault.config.json'), {}) ?? {};
+  const versions = new Map();
+  if (extractors === undefined) return versions;
+  if (!Array.isArray(extractors)) {
+    add('error', 'vault.config.json', 'extractors must be a list of extractor extension names');
+    return versions;
+  }
+  for (const name of extractors) {
+    const { mod, problems } = loadExtractor(name);
+    for (const msg of problems ?? []) add('error', 'vault.config.json', msg);
+    if (mod) versions.set(name, mod.version);
+  }
+  return versions;
+}
+
+function lintPrivacy(add) {
+  const { privacy } = readJson(vaultPath('vault.config.json'), {}) ?? {};
+  const bad = msg => add('error', 'vault.config.json', msg);
+  if (privacy === undefined) return;
+  if (!isMap(privacy)) return bad('privacy must be an object, such as { "allow": [] }');
+  if (privacy.allow === undefined) return;
+  if (!Array.isArray(privacy.allow)) return bad('privacy.allow must be a list of the allow ids scan.mjs prints');
+  for (const id of privacy.allow) {
+    if (typeof id !== 'string' || !/^[0-9a-f]{16}$/.test(id)) bad(`privacy.allow: ${JSON.stringify(id)} isn't an allow id, which is 16 lowercase hex digits as scan.mjs prints it`);
   }
 }
 
@@ -414,7 +450,7 @@ function lintSaid(n, typedIn, add) {
 }
 
 // propose.mjs checks a quote as it writes it, but a rule written or edited by hand never passes through it.
-// A URL, or a source with no words such as a screenshot, can't be checked, so its lines pass.
+// A URL can't be checked, so its lines pass. A binary is checked through its derived text.
 function lintEvidence(n, { typedIn, textsOf, pageTextsOf, rowOf }, add) {
   for (const { line, session, note, source, pick, quote } of evidenceQuotes(n)) {
     if (line) {
@@ -432,8 +468,10 @@ function lintEvidence(n, { typedIn, textsOf, pageTextsOf, rowOf }, add) {
       checkTyped(n, session, quote, typedIn, add);
     } else if (!isUrl(source)) {
       const rel = rawFile(source);
-      const texts = rel ? textsOf(rel) : null;
+      const { texts, why } = rel ? textsOf(rel) : {};
       if (!rel) add('warn', n.rel, `an Evidence line cites ${source}. Cite a URL or a file under raw/ that exists`);
+      else if (why === 'image') add('warn', n.rel, `an Evidence line quotes ${rel}, an image, as a source. What an image shows is a reading: give it basis reading`);
+      else if (why) add('warn', n.rel, `"${quote}" can't be checked: ${rel} has no derived text. Run node tools/extract.mjs ${rel}`);
       else if (texts && !saidIn(quote, texts)) add('warn', n.rel, `"${quote}" isn't in ${rel}. Quote the file's own words, with … where you leave some out`);
     }
   }
