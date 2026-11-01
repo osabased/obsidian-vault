@@ -1,3 +1,4 @@
+import { execFileSync } from 'node:child_process';
 import fs from 'node:fs';
 import test from 'node:test';
 import assert from 'node:assert/strict';
@@ -253,4 +254,52 @@ test("scan and extract exit 2 when they can't finish", t => {
     assert.equal(r.stdout, '');
     assert.match(r.stderr, new RegExp(`^${script.replace('.mjs', '')} failed: `));
   }
+});
+
+test('scan takes a doc set folder, which review.mjs sources lists, and scans each file in it', t => {
+  const v = vault(t);
+  v.write('raw/refs/docs/llms.txt', '# Docs\n- [A](https://glim.example/a.md)\n');
+  v.write('raw/refs/docs/a.md', `${SECRET}\n`);
+  v.write('raw/refs/docs/sub/b.md', 'b\n');
+  assert.match(v.run('review.mjs', ['sources']).stdout, /raw\/refs\/docs\b/);
+  const r = v.run('scan.mjs', ['raw/refs/docs']);
+  assert.equal(r.code, 1, r.stdout + r.stderr);
+  assert.deepEqual(r.stdout.trimEnd().split('\n'), [
+    `raw/refs/docs/a.md:1 assignment api_key=ab…78 · allow ${allowOf('ab12cd34ef56gh78')}`,
+    "1 key- or token-shaped value in 1 file. Remove them, or add an allow id to privacy.allow in vault.config.json if it isn't a secret.",
+  ]);
+  assert.equal(v.run('scan.mjs', ['raw/refs/docs/sub']).code, 2, 'a folder inside a doc set is not the source');
+});
+
+test('a folder scan reads dotfiles too, and skips only what git never tracks', t => {
+  const v = vault(t);
+  v.write('raw/refs/kit/a.txt', 'a\n');
+  v.write('raw/refs/kit/.env', `${SECRET}\n`);
+  v.write('raw/refs/kit/sub/.npmrc', `auth ${TOKEN}\n`);
+  v.write('raw/refs/kit/.git/config', `${SECRET}\n`);
+  assert.equal(v.run('bundle.mjs', ['raw/refs/kit']).code, 0);
+  const r = v.run('scan.mjs', ['raw/refs/kit']);
+  assert.equal(r.code, 1, r.stdout + r.stderr);
+  assert.deepEqual(r.stdout.trimEnd().split('\n').slice(0, 2).map(l => l.split(' ')[0]), ['raw/refs/kit/.env:1', 'raw/refs/kit/sub/.npmrc:1']);
+  assert.match(r.stdout, /in 2 files\./);
+});
+
+test('scan names the file in a bundle it could not read, and exits 2', t => {
+  if (process.getuid?.() === 0) return t.skip('root reads any file');
+  const v = vault(t);
+  v.write('raw/refs/kit/a.txt', 'a\n');
+  v.write('raw/refs/kit/busy.txt', 'b\n');
+  assert.equal(v.run('bundle.mjs', ['raw/refs/kit']).code, 0);
+  const file = v.at('raw', 'refs', 'kit', 'busy.txt');
+  if (process.platform === 'win32') {
+    t.after(() => { try { execFileSync('icacls', [file, '/remove:d', process.env.USERNAME]); } catch {} });
+    execFileSync('icacls', [file, '/deny', `${process.env.USERNAME}:(RD)`]);
+  } else {
+    t.after(() => { try { fs.chmodSync(file, 0o644); } catch {} });
+    fs.chmodSync(file, 0);
+  }
+  const r = v.run('scan.mjs', ['raw/refs/kit']);
+  assert.equal(r.code, 2, r.stdout + r.stderr);
+  assert.equal(r.stdout, '');
+  assert.match(r.stderr, /^raw\/refs\/kit\/busy\.txt can't be read \((?:EPERM|EACCES|EBUSY)\)\. /);
 });
