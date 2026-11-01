@@ -1,26 +1,25 @@
 import fs from 'node:fs';
 import path from 'node:path';
-import { createHash } from 'node:crypto';
-import { config, vaultPath, writeText, readJson, statePath, today, plural, toPosix } from './lib/vault.mjs';
+import { config, vaultPath, writeText, readJson, statePath, today, plural, toPosix, shortHash, removeDir } from './lib/vault.mjs';
 import { isUrl, normUrl, cmp } from './lib/rules.mjs';
 import { yamlQuote } from './lib/frontmatter.mjs';
-import { sourceChains, copyStem } from './lib/sources.mjs';
-import { clone, fetchOrigin, hasCommit, remoteHead, changedSince, showAt } from './lib/git.mjs';
+import { sourceChains, copyStem, sourceProblems, sha256 } from './lib/sources.mjs';
+import { clone, hasOrigin, fetchOrigin, hasCommit, remoteHead, lastChange, sizeAt, showAt } from './lib/git.mjs';
 import { build } from './lib/build.mjs';
 
 const USAGE = 'usage: node tools/refresh.mjs';
-const sha256 = s => createHash('sha256').update(s).digest('hex');
-const { timeoutSeconds, maxBytes } = config().refresh;
-const timeout = timeoutSeconds * 1000;
+// Set in main, so a config that can't be read fails the run as any other error does.
+let timeoutSeconds, maxBytes, timeout;
 
 // A failed check: its reason is recorded, and nothing is written under raw/.
 class Failed extends Error {}
 
-// Lines as parse() reads a saved file's body, so the sha256 of the text is the one lint checks.
+// Line ends as parse() reads a saved file's body, with no \r left before a \n, so the sha256 of the text is the one
+// lint checks.
 function asText(bytes) {
   let text;
   try { text = new TextDecoder('utf-8', { fatal: true }).decode(bytes); } catch { throw new Failed("body isn't UTF-8 text"); }
-  return text.split(/\r?\n/).join('\n');
+  return text.replace(/\r+\n/g, '\n');
 }
 
 async function readCapped(body) {
@@ -73,7 +72,7 @@ async function fetchText(url, { etag, lastModified }) {
 // A clone per repo, named so two repos called alike don't share a folder.
 const cloneDir = repo => {
   const name = String(repo).replace(/[\\/]+$/, '').split(/[\\/:]/).at(-1).replace(/\.git$/i, '').replace(/[^\w.-]/g, '-') || 'repo';
-  return vaultPath('.sources', `${name}-${sha256(String(repo)).slice(0, 8)}`);
+  return vaultPath('.sources', `${name}-${shortHash(repo).slice(0, 8)}`);
 };
 
 const linksIn = (text, base) => new Set([...text.matchAll(/\]\(\s*<?([^)\s>]+)|(?<![(<\w])(https?:\/\/[^\s)>\]]+)/g)].flatMap(m => {
@@ -123,31 +122,55 @@ async function checkUrl(id, chain, chains, was) {
     const now = linksIn(got.text, data.url);
     const added = [...now].filter(u => !before.has(u)).length;
     const removed = [...before].filter(u => !now.has(u)).length;
-    const gone = [...chains.files].filter(([, e]) => e.set === id && !e.manifest && isUrl(e.data.url) && !now.has(normUrl(e.data.url))).map(([r]) => r.slice(id.length + 1));
-    detail = `, ${plural(added, 'link')} added, ${removed} removed${gone.length ? `; cited pages no longer listed: ${[...new Set(gone)].sort(cmp).join(', ')}` : ''}`;
+    const pages = new Set([...chains.files.values()].filter(e => e.set === id && !e.manifest && isUrl(e.data.url) && !now.has(normUrl(e.data.url))).map(e => e.id));
+    const gone = [...pages].map(p => chains.chains.get(p).at(-1).slice(id.length + 1)).sort(cmp);
+    detail = `, ${plural(added, 'link')} added, ${removed} removed${gone.length ? `; cited pages no longer listed: ${gone.join(', ')}` : ''}`;
   }
   return { result, copy, detail, ...headers };
 }
 
+// Each clone is cloned or fetched once a run, however many of its repo's paths the sources cite: null once it is ready,
+// or the error it failed with.
+const synced = new Map();
+function syncClone(repo) {
+  const dir = cloneDir(repo);
+  if (!synced.has(dir)) {
+    try {
+      if (hasOrigin(dir, { timeout })) fetchOrigin(dir, { timeout });
+      else {
+        try { removeDir(dir); } catch (e) { throw new Failed(`can't remove ${toPosix(dir)}: ${e.code ?? e.message}`); }
+        clone(repo, toPosix(dir), { timeout });
+      }
+      if (!remoteHead(dir, { timeout })) throw new Failed('remote has no default branch');
+      synced.set(dir, null);
+    } catch (e) {
+      synced.set(dir, e);
+    }
+  }
+  if (synced.get(dir)) throw synced.get(dir);
+  return dir;
+}
+
 function checkGit(chain, chains) {
   const latest = chain.at(-1);
-  const { data } = chains.files.get(latest);
+  const { data, body } = chains.files.get(latest);
+  const problems = sourceProblems(data, { body });
+  if (problems.length) throw new Failed(`${latest}: ${problems.join('; ')}`);
   const repo = String(data.repo);
-  const commit = typeof data.commit === 'string' ? data.commit : null;
-  if (!commit) throw new Failed(`${latest} gives no commit`);
-  const dir = cloneDir(repo);
-  if (!fs.existsSync(path.join(dir, '.git'))) clone(repo, toPosix(dir), { timeout });
-  else fetchOrigin(dir, { timeout });
-  if (!remoteHead(dir, { timeout })) throw new Failed('remote has no default branch');
-  if (!hasCommit(dir, commit, { timeout })) throw new Failed(`commit ${commit} isn't in ${repo}`);
-  const changes = changedSince(dir, commit, data.path, { timeout });
-  if (!changes.length) return { result: 'unchanged' };
-  const newest = changes[0].commit;
-  const bytes = showAt(dir, newest, data.path, { timeout });
-  if (!bytes) throw new Failed(`${data.path} is gone at ${newest.slice(0, 8)}`);
+  const dir = syncClone(repo);
+  if (!hasCommit(dir, data.commit, { timeout })) throw new Failed(`commit ${data.commit} isn't in ${repo}`);
+  const change = lastChange(dir, data.commit, data.path, { timeout });
+  if (!change) return { result: 'unchanged' };
+  const newest = change.commit;
+  const size = sizeAt(dir, newest, data.path, { timeout });
+  if (size === null) throw new Failed(`${data.path} is gone at ${newest.slice(0, 8)}`);
+  if (size > maxBytes) throw new Failed(`body over ${maxBytes} bytes`);
+  const text = asText(showAt(dir, newest, data.path, { timeout }));
+  // A change reverted upstream leaves the text the latest copy holds, and a copy of it would mark its notes for nothing.
+  if (text === body) return { result: 'unchanged', note: ` (same text at ${newest.slice(0, 8)})` };
   return {
     result: 'changed',
-    copy: { after: latest, hash: newest, ext: '.md', text: asText(bytes), fields: { repo, path: data.path, commit: newest, fetched: today(), replaces: latest } },
+    copy: { after: latest, hash: newest, ext: '.md', text, fields: { repo, path: data.path, commit: newest, fetched: today(), replaces: latest } },
   };
 }
 
@@ -175,6 +198,8 @@ async function inPool(items, n, f) {
 }
 
 async function main() {
+  ({ timeoutSeconds, maxBytes } = config().refresh);
+  timeout = timeoutSeconds * 1000;
   const chains = sourceChains();
   if (chains.unreadable.length) throw new Error(`can't read ${chains.unreadable.join(', ')}`);
   const before = readJson(statePath('derived.json'), {});
@@ -187,11 +212,22 @@ async function main() {
 
   const day = today();
   // The copies are written under build.lock, where their names are taken, and before build reads raw/refs/ for the chains.
+  // A copy another refresh or an /ingest saved since the check read the chain would fork it, so the chain is read again
+  // there, and a check whose copy no longer follows the latest one isn't saved.
   build({
     apply: derived => {
       const sources = { ...(derived.sources ?? {}) };
-      for (const [id, r] of results) {
+      const now = [...results.values()].some(r => r.copy) ? sourceChains() : chains;
+      for (let [id, r] of results) {
         const w = sources[id] ?? {};
+        const latest = now.chains.get(id)?.at(-1);
+        if (r.copy && latest !== r.copy.after) {
+          const same = latest && [now.files.get(latest).data.sha256, now.files.get(latest).data.commit].includes(r.copy.hash);
+          r = same
+            ? { result: 'unchanged', ...('etag' in r ? { etag: r.etag, lastModified: r.lastModified } : {}) }
+            : { result: 'failed', why: `${latest ?? r.copy.after} changed while this check ran` };
+          results.set(id, r);
+        }
         if (r.copy) {
           r.copy.rel = copyName(r.copy.after, r.copy.hash, r.copy.ext);
           writeText(vaultPath(...r.copy.rel.split('/')), `${frontmatter(r.copy.fields)}${r.copy.text}`);

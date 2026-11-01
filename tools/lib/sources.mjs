@@ -12,7 +12,7 @@ export const KINDS = ['pdf', 'video', 'audio', 'image'];
 export const LOCATORS = 'Use #page=3, #t=00:12:31 or #L10-L20';
 const HEX64 = /^[0-9a-f]{64}$/;
 
-const sha256 = data => createHash('sha256').update(data).digest('hex');
+export const sha256 = data => createHash('sha256').update(data).digest('hex');
 
 const readRel = rel => fs.readFileSync(vaultPath(...rel.split('/')));
 
