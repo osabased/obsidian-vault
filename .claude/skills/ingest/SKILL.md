@@ -12,7 +12,7 @@ Work in the vault root. AGENTS.md has the page and rule formats. With `batch`, f
 1. **Source.** Take the source the user named. If they named none, run `node tools/review.mjs sources`, which lists the files in `raw/refs/` no source page names, and ask which. If a source page already covers it, update that page in step 4 rather than start another: one whose `source` is the file, or for a URL, the URL or a file in `raw/refs/` whose frontmatter gives that `url`.
 2. **Save it** in `raw/refs/`, so pages and rules cite a copy whose words propose.mjs can check:
    - A file under `raw/refs/` is there already. Copy a file from elsewhere in under a new name.
-   - For a URL, save the page's own words, as the browser's `get_page_text` gives them (raise `max_chars` for a long page), to a new `raw/refs/<slug>.md` that starts with frontmatter giving its `url` and the day you `fetched` it. WebFetch gives a summary rather than the page's words, so if no browser can open the page, ask the user to save it into `raw/refs/`.
+   - For a URL, save the page's own words, as the browser's `get_page_text` gives them (raise `max_chars` for a long page), to a new `raw/refs/<slug>.md` that starts with frontmatter giving its `url` and the day you `fetched` it, and no `sha256`, `etag` or `last_modified`: a later tool computes those. WebFetch gives a summary rather than the page's words, so if no browser can open the page, ask the user to save it into `raw/refs/`.
 
    Then read it in full.
 3. **Discuss** the main points with the user, a line or two per topic of the domain (`node tools/propose.mjs --help` lists the ones its rules and pages have and the ones it lists), labelled as your reading.
@@ -23,12 +23,13 @@ Work in the vault root. AGENTS.md has the page and rule formats. With `batch`, f
 5. **Propose rules**, the clearest first, with `tools/propose.mjs` (`--help` lists the fields). Pipe the JSON from the Bash tool with a quoted heredoc to `node tools/propose.mjs "$CLAUDE_CODE_SESSION_ID"`.
    - Taste rules come from the user's words: basis `stated` or `inferred`, quoting what they typed, or `reading` for something you saw in the source that they asked you to make a rule of.
    - Knowledge rules come from the new facts the user kept: `kind: knowledge`, basis `source`, with `source` and `source_date` as on the source page, and the source's words as the quote. A source with no date backs none.
-   - Give a rule about code or files `applies_to` globs from the project root, fitting the files in the domain's project folders that `vault.config.json` lists; a knowledge rule needs them. `always` is the user's to set.
-   - A rule goes in its source page's domain. A research domain takes no rules, so a rule from its source goes in the domain, or `global`, whose projects its `applies_to` is for.
+   - Give a rule about code or files `applies_to` globs from the project root, fitting the files in the domain's projects. `always` is the user's to set.
+   - A rule goes in its source page's domain. A vault-only domain takes no rules, so a rule from its source goes in the domain, or `global`, whose projects its `applies_to` is for.
 
    End your reply with the lines it prints; the rule applies from then on. If the user doesn't want it, delete its note, and if they want it worded otherwise, edit it. Then propose the next.
 6. **Update the pages it touches.** For each topic the source touches, find in `index.md` the topic page and the concept and entity pages under it.
    - Add what the source shows to each page it bears on, citing it with a footnote, and what the user said, linking the source page. Where it contradicts a page and is newer than that page's sources, rewrite the claim from it and say what changed; where it's older, keep the claim and note the disagreement.
+   - A page with `author: user` is the user's own writing: add to it only new lines under its `## Agent notes`.
    - Start a topic page, `kind: topic`, for a topic with none, with the `keywords` a request on the topic would use, and `applies_to` when the topic is about certain files, so the hooks point sessions to it.
    - Start a concept or entity page for an idea, API or named thing that the source explains, or that two pages now mention, and that has no page yet. Give it `keywords` too, and link it from its topic page.
    - Link the source page from the page of the topic it is mostly about, and the new rules under the topic page's `## Rules`. Set `updated` to today on every page you change.

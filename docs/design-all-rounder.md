@@ -148,7 +148,7 @@ Phase-3 notes then need no migration, even where the tooling lands later.
     - VS Code's `workspaceContains:<glob>` activation event detects a project kind the same way (https://code.visualstudio.com/api/references/activation-events).
   - `paths`: folders, as today. Paths differ per machine, so they move to an untracked `vault.local.json` keyed by domain. `vault.config.json` keeps only what every machine shares.
   - `everywhere: true`: the domain's pages and keyword rules reach every session. It is opt-in.
-  - A domain with no markers, no paths and no `everywhere` stays vault-only, as a research domain with `projects: []` is today (AGENTS.md:11). So a personal domain never reaches project sessions unless the user turns that on.
+  - `vaultOnly: true`: pages only, as a research domain with `projects: []` is today (AGENTS.md:11). It is explicit, since paths are per machine and missing reach would make it differ by machine. A domain that reaches nothing here and isn't `vaultOnly` gets a lint warning naming `vault.local.json`.
 - *Check* (fixture domains):
   - A session in an unlisted folder holding domain A's marker gets A's rules and can propose.
   - In a monorepo, an edit under `packages/a/` (A's marker) gets A's rules, and an edit under `packages/b/` (B's marker) gets B's.
@@ -575,9 +575,9 @@ The phases build mechanism only. Adding real knowledge and taste is the user's c
 
 | Check | Passing means | Today |
 |---|---|---|
-| `node --test test/*.test.mjs` | All pass; each `todo` fails for the reason its design section names | 171 pass, 10 `todo`, about 12 s |
-| Neutral-core test (§3) | No configured domain's key or title appears in `tools/`, `.claude/skills/`, `test/` or AGENTS.md | Fails: the domain key in `propose.mjs:55`, `:334` and 6 lines of AGENTS.md |
-| The probes as `todo` tests (phase 0) | Each passes with its `todo` mark removed: slow trigger, subagent gate, settle after an mtime change, negated glob, one refusal per file, frontmatter | In `test/delivery` and `test/rules`: 9 `todo`, all red. In `test/propose-repeats`, `setField-bom` passes, and three parallel proposes on a small vault pass, so the default run guards the lock too. |
+| `node --test test/*.test.mjs` | All pass; each `todo` fails for the reason its design section names | 271 pass, 9 `todo`, 17 to 29 s |
+| Neutral-core test (§3) | No configured domain's key or title appears in `tools/`, `.claude/skills/`, `test/` or AGENTS.md | Fails: the domain key in `propose.mjs:58` and `:355` |
+| The probes as `todo` tests (phase 0) | Each passes with its `todo` mark removed: slow trigger, subagent gate, settle after an mtime change, negated glob, one refusal per file, frontmatter | In `test/delivery` and `test/rules`: 8 `todo`, all red: slow trigger, subagent gate (2), settle after an mtime change (2), one refusal per file, frontmatter, long-path prefix. Negated glob passes (phase 1). In `test/propose-repeats`, `setField-bom` passes, and three parallel proposes on a small vault pass, so the default run guards the lock too. |
 | Perf group: `VAULT_PERF=1 node --test test/perf/*.perf.mjs` (about 30 s, outside the default run) | Fastest of 5 gated edits under 1,000 ms at 1,000 notes; fastest of 3 under 300 ms at 3,000 (`todo`); three parallel proposes of unrelated rules at 3,000 notes all succeed (`todo`, 6.6f) | 781 ms; 2,132 ms; 2 of 3 fail on the lock |
 | Each *Check* in §6 | As stated there, against the phase-3 fixtures | Not built |
 | Transcript provider test (6.7c) | The fields the provider reads still exist in a current transcript | Not built |
@@ -589,7 +589,7 @@ The phases build mechanism only. Adding real knowledge and taste is the user's c
 The design changes these parts of AGENTS.md. Each change lands with the phase that builds it.
 
 - **Examples throughout.** Use placeholder domains, such as `example-ui`, instead of a real one (§3).
-- **Line 11 (research domains).** `projects: []` becomes `markers`, `paths` and `everywhere`. A domain with none of them is vault-only.
+- **Line 11 (research domains).** `projects: []` becomes `markers`, `paths` and `everywhere`, and vault-only becomes an explicit `vaultOnly: true`.
 - **Lines 22–27 (how rules and pages reach the agent).**
   - Line 22: one refusal per file carries every due rule and page (decision 6, 6.5).
   - Line 25: a rule is shown again when it turns unverified.
