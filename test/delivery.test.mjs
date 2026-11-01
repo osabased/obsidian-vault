@@ -248,7 +248,7 @@ test('20 rules and 2 pages on one glob refuse the first edit of a file once, and
   assert.equal(edit(v, sid, 'src/x.txt'), null, 'the retry passes');
 });
 
-test('a trigger with nested wildcards does not hold the edit hook up on a long line', { todo: '6.6c' }, t => {
+test('a trigger with nested wildcards does not hold the edit hook up on a long line', t => {
   const v = makeVault(t);
   const sid = sessionId();
   v.write('wiki/demo/rules/slow.md', withTriggers(ruleNote({ applies_to: ['src/**/*.txt'] }), 'make\\(.*,.*,.*,.*\\)'));

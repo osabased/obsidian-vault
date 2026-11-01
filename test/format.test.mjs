@@ -35,7 +35,7 @@ test('frontmatter reads what it read before', () => {
   ]), {
     type: 'rule', topic: "it's", title: 'a\tb', n: '12', always: false, empty: null, tilde: null,
     applies_to: ['src/**', 'lib/*.ts'], keywords: ['one', 'two'], flat: ['x', 'y'],
-    link: ['[wiki/demo/other|other]'], items: ['[[wiki/demo/a]]'], summary: '>-',
+    link: ['[wiki/demo/other|other]'], items: ['[[wiki/demo/a]]'], summary: 'folded text stays out',
   });
   assert.deepEqual(parse('﻿---\r\na: 1\r\nlist:\r\n  - b\r\n---\r\nbody').data, { a: '1', list: ['b'] });
   assert.deepEqual(data(['list:', '  -', 'next: 1']), { list: null, next: '1' });
@@ -326,4 +326,11 @@ test('propose quotes a topic YAML would read as something other than text', t =>
     assert.equal(r.code, 0, `${topic}: ${r.stderr}`);
     assert.match(v.read('wiki/demo/rules/new-rule.md'), new RegExp(`^topic: '${topic}'$`, 'm'));
   }
+});
+
+test('a folded block scalar reads as its lines joined by spaces, a literal one by newlines, and setField leaves either alone', () => {
+  const lines = ['a: >-', '  one', '  two', 'b: |', '  x', '  y', 'c: z'];
+  assert.deepEqual(data(lines), { a: 'one two', b: 'x\ny', c: 'z' });
+  const text = front(lines);
+  assert.equal(setField(text, 'a', 'new'), text);
 });
