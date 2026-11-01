@@ -131,10 +131,27 @@ test('lint errors when a skill has no byte copy in .agents/skills/, and lint --f
   const missing = v.run('lint.mjs');
   assert.match(missing.stdout, /^error \.agents\/skills\/ingest\/SKILL\.md: missing; run node tools\/lint\.mjs --fix to copy \.claude\/skills\/ingest\/SKILL\.md$/m);
   v.write('.agents/skills/ingest/SKILL.md', skill.replace('\r\n', '\n'));
+  assert.doesNotMatch(v.run('lint.mjs').stdout, /\.agents\/skills/, 'a copy that differs only in line endings is the same skill');
+  v.write('.agents/skills/ingest/SKILL.md', skill.replace('Steps', 'Old steps'));
   const differs = v.run('lint.mjs');
   assert.match(differs.stdout, /^error \.agents\/skills\/ingest\/SKILL\.md: differs from \.claude\/skills\/ingest\/SKILL\.md; edit the skill there, then run node tools\/lint\.mjs --fix to copy it$/m);
   const fixed = v.run('lint.mjs', ['--fix']);
   assert.match(fixed.stdout, /^fixed \.agents\/skills\/ingest\/SKILL\.md: /m);
   assert.ok(fs.readFileSync(v.at('.agents', 'skills', 'ingest', 'SKILL.md')).equals(Buffer.from(skill)));
   assert.doesNotMatch(fixed.stdout.split(/^fixed .*$/m).at(-1), /\.agents\/skills/);
+});
+
+test('lint errors on a copy in .agents/skills/ whose skill is gone, naming the folder to delete, and lint --fix leaves it', t => {
+  const v = makeVault(t);
+  v.write('.claude/skills/ingest/SKILL.md', '---\nname: ingest\n---\n');
+  v.write('.agents/skills/ingest/SKILL.md', '---\nname: ingest\n---\n');
+  v.write('.agents/skills/old-name/SKILL.md', '---\nname: old-name\n---\n');
+  v.write('.agents/skills/old-name/notes/more.md', 'More.\n');
+  const r = v.run('lint.mjs');
+  assert.equal(r.code, 1);
+  const found = r.stdout.split('\n').filter(l => l.includes('.agents/skills'));
+  assert.deepEqual(found, ['error .agents/skills/old-name/: .claude/skills/old-name/ no longer exists; delete .agents/skills/old-name/']);
+  const fixed = v.run('lint.mjs', ['--fix']);
+  assert.match(fixed.stdout, /^error \.agents\/skills\/old-name\/: /m);
+  assert.ok(fs.existsSync(v.at('.agents', 'skills', 'old-name', 'SKILL.md')));
 });

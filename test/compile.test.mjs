@@ -239,3 +239,126 @@ test('lint errors on a compile or compile.maxBytes of the wrong shape', async t 
   assert.ok(found.some(m => /^glim\.compile must be a list of adapter names/.test(m)), found.join('\n'));
   assert.ok(found.some(m => /^compile\.maxBytes must be a whole number/.test(m)), found.join('\n'));
 });
+
+test('a compile.maxBytes that isn\'t a positive whole number falls back to the default, so compile and lint finish', t => {
+  const v = glimVault(t, { config: { compile: { maxBytes: 'big' } } });
+  const r = v.run('compile.mjs', [v.project], { timeout: 20e3 });
+  assert.equal(r.error?.code, undefined, 'compile finishes');
+  assert.equal(r.code, 0, r.stderr);
+  assert.equal(fs.readFileSync(agentsOf(v), 'utf8'), SECTION);
+  const l = v.run('lint.mjs', [], { timeout: 60e3 });
+  assert.equal(l.error?.code, undefined, 'lint finishes');
+  assert.match(l.stdout, /^error vault\.config\.json: compile\.maxBytes must be a whole number/m);
+});
+
+test('the section holds only what committed files say: a source-changed label from .state/ stays out, and lint stays quiet', async t => {
+  const v = glimVault(t);
+  assert.equal(compile(v).code, 0);
+  const { loadNotes } = await v.import('lib/rules.mjs');
+  const n = loadNotes().find(x => x.key === 'glim/keyword-rule');
+  v.write('.state/derived.json', JSON.stringify({ unverified: { 'glim/keyword-rule': { contentHash: n.contentHash, since: '2026-10-01' } } }));
+  assert.deepEqual((await lintOf(v)).filter(f => f.file === posix(agentsOf(v))), []);
+  const r = compile(v);
+  assert.equal(r.stdout, `unchanged ${posix(agentsOf(v))}\n`);
+  assert.equal(fs.readFileSync(agentsOf(v), 'utf8'), SECTION);
+});
+
+test('a worktree of a project whose marker sits below it gets the same globs as the main checkout', t => {
+  const v = glimVault(t);
+  v.write('vault.local.json', `${JSON.stringify({ domains: { glim: { paths: [] } } })}\n`);
+  const main = folder(t, { 'pkg/glim.project': '', '.claude/worktrees/x/pkg/glim.project': '' });
+  const tree = path.join(main, '.claude', 'worktrees', 'x');
+  const r = compile(v, tree);
+  assert.equal(r.code, 0, r.stdout + r.stderr);
+  assert.match(fs.readFileSync(agentsOf(v, tree), 'utf8'), /### When editing pkg\/src\/\*\*\/\*\.zq\n\n- glim\/zq-trigger/);
+});
+
+test('a folder below a domain\'s project root is refused with the root to compile instead, and nothing is written', t => {
+  const v = glimVault(t);
+  const sub = path.join(v.project, 'sub');
+  fs.mkdirSync(sub);
+  const r = compile(v, sub);
+  assert.equal(r.code, 1);
+  assert.equal(r.stdout, `refused ${posix(sub)}: the glim rules' globs start at ${posix(v.project)}, which holds this folder. Run node tools/compile.mjs ${posix(v.project)} instead.\n`);
+  assert.ok(!fs.existsSync(agentsOf(v, sub)));
+});
+
+test('markers inside a code fence are the user\'s text: the section is appended once, then stays current, and a hand edit is still found', t => {
+  const v = glimVault(t);
+  const sample = `# Mine\n\n\`\`\`md\n${beginLine('3f9c01ab77e0d2c1')}\n## Taste rules\n${END}\n\`\`\`\n\n~~~\n${END}\n~~~\n`;
+  fs.writeFileSync(agentsOf(v), sample);
+  const r = compile(v);
+  assert.equal(r.code, 0, r.stdout);
+  assert.equal(fs.readFileSync(agentsOf(v), 'utf8'), `${sample}\n${SECTION}`);
+  assert.equal(compile(v).stdout, `unchanged ${posix(agentsOf(v))}\n`);
+  fs.writeFileSync(agentsOf(v), fs.readFileSync(agentsOf(v), 'utf8').replace('Open each glim file', 'Open any glim file'));
+  assert.match(compile(v).stdout, /edited by hand/);
+});
+
+test('an unclosed fence hides no marker, so compiling twice leaves one section', t => {
+  const v = glimVault(t);
+  fs.writeFileSync(agentsOf(v), '# Mine\n\n```\nopen fence\n');
+  assert.equal(compile(v).code, 0);
+  const once = fs.readFileSync(agentsOf(v), 'utf8');
+  assert.equal(compile(v).stdout, `unchanged ${posix(agentsOf(v))}\n`);
+  assert.equal(fs.readFileSync(agentsOf(v), 'utf8'), once);
+});
+
+test('compile.maxBytes caps the section as written, markers and CRLF endings included, and the overflow line counts only rules', t => {
+  const v = glimVault(t, { config: { compile: { maxBytes: 700 } } });
+  for (let i = 0; i < 8; i++) v.write(`wiki/glim/rules/long-${i}.md`, ruleNote({ keywords: [`word${i}`], doLine: `Do thing number ${i} in the usual way.`, notLine: `Skip thing number ${i}.` }));
+  fs.writeFileSync(agentsOf(v), 'x\r\n');
+  assert.equal(compile(v).code, 0);
+  const got = fs.readFileSync(agentsOf(v), 'utf8');
+  const section = got.slice(got.indexOf('<!-- taste-vault: begin'));
+  assert.ok(Buffer.byteLength(section) <= 700, `${Buffer.byteLength(section)} bytes`);
+  assert.match(section, /\r\n\(Left out to stay within 700 bytes: \d+ rules\.\)\r\n<!-- taste-vault: end -->\r\n$/);
+
+  const tiny = glimVault(t, { config: { compile: { maxBytes: 40 } } });
+  assert.equal(compile(tiny).code, 0);
+  const lines = fs.readFileSync(agentsOf(tiny), 'utf8').split('\n');
+  assert.deepEqual(lines.slice(1, -2), ['## Taste rules', '', "From the user's taste vault. Follow them in this project.", '', '(Left out to stay within 40 bytes: 3 rules.)']);
+});
+
+test('an existing section keeps its own line endings and the spaces after its markers, so it stays current', async t => {
+  const v = glimVault(t);
+  assert.equal(compile(v).code, 0);
+  const file = agentsOf(v);
+  const quiet = async () => assert.deepEqual((await lintOf(v)).filter(f => f.file === posix(file)), []);
+  for (const text of [`${SECTION}mine\r\n`, SECTION.replace(/-->\n/, '-->  \n').replace(`${END}\n`, `${END} \n`)]) {
+    fs.writeFileSync(file, text);
+    await quiet();
+    assert.equal(compile(v).stdout, `unchanged ${posix(file)}\n`);
+    assert.equal(fs.readFileSync(file, 'utf8'), text);
+  }
+  reword(v, 'Fade a shimmer in over three frames.');
+  assert.equal(compile(v).code, 0);
+  const got = fs.readFileSync(file, 'utf8');
+  assert.ok(got.startsWith(`${beginLine(createHash('sha256').update(BODY.join('\n').replace('two frames', 'three frames')).digest('hex').slice(0, 16))}  \n`), JSON.stringify(got.slice(0, 200)));
+  assert.ok(!got.includes('\r'));
+});
+
+test('a project whose file can\'t be written is refused, and the projects after it still compile', t => {
+  const v = glimVault(t);
+  const locked = folder(t, { 'AGENTS.md': '# Mine\n' });
+  const other = folder(t);
+  v.write('vault.local.json', `${JSON.stringify({ domains: { glim: { paths: [posix(locked), posix(other)] } } })}\n`);
+  const posixLock = process.platform !== 'win32';
+  if (posixLock && process.getuid?.() === 0) return t.skip('root writes through read-only folders');
+  const target = posixLock ? locked : agentsOf(v, locked);
+  fs.chmodSync(target, posixLock ? 0o555 : 0o444);
+  let r;
+  try {
+    r = compile(v, locked, other);
+  } finally {
+    fs.chmodSync(target, posixLock ? 0o755 : 0o644);
+  }
+  assert.equal(r.code, 1);
+  const [refused] = r.stdout.split('\n');
+  assert.ok(refused.startsWith(`refused ${posix(agentsOf(v, locked))}: the file can't be written (`), refused);
+  assert.match(refused, /\(\w+\)\. Make it writable, then compile again\.$/);
+  assert.match(r.stdout, /\nwrote .*AGENTS\.md: 3 rules\n$/);
+  assert.equal(fs.readFileSync(agentsOf(v, locked), 'utf8'), '# Mine\n');
+  assert.deepEqual(fs.readdirSync(locked), ['AGENTS.md']);
+  assert.ok(fs.existsSync(agentsOf(v, other)));
+});

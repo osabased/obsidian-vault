@@ -12,7 +12,7 @@ const rest = fixAt < 0 ? args : args.toSpliced(fixAt, 1);
 
 if (rest.length && !(rest.length === 2 && rest[0] === '--fail-on' && LEVELS.includes(rest[1]))) {
   console.error(`usage: node tools/lint.mjs [--fix] [--fail-on error|warn]
---fix rewrites the link, footnote and source paths lint gives the spelling of, and rebuilds the generated files.`);
+--fix rewrites the link, footnote and source paths lint gives the spelling of, writes the skill copies in .agents/skills/ that are missing or differ, and rebuilds the generated files.`);
   process.exit(2);
 }
 const failOn = rest[1] ?? 'error';
