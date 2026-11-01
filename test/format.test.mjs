@@ -266,27 +266,28 @@ test('lintConfig checks namespaces and editTools, naming the key', async t => {
   assert.deepEqual(await lintOf({ editTools: { mcp__a__b: 'x' } }), ['editTools.mcp__a__b must be an object with namespace, path and after']);
 });
 
-test('setField writes a value that reads back exactly, replacing the whole old value and its comment', () => {
-  const set = (line, val) => setField(front([line, 'type: page']), 'source', val);
-  const read = text => parse(text).data.source;
+test('setField writes a value that reads back exactly, replacing only the old value and keeping a trailing comment', () => {
   const cases = [
-    ["source: 'raw\\refs\\Designer''s shop.png'", "raw/refs/Designer's shop.png"],
-    ["source: 'raw\\refs\\Shop #2.png'", 'raw/refs/Shop #2.png'],
-    ['source: raw\\refs\\a.png', 'raw/refs/a #1.png'],
-    ['source: raw\\refs\\a.png # old', 'raw/refs/a.png'],
-    ['source: "raw\\\\refs\\\\a.png" # old', 'raw/refs/a.png'],
-    ['source: raw/a.png', 'raw/refs/a: b.png'],
-    ['source: raw/a.png', "'quoted'"],
-    ['source: raw/a.png', 'true'],
+    ["source: 'raw\\refs\\Designer''s shop.png'", "raw/refs/Designer's shop.png", "source: 'raw/refs/Designer''s shop.png'"],
+    ["source: 'raw\\refs\\Shop #2.png'", 'raw/refs/Shop #2.png', "source: 'raw/refs/Shop #2.png'"],
+    ['source: raw\\refs\\a.png', 'raw/refs/a #1.png', "source: 'raw/refs/a #1.png'"],
+    ['source: raw/a.png', 'raw/refs/a: b.png', "source: 'raw/refs/a: b.png'"],
+    ['source: raw/a.png', "'quoted'", "source: '''quoted'''"],
+    ['source: raw/a.png', 'true', "source: 'true'"],
+    ['source: raw\\refs\\a.png # by hand', 'raw/refs/a.png', 'source: raw/refs/a.png # by hand'],
+    ['source: raw/a#b.png\t# by hand', 'raw/c.png', 'source: raw/c.png\t# by hand'],
+    ['source: raw/a.png # by hand', 'raw/refs/a #1.png', "source: 'raw/refs/a #1.png' # by hand"],
+    ["source: 'raw\\refs\\Shop #2.png' # by hand", 'raw/refs/Shop #2.png', "source: 'raw/refs/Shop #2.png' # by hand"],
+    ["source: 'it''s #2' # by hand", 'raw/c.png', "source: 'raw/c.png' # by hand"],
+    ['source: "raw\\\\refs\\\\a \\" #b.png" # by hand', 'raw/refs/a.png', "source: 'raw/refs/a.png' # by hand"],
+    ["source: 'raw/a.png'#tail", 'raw/c.png', "source: 'raw/c.png'"],
   ];
-  for (const [line, val] of cases) {
-    const out = set(line, val);
-    assert.equal(read(out), val, out);
-    assert.doesNotMatch(out, /old/, out);
+  for (const [line, val, want] of cases) {
+    const out = setField(front([line, 'type: page']), 'source', val);
+    assert.equal(out.split('\n')[1], want, line);
+    assert.equal(parse(out).data.source, val, out);
     assert.equal(parse(out).data.type, 'page', out);
   }
-  assert.equal(set("source: 'raw\\refs\\Designer''s shop.png'", "raw/refs/Designer's shop.png").split('\n')[1], "source: 'raw/refs/Designer''s shop.png'");
-  assert.equal(set('source: raw\\refs\\a.png # old', 'raw/refs/a.png').split('\n')[1], 'source: raw/refs/a.png');
 });
 
 test('lintConfig refuses an escape that is a glob character or is in the separator', async t => {

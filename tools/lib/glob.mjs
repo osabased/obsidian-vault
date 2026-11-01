@@ -2,7 +2,9 @@
 // matched against. Files have no escape: normGlob has already turned their backslashes into slashes.
 const FILE = { separator: '/', escape: null, mark: '/' };
 const MARK = '\uE000';
-export const NAMESPACE_NAME = /^[a-z][a-z0-9_-]+$/;
+// The escape is one character, which outside the BMP is two UTF-16 units.
+const escAt = (s, i, ns) => ns.escape !== null && s.startsWith(ns.escape, i);
+export const NAMESPACE_NAME =/^[a-z][a-z0-9_-]+$/;
 
 // The glob's parts, which the gate's regex and the overlap check are both built from: 'any' (a ** that ends the glob),
 // 'dirs' (a **/ that crosses folders), 'seg' (*, or ** inside a name), 'one' (?), a list of alternatives, or a character.
@@ -12,9 +14,11 @@ function parse(glob, ns) {
   for (let i = 0; i < glob.length; i++) {
     const ch = glob[i];
     const last = parts[parts.length - 1];
-    if (ch === ns.escape) {
-      parts.push({ ch: glob[i + 1] ?? ch });
-      if (i + 1 < glob.length) i++;
+    if (escAt(glob, i, ns)) {
+      const j = i + ns.escape.length;
+      const next = j < glob.length ? String.fromCodePoint(glob.codePointAt(j)) : ns.escape;
+      parts.push({ ch: next });
+      i = j < glob.length ? j + next.length - 1 : j - 1;
     } else if (sepAt(i)) {
       parts.push({ ch: ns.mark, sep: true });
       i += ns.separator.length - 1;
@@ -52,7 +56,7 @@ function braces(glob, open, ns) {
   let from = open + 1;
   for (let j = open + 1; j < glob.length; j++) {
     const ch = glob[j];
-    if (ch === ns.escape) j++;
+    if (escAt(glob, j, ns)) j += ns.escape.length;
     else if (ch === '{') break;
     else if (ch === ',' || ch === '}') {
       alts.push(glob.slice(from, j));
@@ -95,7 +99,7 @@ export function entryKey(entry) {
 function declOf(namespace, namespaces) {
   if (namespace === 'file') return FILE;
   const d = namespaces && Object.hasOwn(namespaces, namespace) ? namespaces[namespace] : null;
-  const ok = typeof d?.separator === 'string' && d.separator && typeof d.escape === 'string' && d.escape.length === 1;
+  const ok = typeof d?.separator === 'string' && d.separator && typeof d.escape === 'string' && [...d.escape].length === 1;
   return ok ? { separator: d.separator, escape: d.escape, mark: MARK } : null;
 }
 
@@ -229,8 +233,10 @@ export function matchTarget(list, { namespace = 'file', path }, namespaces) {
   if (!ns) return null;
   let subject = '';
   for (let i = 0; i < path.length; i++) {
-    if (path[i] === ns.escape && i + 1 < path.length) subject += path[++i];
-    else if (ns !== FILE && path.startsWith(ns.separator, i)) {
+    if (escAt(path, i, ns) && i + ns.escape.length < path.length) {
+      i += ns.escape.length;
+      subject += path[i];
+    } else if (ns !== FILE && path.startsWith(ns.separator, i)) {
       subject += ns.mark;
       i += ns.separator.length - 1;
     } else subject += path[i];
