@@ -1,27 +1,22 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { isBuiltin } from 'node:module';
-import { config, vaultPath, plural, today, datedFiles, filesIn, pickRows, rewriteText, lf, readJson, readJsonSafe, toPosix } from './vault.mjs';
+import {
+  config, vaultPath, plural, today, datedFiles, filesIn, pickRows, rewriteText, lf, readJson, readJsonSafe, toPosix, memo, isVaultOnly, isMarkerName,
+} from './vault.mjs';
 import {
   vaultFile, loadNotes, noteErrors, ruleText, ruleTextParts, liveRules, knownDomain, alwaysSize, isUrl, validDay, normTopic, topicNotes, rawFile, toKey, resolver, linksUnder, noteLinks, byTopic, isTopicPage, isSourcePage, PAGE_KINDS, joinList,
-  hasSection, footnotes, youSaid, linkedKeys, clip, isResearch, citedSources, evidenceQuotes, keyOf, kindFolder, kindLabel, linkTo, parseNote, noteLinkSpans, maxChars, bundleOf, locate,
+  hasSection, footnotes, youSaid, linkedKeys, clip, citedSources, evidenceQuotes, keyOf, kindFolder, kindLabel, linkTo, parseNote, noteLinkSpans, maxChars, bundleOf, locate,
+  filled, isMap, sourceItem, authoredByUser, parsedFile,
 } from './rules.mjs';
-import { parse, setField } from './frontmatter.mjs';
+import { setField } from './frontmatter.mjs';
 import { NAMESPACE_NAME } from './glob.mjs';
 import { build } from './build.mjs';
 import { transcriptFor } from './sessions.mjs';
 import { typedMessages, saidIn, sourceTexts, userPageTexts } from './quotes.mjs';
 import {
-  KINDS, LOCATORS, filled, hashFile, lineCount, clockTime, parseLocator, anchorsIn, derivedAnchors, manifestLine, sourceProblems, refSources,
+  KINDS, LOCATORS, hashFile, lineCount, clockTime, parseLocator, anchorsIn, derivedAnchors, manifestLine, sourceProblems, refSources,
 } from './sources.mjs';
-
-const memo = f => {
-  const seen = new Map();
-  return k => {
-    if (!seen.has(k)) seen.set(k, f(k));
-    return seen.get(k);
-  };
-};
 
 export const tally = found => {
   const errors = found.filter(f => f.level === 'error').length;
@@ -131,7 +126,7 @@ export function fix(found) {
     const file = vaultPath(rel);
     const text = fs.readFileSync(file, 'utf8');
     // The user wrote this page and keeps it as they wrote it; lint still reports what it finds.
-    if (parse(text).data.author === 'user') continue;
+    if (authoredByUser(text)) continue;
     const before = lf(text);
     const out = fixable.filter(f => f.file === rel).reduce((t, f) => f.fix(t), before);
     if (out === before) continue;
@@ -202,7 +197,6 @@ function lintPicks(add) {
 export function lintConfig(add) {
   const c = readJson(vaultPath('vault.config.json'), {}) ?? {};
   const bad = msg => add('error', 'vault.config.json', msg);
-  const isMap = x => x !== null && typeof x === 'object' && !Array.isArray(x);
   const namespaces = c.namespaces ?? {};
   if (!isMap(namespaces)) bad('namespaces must be an object of { separator, escape } by namespace name');
   else {
@@ -283,13 +277,12 @@ function lintFootnotes(n, { lines, anchors }, add) {
       const count = lines(rel);
       const span = locator.from === locator.to ? `line ${locator.from}` : `lines ${locator.from}-${locator.to}`;
       if (count !== null && locator.to > count) add('warn', n.rel, `footnote [^${id}] cites ${span} of ${rel}, which has ${plural(count, 'line')}`);
-    } else if (locator.kind === 'page' || (locator.kind === 'time' && locator.start !== null)) {
+    } else if (locator.kind === 'page') {
       const found = anchors(rel);
-      if (found && locator.kind === 'page' && !found.pages.has(locator.page)) {
-        add('warn', n.rel, `footnote [^${id}] cites page ${locator.page} of ${rel}, and its derived text has no [p. ${locator.page}]`);
-      } else if (found && locator.kind === 'time' && !found.times.has(locator.start)) {
-        add('warn', n.rel, `footnote [^${id}] cites ${clockTime(locator.start)} of ${rel}, and its derived text has no [t=${clockTime(locator.start)}]`);
-      }
+      if (found && !found.pages.has(locator.page)) add('warn', n.rel, `footnote [^${id}] cites page ${locator.page} of ${rel}, and its derived text has no [p. ${locator.page}]`);
+    } else if (locator.kind === 'time' && locator.start !== null) {
+      const found = anchors(rel);
+      if (found && !found.times.has(locator.start)) add('warn', n.rel, `footnote [^${id}] cites ${clockTime(locator.start)} of ${rel}, and its derived text has no [t=${clockTime(locator.start)}]`);
     }
   }
   const written = new Set(defs.map(d => d.id));
@@ -299,9 +292,8 @@ function lintFootnotes(n, { lines, anchors }, add) {
 // Raw files are append-only, so a saved source's fields are warnings: a fix is a new file, not an edit.
 function lintSources(add) {
   for (const f of refSources().loose.filter(x => x.endsWith('.md'))) {
-    let parsed;
-    try { parsed = parse(fs.readFileSync(vaultPath(...f.split('/')), 'utf8')); } catch { continue; }
-    if (!parsed.ok || (parsed.data.url == null && parsed.data.repo == null)) continue;
+    const parsed = parsedFile(f);
+    if (!parsed?.ok || (parsed.data.url == null && parsed.data.repo == null)) continue;
     for (const msg of sourceProblems(parsed.data, { body: parsed.body })) add('warn', f, msg);
   }
 }
@@ -309,8 +301,8 @@ function lintSources(add) {
 function lintBundles(add, hashOf) {
   for (const dir of refSources().bundles) {
     const rel = `${dir}/source.md`;
-    let parsed;
-    try { parsed = parse(fs.readFileSync(vaultPath(...rel.split('/')), 'utf8')); } catch { continue; }
+    const parsed = parsedFile(rel);
+    if (!parsed) continue;
     const { data, ok } = parsed;
     if (!ok) {
       add('warn', rel, "no frontmatter. A bundle's source.md starts with url and commit, or sha256");
@@ -336,8 +328,8 @@ function lintDerived(add, hashOf) {
     const hash = /^[0-9a-f]{64}\.md$/.test(name) ? name.slice(0, 64) : null;
     if (!hash) add('warn', f, `named ${name}. Derived text is derived/<sha256>.md, the SHA-256 of the file it was taken from`);
     if (!f.endsWith('.md')) continue;
-    let parsed;
-    try { parsed = parse(fs.readFileSync(vaultPath(...f.split('/')), 'utf8')); } catch { continue; }
+    const parsed = parsedFile(f);
+    if (!parsed) continue;
     const { data, body, ok } = parsed;
     if (!ok) {
       add('warn', f, 'no frontmatter. Derived text starts with kind, extractor, extractor_version and source');
@@ -434,9 +426,7 @@ function lintPage(n, watched, add) {
   // Another page gets only the warning below that these fields are for source pages, not errors on their values.
   if (isSourcePage(n)) {
     if (source != null && !isUrl(source)) {
-      const file = rawFile(source);
-      const bundle = bundleOf(file ?? source);
-      const rel = bundle ?? file;
+      const { file, bundle, rel } = sourceItem(source);
       if (!rel) add('error', n.rel, 'source must be a URL, a file under raw/ that exists, or a folder under raw/refs/ with a source.md');
       else if (bundle && file) add('error', n.rel, `write source as ${bundle}, the bundle it is in`, text => setField(text, 'source', bundle));
       else if (rel !== source) add('error', n.rel, `write source as ${rel}, the path from the vault root`, text => setField(text, 'source', rel));
@@ -458,7 +448,7 @@ function lintPage(n, watched, add) {
     if (set.length) add('warn', n.rel, `${joinList(set, 'and')} ${set.length > 1 ? 'are' : 'is'} for ${owner}. ${instead}`);
   };
   if (!isSourcePage(n)) misplaced(['source', 'source_date'], 'source pages', 'Cite a source with a footnote instead');
-  if (n.applies_to?.length && isResearch(n.domain)) {
+  if (n.applies_to?.length && isVaultOnly(n.domain)) {
     add('warn', n.rel, `${n.domain} is vault-only, so no edit brings this page up. Give it keywords instead`);
   }
   if (isSourcePage(n)) return;
@@ -647,7 +637,6 @@ function lintCode(add) {
 }
 
 const isList = (v, ok) => Array.isArray(v) && v.every(ok);
-const isFileName = m => typeof m === 'string' && Boolean(m.trim()) && !/[\/]/.test(m);
 const isFolder = p => typeof p === 'string' && Boolean(p.trim()) && path.isAbsolute(p);
 
 // Reach comes from vault.config.json, which every machine shares, and the paths in vault.local.json, which only this
@@ -662,8 +651,9 @@ function lintReach(add) {
     return;
   }
   const pathsOf = d => (Array.isArray(mine[d]?.paths) ? mine[d].paths : []);
-  for (const [d, c = {}] of Object.entries(shared).map(([k, x]) => [k, x ?? undefined])) {
-    if (c.markers !== undefined && !isList(c.markers, isFileName)) add('error', 'vault.config.json', `${d}: markers must be a list of file names, with no folders in them`);
+  for (const [d, x] of Object.entries(shared)) {
+    const c = x ?? {};
+    if (c.markers !== undefined && !isList(c.markers, isMarkerName)) add('error', 'vault.config.json', `${d}: markers must be a list of file names, with no folders in them`);
     for (const flag of ['everywhere', 'vaultOnly']) {
       if (c[flag] !== undefined && typeof c[flag] !== 'boolean') add('error', 'vault.config.json', `${d}: ${flag} must be true or false`);
     }

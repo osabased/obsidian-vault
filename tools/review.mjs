@@ -1,7 +1,7 @@
-import { config, plural, toPosix, guarded, hookErrors, errorsLog, localDay, appendLog } from './lib/vault.mjs';
+import { config, plural, toPosix, guarded, hookErrors, errorsLog, localDay, appendLog, isVaultOnly } from './lib/vault.mjs';
 import {
-  clip, normTopic, topicNotes, loadNotes, liveRules, evidenceSessions, validDay, byKey, cmp, sharedFiles, isResearch, rawFile, resolver, linkedKeys, evidenceSources, isSourcePage, joinList,
-  rankPair, bundleOf,
+  clip, normTopic, topicNotes, loadNotes, liveRules, evidenceSessions, validDay, byKey, cmp, sharedFiles, rawFile, resolver, linkedKeys, evidenceSources, isSourcePage, joinList,
+  rankPair, sourceItem,
 } from './lib/rules.mjs';
 import { lint, tally } from './lib/lint.mjs';
 import { lintRan, lintDone, trackedSessions, sessionDomains } from './lib/sessions.mjs';
@@ -46,7 +46,7 @@ function section(title, lines) {
 function emptyTopics() {
   const used = topicNotes(notes());
   return Object.entries(config().domains).flatMap(([d, c]) => {
-    if (isResearch(d)) return [];
+    if (isVaultOnly(d)) return [];
     const empty = (c.topics ?? []).filter(t => !used.get(d)?.has(normTopic(t)));
     return empty.length ? [`${d}: ${empty.join(', ')}`] : [];
   });
@@ -129,18 +129,15 @@ const unnamedSources = () => {
   const { loose, bundles } = refSources();
   const all = new Set(loose);
   const versions = new Map([...loose, ...bundles].map(f => [f, sourceVersion(f)]));
-  const versionKey = v => `${v.url}
-${v.version}`;
-  const hashKey = v => `${v.url}
-${v.sha256}`;
+  const versionKey = v => `${v.url}\n${v.version}`;
+  const hashKey = v => `${v.url}\n${v.sha256}`;
   const named = new Set();
   const urls = new Set();
   const pinned = new Set();
   const pinnedUrls = new Set();
   const hashes = new Set();
   for (const n of sourcePages()) {
-    const file = rawFile(n.data.source);
-    const item = bundleOf(file ?? n.data.source) ?? file;
+    const item = sourceItem(n.data.source).rel;
     const v = item && versions.get(item);
     if (item) named.add(item);
     else if (n.data.source) urls.add(n.data.source);

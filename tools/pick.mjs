@@ -2,13 +2,13 @@ import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
 import {
-  config, vaultPath, appendJsonl, picksFile, pickRows, copyNew, sessionReach, today, toPosix, withLock, statePath, guarded,
+  config, vaultPath, appendJsonl, picksFile, pickRows, copyNew, today, toPosix, withLock, statePath, guarded,
 } from './lib/vault.mjs';
 import { KEBAB, settledRules, ruleLine, normTopic, joinList, byKey, cmp } from './lib/rules.mjs';
 import { build } from './lib/build.mjs';
 import { subjectRows, laterRows, liveRows, endedBy, newestFirst, entry, projectName, sameProject } from './lib/picks.mjs';
 import { UsageError, readInput, refuse, failure, line } from './lib/input.mjs';
-import { ownEntry, markShown, sessionDomains } from './lib/sessions.mjs';
+import { ownEntry, markShown, sessionRoots } from './lib/sessions.mjs';
 
 const RUN = 'usage: node tools/pick.mjs <session-id> < pick.json';
 const SHOW = '       node tools/pick.mjs show <session-id> <subject> [domain [project]]';
@@ -56,8 +56,7 @@ const help = () => [
 function sessionOf(sid) {
   const { entry: entryRow, notOwn } = ownEntry(sid);
   if (notOwn) refuse(notOwn);
-  const names = sessionDomains(sid, entryRow?.cwd);
-  const hits = sessionReach(entryRow?.cwd).filter(h => names.includes(h.domain)).sort((a, b) => cmp(a.domain, b.domain) || cmp(a.root, b.root));
+  const hits = [...sessionRoots(entryRow)].sort((a, b) => cmp(a.domain, b.domain) || cmp(a.root, b.root));
   if (!hits.length) refuse(`the taste vault has no session ${sid} from a domain's project folder. Pass the session id from the taste vault's note at session start.`);
   return { ...entryRow, hits };
 }

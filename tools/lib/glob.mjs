@@ -4,7 +4,7 @@ const FILE = { separator: '/', escape: null, mark: '/' };
 const MARK = '\uE000';
 // The escape is one character, which outside the BMP is two UTF-16 units.
 const escAt = (s, i, ns) => ns.escape !== null && s.startsWith(ns.escape, i);
-export const NAMESPACE_NAME =/^[a-z][a-z0-9_-]+$/;
+export const NAMESPACE_NAME = /^[a-z][a-z0-9_-]+$/;
 
 // The glob's parts, which the gate's regex and the overlap check are both built from: 'any' (a ** that ends the glob),
 // 'dirs' (a **/ that crosses folders), 'seg' (*, or ** inside a name), 'one' (?), a list of alternatives, or a character.
@@ -85,8 +85,9 @@ export const globToRegExp = glob => new RegExp(`^${pattern(parse(normGlob(glob),
 export function entryParts(entry) {
   const negated = entry.startsWith('!');
   const rest = negated ? entry.slice(1) : entry;
-  const m = /^([a-z][a-z0-9_-]+):(.*)$/s.exec(rest);
-  return m ? { negated, namespace: m[1], glob: m[2] } : { negated, namespace: 'file', glob: rest };
+  const at = rest.indexOf(':');
+  const namespace = at > 0 ? rest.slice(0, at) : '';
+  return NAMESPACE_NAME.test(namespace) ? { negated, namespace, glob: rest.slice(at + 1) } : { negated, namespace: 'file', glob: rest };
 }
 
 // Two spellings of one entry get one key. File globs ignore case and slash style; names in a namespace do not.
@@ -103,27 +104,27 @@ function declOf(namespace, namespaces) {
   return ok ? { separator: d.separator, escape: d.escape, mark: MARK } : null;
 }
 
-// An entry the gate can't use gets null.
+// An entry the gate can't use gets null. A hook checks and matches every note's entries on each edit, so each one
+// compiles once for its namespace's declaration.
+const compilations = new Map();
 function compiled(entry, namespaces) {
   if (typeof entry !== 'string') return null;
   const { negated, namespace, glob } = entryParts(entry);
   const ns = declOf(namespace, namespaces);
   if (!ns || !glob.trim() || glob.startsWith('!')) return null;
-  try {
-    const regex = ns === FILE ? globToRegExp(glob) : new RegExp(`^${pattern(parse(glob, ns), ns.mark)}$`, 's');
-    return { negated, namespace, ns, regex };
-  } catch {
-    return null;
+  const key = `${ns.separator}\0${ns.escape}\0${entry}`;
+  if (!compilations.has(key)) {
+    try {
+      const regex = ns === FILE ? globToRegExp(glob) : new RegExp(`^${pattern(parse(glob, ns), ns.mark)}$`, 's');
+      compilations.set(key, { negated, namespace, ns, regex });
+    } catch {
+      compilations.set(key, null);
+    }
   }
+  return compilations.get(key);
 }
 
-// Without the namespaces, a namespaced entry is only checked for having a glob: its syntax depends on the declaration.
-export function validGlob(entry, namespaces) {
-  if (typeof entry !== 'string') return false;
-  const { namespace, glob } = entryParts(entry);
-  if (namespaces === undefined && namespace !== 'file') return Boolean(glob.trim());
-  return compiled(entry, namespaces) !== null;
-}
+export const validGlob = (entry, namespaces) => compiled(entry, namespaces) !== null;
 
 // The parts as an automaton, with edges labelled null (no character), 'any', 'seg' (any but /) or a lowercase character.
 function automaton(parts) {
@@ -195,9 +196,9 @@ function globsOverlap(a, b) {
 // Namespaced entries are left out: they match no file.
 export function overlapping(as, bs, [inA, inB] = ['', '']) {
   const globs = list => list.flatMap(entry => {
-    if (!validGlob(entry)) return [];
+    if (typeof entry !== 'string') return [];
     const { negated, namespace, glob } = entryParts(entry);
-    return negated || namespace !== 'file' ? [] : [[entry, glob]];
+    return negated || namespace !== 'file' || !validGlob(entry) ? [] : [[entry, glob]];
   });
   for (const [a, ga] of globs(as)) for (const [b, gb] of globs(bs)) if (globsOverlap([ga, inA], [gb, inB])) return [a, b];
   return null;

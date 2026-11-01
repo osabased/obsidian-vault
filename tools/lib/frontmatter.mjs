@@ -145,6 +145,8 @@ const PLAIN_NOT_TEXT = /^(?:[-+]?(?:\d[\d_]*(?:\.\d*)?|\.\d+)(?:e[-+]?\d+)?|[-+]
 const plainSafe = s => s !== '' && s === s.trim() && !/[\r\n\t]/.test(s) && !/^[-?:,[\]{}#&*!|>'"%@`]/.test(s)
   && !/: | #|:$/.test(s) && !PLAIN_NOT_TEXT.test(s) && value(s) === s;
 
+export const yamlQuote = s => `'${String(s).replace(/'/g, "''")}'`;
+
 // Where a value written after `key: ` ends: after its closing quote, or where a comment starts in a plain one.
 function valueEnd(rest) {
   const q = rest[0];
@@ -172,7 +174,7 @@ export function setField(text, key, val) {
   const tail = old.slice(valueEnd(old));
   const comment = /^[ \t]+#/.test(tail) ? tail : '';
   const s = String(val);
-  const written = plainSafe(s) && !/^['"]/.test(old) ? s : `'${s.replace(/'/g, "''")}'`;
+  const written = plainSafe(s) && !/^['"]/.test(old) ? s : yamlQuote(s);
   lines[at] = `${/\s$/.test(head) ? head : `${head} `}${written}${comment}${eol}`;
   return lines.join('\n');
 }

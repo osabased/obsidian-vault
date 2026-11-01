@@ -114,6 +114,13 @@ test('lint reports a missing path as an error and a domain that reaches no proje
   ]);
 });
 
+test('lint refuses a marker with a backslash in it, which the hooks never match', async t => {
+  const v = makeVault(t, { domains: { alpha: { title: 'Alpha', markers: ['sub\\alpha.project'], topics: [] } } });
+  assert.deepEqual((await reachFound(v)).filter(([level]) => level === 'error'), [
+    ['error', 'vault.config.json', 'alpha: markers must be a list of file names, with no folders in them'],
+  ]);
+});
+
 test('lint checks the shape of markers, everywhere, vaultOnly and vault.local.json', async t => {
   const v = makeVault(t, {
     domains: {

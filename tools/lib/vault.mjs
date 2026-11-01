@@ -65,7 +65,8 @@ const caseFolds = process.platform === 'win32' || process.platform === 'darwin';
 const fold = name => (caseFolds ? name.toLowerCase() : name);
 
 // A marker is a file name, so one with a folder in it never matches.
-const markersOf = d => strings(config().domains[d]?.markers).filter(m => !/[\\/]/.test(m));
+export const isMarkerName = m => typeof m === 'string' && Boolean(m.trim()) && !/[\\/]/.test(m);
+const markersOf = d => strings(config().domains[d]?.markers).filter(isMarkerName);
 
 // Each marker file name with the domains it puts a folder in.
 function markerDomains() {
@@ -166,8 +167,9 @@ export function sessionReach(cwd) {
 
 export const inVaultFolder = cwd => Boolean(cwd) && vaultRel(cwd) !== null;
 
-// A vault-only domain holds pages only, which sessions read from the vault folder.
-const isVaultOnly = d => d !== 'global' && config().domains[d]?.vaultOnly === true;
+// A vault-only domain holds pages only, which sessions read from the vault folder. It is set in vault.config.json rather
+// than read from missing paths, so a domain is vault-only on every machine or none.
+export const isVaultOnly = d => d !== 'global' && config().domains[d]?.vaultOnly === true;
 export const everywhereDomains = () => Object.keys(config().domains).filter(d => config().domains[d].everywhere === true && !isVaultOnly(d));
 
 // /ingest runs in the vault folder and can feed any domain. A session takes the domains session start found for it,
@@ -268,6 +270,14 @@ export function readJsonl(file, missing = []) {
 }
 
 export const plural = (n, word) => `${n} ${word}${n === 1 ? '' : 's'}`;
+
+export const memo = f => {
+  const seen = new Map();
+  return k => {
+    if (!seen.has(k)) seen.set(k, f(k));
+    return seen.get(k);
+  };
+};
 
 const pad = n => String(n).padStart(2, '0');
 export const today = (d = new Date()) => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;

@@ -1,7 +1,8 @@
 import fs from 'node:fs';
 import { runHook, config, domainsFor, everywhereDomains, inside, vaultRel, toPosix, cwdOf, FILE_TOOLS, toolFile, shortHash, lf } from '../lib/vault.mjs';
-import { settledNotes, liveRules, livePages, ruleLine, pagePointers, tryRegex, cmp, clip, parseNote, QUOTED, agentNotesSpan } from '../lib/rules.mjs';
-import { parse } from '../lib/frontmatter.mjs';
+import {
+  settledNotes, liveRules, livePages, ruleLine, pagePointers, tryRegex, cmp, clip, parseNote, QUOTED, agentNotesSpan, authoredByUser, AGENT_NOTES, TOP_HEADING,
+} from '../lib/rules.mjs';
 import { bestMatch, specificity, bySpecificity } from '../lib/glob.mjs';
 import { marked, mark, markShown, markPages } from '../lib/sessions.mjs';
 
@@ -38,8 +39,11 @@ function replaced(text, e) {
   return parts.length > 2 && !e.replace_all ? null : parts.join(lf(e.new_string));
 }
 
+// A BOM is the editor's, not the text's, so the guards compare the files without it.
+const textOf = s => lf(s).replace(/^\uFEFF/, '');
+
 function textAfter(tool, ti, before) {
-  if (tool === 'Write') return lf(ti.content);
+  if (tool === 'Write') return textOf(ti.content);
   const edits = tool === 'MultiEdit' ? ti.edits ?? [] : tool === 'Edit' ? [ti] : null;
   return edits && edits.reduce((text, e) => (text === null ? null : replaced(text, e)), before);
 }
@@ -48,8 +52,7 @@ function textAfter(tool, ti, before) {
 const quotedLines = n => n.body.split(/^## /m).slice(1).filter(s => QUOTED.includes(s.split('\n')[0].trim().toLowerCase()))
   .flatMap(s => s.split('\n').slice(1).map(l => l.trim()).filter(Boolean));
 
-const userAuthored = text => parse(text).data.author === 'user';
-const headingLine = l => /^#{1,2}\s/.test(l);
+const headingLine = l => TOP_HEADING.test(l);
 
 // A page the user wrote may gain lines under `## Agent notes`, or that heading with lines at its end, and nothing else.
 // Lines added without a heading in the way are the same text wherever the diff puts them, so any placement inside the
@@ -66,7 +69,7 @@ function onlyNotesAdded(before, after) {
     if (!gap && !before.endsWith('\n')) return false;
     const [first, ...added] = rest.slice(gap.length).split('\n');
     const at = a.length - added.length - 1;
-    return /^## agent notes\s*$/i.test(first) && added.some(l => l.trim()) && !added.some(headingLine) && now?.at === at && now.end === a.length;
+    return AGENT_NOTES.test(first) && added.some(l => l.trim()) && !added.some(headingLine) && now?.at === at && now.end === a.length;
   }
   if (a.length < b.length || now?.at !== span.at || a.length - now.end !== b.length - span.end) return false;
   let head = 0;
@@ -78,13 +81,11 @@ function onlyNotesAdded(before, after) {
   return at <= Math.min(span.end, head) && !a.slice(at, at + a.length - b.length).some(headingLine);
 }
 
-const noBom = s => s.replace(/^﻿/, '');
-
 function userNoteGuard(rel, before, after) {
-  if (userAuthored(after) && !userAuthored(before)) {
+  if (authoredByUser(after) && !authoredByUser(before)) {
     return `${rel} would be marked author: user. The user sets author: user themselves; the agent doesn't make a page theirs.`;
   }
-  if (!userAuthored(before) || after === before || onlyNotesAdded(before, after)) return null;
+  if (!authoredByUser(before) || after === before || onlyNotesAdded(before, after)) return null;
   return `${rel} is the user's own writing, so it stays as they wrote it. Add notes as new lines under ## Agent notes, and change nothing else in the file.`;
 }
 
@@ -97,12 +98,12 @@ function noteGuard(input, file, cwd) {
   if (!rel || !/^wiki\/.+\.md$/i.test(rel)) return null;
   let before = null;
   if (fs.existsSync(toPosix(file, cwd))) {
-    try { before = lf(fs.readFileSync(toPosix(file, cwd), 'utf8')); } catch { return null; }
+    try { before = textOf(fs.readFileSync(toPosix(file, cwd), 'utf8')); } catch { return null; }
   }
   const after = textAfter(input.tool_name, input.tool_input ?? {}, before ?? '');
   if (after === null) return null;
   // A user's page gets no second try: a retry of an edit that changes their words would be the slip the guard is for.
-  const owned = userNoteGuard(rel, noBom(before ?? ''), noBom(after));
+  const owned = userNoteGuard(rel, before ?? '', after);
   if (owned) return owned;
   if (before === null) return null;
   const was = parseNote(before, rel);

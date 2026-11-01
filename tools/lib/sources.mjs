@@ -2,13 +2,13 @@ import fs from 'node:fs';
 import { createHash } from 'node:crypto';
 import { parse } from './frontmatter.mjs';
 import { filesIn, vaultPath } from './vault.mjs';
-import { isUrl, validDay, rawFile, bundleOf } from './rules.mjs';
+import { isUrl, validDay, rawFile, bundleOf, filled, parsedFile } from './rules.mjs';
 
 export const KINDS = ['pdf', 'video', 'audio', 'image'];
 export const LOCATORS = 'Use #page=3, #t=00:12:31 or #L10-L20';
 const HEX64 = /^[0-9a-f]{64}$/;
 
-export const sha256 = data => createHash('sha256').update(data).digest('hex');
+const sha256 = data => createHash('sha256').update(data).digest('hex');
 
 const readRel = rel => fs.readFileSync(vaultPath(...rel.split('/')));
 
@@ -99,17 +99,19 @@ export function anchorsIn(text) {
 }
 
 export function derivedAnchors(hash) {
-  try { return anchorsIn(parse(readRel(`derived/${hash}.md`).toString('utf8')).body); } catch { return null; }
+  const parsed = parsedFile(`derived/${hash}.md`);
+  return parsed && anchorsIn(parsed.body);
 }
+
+// A relative path that stays inside its folder.
+const insideFolder = p => !p.startsWith('/') && !p.split('/').includes('..') && !p.includes('\\');
 
 // sha256sum's lines: the hash, two spaces, then the path from the bundle folder.
 export function manifestLine(line) {
   const m = typeof line === 'string' ? line.match(/^([0-9a-f]{64}) {2}(\S.*)$/) : null;
   const file = m?.[2].replace(/^\.\//, '');
-  return m && !file.startsWith('/') && !file.split('/').includes('..') && !file.includes('\\') ? { hash: m[1], file } : null;
+  return m && insideFolder(file) ? { hash: m[1], file } : null;
 }
-
-export const filled = v => typeof v === 'string' && v.trim() !== '';
 
 // The shape of the fields a saved source or a bundle's source.md starts with. Each is checked when it is there;
 // a file's sha256 is the hash of what follows its frontmatter, and a bundle's is a list of lines, checked apart.
@@ -123,9 +125,7 @@ export function sourceProblems(data, { body, bundle = false } = {}) {
   if (has('last_modified') && !(filled(data.last_modified) && !Number.isNaN(Date.parse(data.last_modified)))) out.push('last_modified must be a date');
   if (has('repo') && !filled(data.repo)) out.push('repo must be the URL or name of the repository');
   if (has('commit') && !(typeof data.commit === 'string' && /^[0-9a-f]{7,64}$/.test(data.commit))) out.push('commit must be 7 to 64 hex digits');
-  if (has('path') && !(filled(data.path) && !data.path.startsWith('/') && !data.path.split('/').includes('..') && !data.path.includes('\\'))) {
-    out.push('path must be a relative path inside the repo');
-  }
+  if (has('path') && !(filled(data.path) && insideFolder(data.path))) out.push('path must be a relative path inside the repo');
   if (has('repo') && !bundle) {
     for (const k of ['path', 'commit']) if (!has(k)) out.push(`no ${k}. A git source gives repo, path and commit`);
   }
