@@ -457,7 +457,9 @@ function lintPrivacy(add) {
 }
 
 // A session the registry has dropped, or whose transcript is gone, is checked against the inbox row the line names,
-// whose text propose.mjs checked as it wrote it. A line with no such row can't be checked, and goes in the tally.
+// whose text propose.mjs checked as it wrote it, if the row is from that session. It isn't compared with the row's note:
+// a rule renamed since keeps its evidence, and raw/ can't change. A line with no such row can't be checked, and goes in
+// the tally.
 function checkTyped(n, { session, quote, id }, { typedIn, inboxRow, unchecked }, add) {
   const typed = typedIn(session);
   if (typed) {
@@ -466,6 +468,7 @@ function checkTyped(n, { session, quote, id }, { typedIn, inboxRow, unchecked },
   }
   const row = id && inboxRow(id);
   if (!row) unchecked.push({ note: n.rel, cites: `session ${session}`, quote, gone: true });
+  else if (!String(row.session ?? '').startsWith(session)) add('warn', n.rel, `"${quote}" isn't in what row ${id} recorded for session ${session}: it was recorded in session ${String(row.session ?? '').slice(0, 8) || 'unknown'}`);
   else if (!saidIn(quote, [String(row.text ?? '')])) add('warn', n.rel, `"${quote}" isn't in what row ${id} recorded`);
 }
 
@@ -487,7 +490,8 @@ function lintSaid(n, ctx, add) {
 // propose.mjs checks a quote as it writes it, but a rule written or edited by hand never passes through it.
 // A binary is checked through its derived text. A URL, and a session whose transcript is gone with no row to fall
 // back on, can't be checked, so they go in the tally.
-function lintEvidence(n, { typedIn, textsOf, pageTextsOf, rowOf, inboxRow, unchecked }, add) {
+function lintEvidence(n, ctx, add) {
+  const { textsOf, pageTextsOf, rowOf, unchecked } = ctx;
   for (const { line, session, note, source, pick, quote, id } of evidenceQuotes(n)) {
     if (line) {
       add('warn', n.rel, `an Evidence line isn't in the form propose.mjs writes, so lint can't check it: ${clip(line, 100)}`);
@@ -501,7 +505,7 @@ function lintEvidence(n, { typedIn, textsOf, pageTextsOf, rowOf, inboxRow, unche
       if (!row) add('warn', n.rel, `an Evidence line cites ${pick}, which no row in raw/picks/ has`);
       else if (!saidIn(quote, [String(row.text ?? '')])) add('warn', n.rel, `"${quote}" isn't in what row ${pick} recorded. Quote the row's own words, with … where you leave some out`);
     } else if (source === undefined) {
-      checkTyped(n, { session, quote, id }, { typedIn, inboxRow, unchecked }, add);
+      checkTyped(n, { session, quote, id }, ctx, add);
     } else if (!isUrl(source)) {
       const rel = rawFile(source);
       const { texts, why } = rel ? textsOf(rel) : {};

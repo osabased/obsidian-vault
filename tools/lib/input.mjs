@@ -14,7 +14,7 @@ export const refuse = msg => { throw new Refused(msg); };
 
 // lib/ doesn't print, so each script prints the message and sets the exit code this returns.
 export function failure(e, name, usage, refused = 'Refused') {
-  if (e instanceof UsageError) return { message: usage, code: 2 };
+  if (e instanceof UsageError) return { message: e.message ? `${e.message}\n${usage}` : usage, code: 2 };
   if (e instanceof Refused) return { message: `${refused}: ${e.message}`, code: 1 };
   return { message: `${name} failed: ${e.message}`, code: 1 };
 }

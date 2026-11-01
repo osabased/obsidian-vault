@@ -73,6 +73,8 @@ export const vaultRel = (p, base) => {
   const rel = inside(ROOT, p, base);
   return rel === null ? null : stripWorktree(rel);
 };
+// A session outside the vault passes full paths.
+export const fromRoot = ref => (path.isAbsolute(ref) && vaultRel(ref)) || ref;
 
 // The vault's notes and sources are the user's taste, and the rest are written by the tools or kept for this machine,
 // so no rule covers them, and the edit guard decides what may change.
