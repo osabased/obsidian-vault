@@ -6,7 +6,8 @@ import { changedFiles } from './git.mjs';
 
 // Reading and hashing every note costs more than a hook may spend, so each note's parsed text is kept in .state/cache/,
 // one file per folder of wiki/, and read again only when its size or mtime changes. Each entry also keeps when its text
-// was first seen, which settling reads, and whether git last found it unchanged from HEAD.
+// was first seen, which settling reads, and whether git last found it unchanged from HEAD. The frontmatter of each copy in
+// raw/refs/ is kept the same way, in .refs.json.
 
 const CACHE = ['.state', 'cache'];
 // A file saved within this long of being read may change again within the same mtime on a coarse file system, so it
@@ -21,8 +22,9 @@ const bucketOf = rel => {
   const parts = rel.split('/');
   return parts.length > 2 ? nfc(parts[1]) : '';
 };
-// Names starting with a dot are never walked, so .root can't be a folder's file.
-const cacheFile = b => vaultPath(...CACHE, `${b === '' ? '.root' : /^[\p{L}\p{N}_-]+$/u.test(b) ? b : shortHash(b)}.json`);
+// Names starting with a dot are never walked, so .root and .refs, which holds the copies in raw/refs/, can't be a folder's file.
+const REFS_BUCKET = '.refs';
+const cacheFile = b => vaultPath(...CACHE, `${b === '' ? '.root' : b === REFS_BUCKET || /^[\p{L}\p{N}_-]+$/u.test(b) ? b : shortHash(b)}.json`);
 const readBucket = (b, stamp) => {
   const c = readJsonSafe(cacheFile(b));
   return c?.stamp === stamp && c.notes && typeof c.notes === 'object' ? c.notes : {};
@@ -116,6 +118,41 @@ export function cachedNotes(buckets, read, stamp) {
       if (changed || dropped.length) saveBucket(b, stamp, found, dropped);
     }
     for (const [rel, e] of Object.entries(found)) out.push({ rel, ...e });
+  }
+  return out;
+}
+
+// What read(rel) gave for each file named, from .state/cache/.refs.json while the file's size and mtime hold, as a Map in
+// the order given. Reading every copy in raw/refs/ costs seconds at thousands of copies, so only the ones that changed are
+// read. read returns null for a file it can't use, which is never kept, so read sees it again on every call. lstat keys
+// the cache, so a file that becomes a link is read again.
+export function cachedFiles(rels, read, stamp) {
+  const old = readBucket(REFS_BUCKET, stamp);
+  const found = {};
+  const out = new Map();
+  let changed = false;
+  let whole = false;
+  try {
+    for (const rel of rels) {
+      checkDeadline();
+      const e = old[rel];
+      const st = fs.lstatSync(vaultPath(...rel.split('/')), { throwIfNoEntry: false });
+      if (st && e && e.m === st.mtimeMs && e.s === st.size && !isRacy(e.at, e.m)) {
+        found[rel] = e;
+        out.set(rel, e.value);
+        continue;
+      }
+      const value = read(rel);
+      if (value === null) continue;
+      out.set(rel, value);
+      if (!st) continue;
+      found[rel] = { m: st.mtimeMs, s: st.size, at: Date.now(), value };
+      changed = true;
+    }
+    whole = true;
+  } finally {
+    const dropped = whole ? Object.keys(old).filter(rel => !found[rel]) : [];
+    if (changed || dropped.length) saveBucket(REFS_BUCKET, stamp, found, dropped);
   }
   return out;
 }
