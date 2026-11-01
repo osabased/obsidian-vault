@@ -7,7 +7,7 @@ import assert from 'node:assert/strict';
 import { makeVault, ruleNote } from './fixture.mjs';
 
 const END = '<!-- taste-vault: end -->';
-const beginLine = hash => `<!-- taste-vault: begin ${hash} · written by node tools/compile.mjs; edits inside are overwritten -->`;
+const beginLine = hash => `<!-- taste-vault: begin ${hash} · written by node tools/compile.mjs, which refuses to rewrite it once it is edited by hand -->`;
 const HASH = '2fdaa50d75083113';
 
 const BODY = [
@@ -190,7 +190,7 @@ test('a domain whose marker sits below the project folder gets its globs under t
   assert.match(fs.readFileSync(agentsOf(v, root), 'utf8'), /### When editing pkg\/src\/\*\*\/\*\.zq\n\n- glim\/zq-trigger/);
 });
 
-test('over compile.maxBytes the section stops at a rule and ends with the overflow line, and fits the limit', t => {
+test('over compile.maxBytes the section stops at a rule and ends with an overflow line that names no path on this machine, and fits the limit', t => {
   const v = glimVault(t, { config: { compile: { maxBytes: 700 } } });
   for (let i = 0; i < 8; i++) v.write(`wiki/glim/rules/long-${i}.md`, ruleNote({ keywords: [`word${i}`], doLine: `Do thing number ${i} in the usual way.`, notLine: `Skip thing number ${i}.` }));
   const r = compile(v);
@@ -198,7 +198,8 @@ test('over compile.maxBytes the section stops at a rule and ends with the overfl
   const section = fs.readFileSync(agentsOf(v), 'utf8');
   const body = section.split('\n').slice(1, section.split('\n').indexOf(END));
   assert.ok(Buffer.byteLength(body.join('\n')) <= 700, `${Buffer.byteLength(body.join('\n'))} bytes`);
-  assert.match(body.at(-1), /^\(Left out to stay within \d+ characters: \d+ rules?\./);
+  assert.match(body.at(-1), /^\(Left out to stay within 700 bytes: \d+ rules\.\)$/);
+  assert.ok(!section.includes(posix(v.root)) && !section.includes('index.md'), body.at(-1));
   assert.match(r.stdout, /: \d+ rules\n$/);
 });
 
@@ -217,7 +218,7 @@ test('lint warns on a section that is missing, stale or edited by hand, and name
   assert.equal(compile(v).code, 0);
 
   fs.writeFileSync(file, fs.readFileSync(file, 'utf8').replace('Open each glim file', 'Open any glim file'));
-  assert.deepEqual((await compiledFindings()).map(f => [f.level, f.msg]), [['warn', 'edited by hand since it was compiled']]);
+  assert.deepEqual((await compiledFindings()).map(f => [f.level, f.msg]), [['warn', `edited by hand since it was compiled; move those edits out of the section, or delete it, then run node tools/compile.mjs ${root}`]]);
 });
 
 test('lint reports no compile finding for a domain that doesn\'t opt in', async t => {

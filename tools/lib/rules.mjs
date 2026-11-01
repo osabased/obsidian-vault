@@ -494,13 +494,15 @@ export const ruleLine = (k, r) => `- ${k}: ${clip(r.text, maxChars(r.kind))}${la
 // For a rule a refusal has no room to show in full: enough to tell whether to open the note.
 export const rulePointer = (k, r) => `- ${k}: ${clip(r.text, 70)}${labelled(r)} ${toPosix(vaultPath(...r.rel.split('/')))}`;
 
+const pointToIndex = max => list => `(Left out to stay within ${max} characters: ${list}. \`${toPosix(vaultPath('index.md'))}\` lists the rest.)`;
+
 // Fits a hook's output to delivery.maxContextChars, since an agent may replace a longer one with a file path and a
 // preview. Sections come in rank order; a plain string is one item. A section is { noun, items, head?, render? }: its
 // text is `head` and the kept items on lines, or render(kept). Items are kept from the top while they fit; the first
-// section that loses one ends the fill, and one line says what was left out and that index.md lists the rest. `tail` is
-// kept whatever the budget. `gap` sets the sections apart, a blank line by default. Returns the text and, for each
-// section passed, how many of its items the text holds.
-export function fitContext(sections, { max = config().delivery.maxContextChars, tail = '', gap = '\n\n' } = {}) {
+// section that loses one ends the fill, and one line says what was left out: leftOut(list), which by default says that
+// index.md lists the rest. `tail` is kept whatever the budget. `gap` sets the sections apart, a blank line by default.
+// Returns the text and, for each section passed, how many of its items the text holds.
+export function fitContext(sections, { max = config().delivery.maxContextChars, tail = '', gap = '\n\n', leftOut = pointToIndex(max) } = {}) {
   const all = sections.map(s => (typeof s === 'string' || !s ? { noun: 'note', items: s ? [s] : [] } : s));
   const join = parts => parts.filter(Boolean).join(gap);
   const body = (s, n) => (n ? (s.render ? s.render(s.items.slice(0, n)) : [s.head, ...s.items.slice(0, n)].filter(Boolean).join('\n')) : '');
@@ -508,7 +510,7 @@ export function fitContext(sections, { max = config().delivery.maxContextChars, 
     const counts = new Map();
     all.forEach((s, i) => { if (s.items.length > kept[i]) counts.set(s.noun, (counts.get(s.noun) ?? 0) + s.items.length - kept[i]); });
     const left = [...counts].map(([noun, n]) => plural(n, noun));
-    return left.length ? `(Left out to stay within ${max} characters: ${joinList(left, 'and')}. \`${toPosix(vaultPath('index.md'))}\` lists the rest.)` : '';
+    return left.length ? leftOut(joinList(left, 'and')) : '';
   };
   const render = kept => join([...all.map((s, i) => body(s, kept[i])), overflow(kept), tail]);
   const full = all.map(s => s.items.length);

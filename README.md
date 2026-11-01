@@ -48,3 +48,13 @@ What Codex doesn't give the vault, and the vault doesn't work around:
 - **Failures.** A hook that fails is marked failed and the call goes on. The vault logs it in `.state/errors.log` and names it at the next session start.
 - **Context size.** `additionalContextLimit` counts tokens by Codex's own estimate, and Codex saves longer context to a file with a preview.
 - **Untrusted hooks** don't run, and the vault can't tell.
+
+### Projects without the hooks
+
+For a project where the vault's hooks don't run, such as a machine without them or a repo other people's agents read, add `"compile": ["codex"]` to its domain in `vault.config.json` and run:
+
+```
+node tools/compile.mjs <project>
+```
+
+It writes the domain's file-glob and keyword rules, and global's, into a marked section of the project's `AGENTS.md`, and keeps the rest of the file byte for byte. Run it again when the rules change: `node tools/lint.mjs` warns on a section that is missing or stale in a folder the domain lists under `paths`. Compile refuses a section edited by hand, so change the rules in the vault, not the section. Opt in only where the hooks don't run, since a session with trusted Codex hooks would get the rules twice. A compiled section has no refusal and retry, `triggers`, once-per-session delivery, proposing, pages or namespace globs.
