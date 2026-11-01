@@ -234,6 +234,9 @@ export function writeText(file, text) {
   }
 }
 
+// Only for a folder the tools keep for themselves, such as a clone in .sources/.
+export const removeDir = dir => fs.rmSync(dir, { recursive: true, force: true, maxRetries: 3, retryDelay: 50 });
+
 export const lf = s => String(s ?? '').replace(/\r\n/g, '\n');
 // A BOM is the editor's, not the text's, so the guards and triggers read text without it.
 export const plainText = s => lf(s).replace(/^\uFEFF/, '');
