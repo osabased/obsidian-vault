@@ -1,4 +1,4 @@
-import { runHook, sessionReach, inVaultFolder, readableDomains, vaultPath, toolsPath, toPosix, guarded, config, plural, clock, readJson, statePath, today } from '../lib/vault.mjs';
+import { runHook, sessionReach, inVaultFolder, readableDomains, vaultPath, toolsPath, toPosix, guarded, config, plural, clock, daysBetween } from '../lib/vault.mjs';
 import { alwaysContext, alwaysIn, fitContext, indexNote, scopeTopics, loadNotes, settledNotes, liveRules, deliverable, deliveryFor, clip, undelivered, knownDomain, joinList } from '../lib/rules.mjs';
 import { build } from '../lib/build.mjs';
 import { remaining } from '../lib/deadline.mjs';
@@ -65,9 +65,8 @@ function lintNote(notes, walked) {
 }
 
 // A failed check doesn't move checked, so a source that only fails stays counted until a check goes through.
-function sourcesNote(scope) {
-  const { sources = {}, domains = {} } = readJson(statePath('derived.json'), {});
-  const now = Date.parse(today());
+function sourcesNote(scope, derived) {
+  const { sources = {}, domains = {} } = derived;
   const stale = new Set();
   const named = [];
   const limits = [];
@@ -75,7 +74,7 @@ function sourcesNote(scope) {
     const { checkAfterDays } = knowledgeDays(d);
     const old = (domains[d] ?? []).filter(id => {
       const checked = sources[id]?.checked;
-      return !checked || Math.round((now - Date.parse(checked)) / 864e5) > checkAfterDays;
+      return !checked || daysBetween(checked) > checkAfterDays;
     });
     if (!old.length) continue;
     old.forEach(id => stale.add(id));
@@ -106,7 +105,8 @@ runHook('session-start', input => {
     try { build({ waitMs: Math.min(2000, remaining()) }); } catch (e) { if (e?.code !== 'ELOCKED') throw e; }
   });
   const ready = settledNotes(notes);
-  const rules = deliverable(liveRules(ready), deliveryFor(hits));
+  const ctx = deliveryFor(hits);
+  const rules = deliverable(liveRules(ready), ctx);
   const always = alwaysContext(scope, rules);
   const topics = guarded('index note', () => scopeTopics(readable, ready), []);
   let propose = '';
@@ -131,7 +131,7 @@ runHook('session-start', input => {
     pick,
     { noun: 'topic', items: topics, render: indexNote },
     again ? '' : guarded('lint reminder', () => lintNote(notes, walked)),
-    again ? '' : guarded('source checks', () => sourcesNote(scope)),
+    again ? '' : guarded('source checks', () => sourcesNote(readable, ctx.derived)),
   ]);
   // Only the rules in the block count as shown, but those the block cut for size are marked too, since it points to
   // active.md for them. A block the output budget left out marks nothing, so the next prompt brings its rules.
