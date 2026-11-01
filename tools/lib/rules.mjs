@@ -104,7 +104,7 @@ function field(lead, name) {
 
 export const parseNote = (text, rel) => noteFrom(parse(text), rel);
 
-function noteFrom({ data, body, ok, errors = [] }, rel) {
+function noteFrom({ data, body, ok, errors }, rel) {
   const parts = nfc(rel).replace(/^wiki\//i, '').replace(/\.md$/i, '').split('/');
   const lead = body.split(/^## /m)[0];
   const successor = single(data.superseded_by);
@@ -168,8 +168,9 @@ const shownItem = x => (isMap(x) ? Object.entries(x).map(([k, v]) => `${k}: ${ty
 export function notTextError(f, x) {
   const item = shownItem(x);
   const quoted = yamlQuote(item);
-  return isMap(x) ? `${f} item ${item} reads as a key and value, not text. Single-quote an item that holds ": ", as in ${quoted}`
-    : `${f} item ${item} isn't text. Single-quote it, as in ${quoted}`;
+  const how = quoted[0] === '"' ? 'Double-quote' : 'Single-quote';
+  return isMap(x) ? `${f} item ${item} reads as a key and value, not text. ${how} an item that holds ": ", as in ${quoted}`
+    : `${f} item ${item} isn't text. ${how} it, as in ${quoted}`;
 }
 
 // YAML reads an unquoted `- TextSize: 1[0-9]` as a map, as Obsidian does, so a list item is checked for text before
@@ -259,10 +260,7 @@ function checkNote(n) {
   return errs;
 }
 
-const parsed = (rel, text) => {
-  const { data, body, ok, errors } = parse(text);
-  return { data, body, ok, errors };
-};
+const parsed = (_rel, text) => parse(text);
 // The cache keeps what parsed() read, in cache.mjs's shape, so a change to either, or to frontmatter.mjs, makes it read
 // every note again.
 let parserStamp;
