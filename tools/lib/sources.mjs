@@ -32,11 +32,41 @@ export function hashPath(file) {
 
 export const hashFile = rel => hashPath(vaultPath(...rel.split('/')));
 
+// The bytes as text, or null when they aren't UTF-8 or hold a NUL, as a binary does.
+export function utf8Text(buf) {
+  let text;
+  try { text = new TextDecoder('utf-8', { fatal: true }).decode(buf); } catch { return null; }
+  return text.includes('\0') ? null : text;
+}
+
+const SNIFF = 8192;
+
+// A file's text, or null when it isn't UTF-8 text. A binary is told from its first bytes, so a video isn't read whole to
+// learn that, and a file too large for a buffer (2 GiB) counts as one. A file another program holds open throws.
+export function fileText(file) {
+  const fd = fs.openSync(file, 'r');
+  try {
+    const head = Buffer.alloc(SNIFF);
+    const n = fs.readSync(fd, head, 0, SNIFF, 0);
+    // The cut can fall inside a character, so the last bytes are left to the decoder to wait on rather than reject.
+    if (head.subarray(0, n).includes(0)) return null;
+    try { new TextDecoder('utf-8', { fatal: true }).decode(head.subarray(0, n), { stream: true }); } catch { return null; }
+  } finally {
+    fs.closeSync(fd);
+  }
+  try {
+    return utf8Text(fs.readFileSync(file));
+  } catch (e) {
+    if (e.code === 'ERR_FS_FILE_TOO_LARGE') return null;
+    throw e;
+  }
+}
+
 // The lines a footnote may point at, so a binary or a file another program holds open has none.
 export function lineCount(rel) {
   try {
-    const text = new TextDecoder('utf-8', { fatal: true }).decode(readRel(rel));
-    if (text.includes('\0')) return null;
+    const text = fileText(vaultPath(...rel.split('/')));
+    if (text === null) return null;
     return text ? text.split('\n').length - (text.endsWith('\n') ? 1 : 0) : 0;
   } catch {
     return null;
@@ -92,6 +122,8 @@ export function parseLocator(fragment) {
 const PAGE_ANCHOR = /^\[p\. ([1-9]\d*)\]$/;
 const TIME_ANCHOR = /^\[t=(\d\d+):([0-5]\d):([0-5]\d)\]$/;
 export const isAnchor = line => PAGE_ANCHOR.test(line.trim()) || TIME_ANCHOR.test(line.trim());
+// A line lint reads as an anchor, well formed or not.
+export const startsLikeAnchor = line => /^\[(?:p\.|t=)/.test(line.trim());
 
 // Page anchors [p. 3] and time anchors [t=00:12:31], as the seconds and numbers they stand for, and the lines that
 // start like an anchor but aren't one. An anchor sits on a line of its own, as extract.mjs writes it, so a [p. 3] in a
@@ -118,7 +150,7 @@ export function derivedAnchors(hash) {
   return parsed && anchorsIn(parsed.body);
 }
 
-// The images pick.mjs takes as a sheet, and that quoteTexts reads as images when no derived text says otherwise.
+// The images pick.mjs takes as a sheet.
 export const IMAGE = /\.(?:png|jpe?g|webp)$/i;
 
 // A relative path that stays inside its folder.

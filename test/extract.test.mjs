@@ -200,3 +200,94 @@ test('extractors that is not a list is a lint error', async t => {
   const v = archive(t, { extractors: 'fixture' });
   assert.deepEqual(await configErrors(v), ['extractors must be a list of extractor extension names']);
 });
+
+test('a lone CR in a part can not forge an anchor line', t => {
+  const v = archive(t);
+  const rel = 'raw/refs/cr.echo';
+  v.write(rel, echoed({ kind: 'pdf', parts: [{ page: 1, text: 'one\r[p. 9]\rtwo' }, { page: 2, text: 'three' }] }));
+  const before = derivedFiles(v);
+  const r = extract(v, rel);
+  assert.equal(r.code, 1);
+  assert.equal(r.stdout, `failed ${rel}: echo returned text with a line that reads as an anchor: [p. 9]\n`);
+  assert.deepEqual(derivedFiles(v), before);
+});
+
+test('a line that starts like an anchor but is not one fails extraction, naming the line', t => {
+  const v = archive(t);
+  const page = text => ({ page: 1, text });
+  const cases = {
+    'raw/refs/roman.echo': [page('Contents\n[p. iv] Preface'), 'echo returned text with a line that starts like an anchor: [p. iv] Preface'],
+    'raw/refs/trail.echo': [page('See\n[p. 3] see figure'), 'echo returned text with a line that starts like an anchor: [p. 3] see figure'],
+    'raw/refs/clock.echo': [page('A\n  [t=1:00] later'), 'echo returned text with a line that starts like an anchor: [t=1:00] later'],
+  };
+  const before = derivedFiles(v);
+  for (const [rel, [part, why]] of Object.entries(cases)) {
+    v.write(rel, echoed({ kind: 'pdf', parts: [part] }));
+    const r = extract(v, rel);
+    assert.equal(r.code, 1, rel);
+    assert.equal(r.stdout, `failed ${rel}: ${why}\n`);
+  }
+  assert.deepEqual(derivedFiles(v), before);
+});
+
+test('a page or time past the safe integers fails extraction', t => {
+  const v = archive(t);
+  const cases = {
+    'raw/refs/bigpage.echo': [{ page: 1e21, text: 'Far.' }, 'echo returned page 1e+21'],
+    'raw/refs/bigtime.echo': [{ t: 1e21, text: 'Far.' }, 'echo returned t=1e+21, not whole seconds'],
+  };
+  for (const [rel, [part, why]] of Object.entries(cases)) {
+    v.write(rel, echoed({ kind: 'pdf', parts: [part] }));
+    const r = extract(v, rel);
+    assert.equal(r.code, 1, rel);
+    assert.equal(r.stdout, `failed ${rel}: ${why}\n`);
+  }
+});
+
+test('anchorsIn and extract read the same lines as anchors', async t => {
+  const v = archive(t);
+  const { startsLikeAnchor, anchorsIn } = await v.import('lib/sources.mjs');
+  for (const line of ['[p. 3]', '[p. iv] Preface', '  [t=1:00]', '[t=00:00:01]']) assert.equal(startsLikeAnchor(line), true, line);
+  for (const line of ['See [p. 3]', 'p. 3', '']) assert.equal(startsLikeAnchor(line), false, line);
+  assert.deepEqual(anchorsIn('[p. iv] Preface\n[p. 2]\nplain').bad, ['[p. iv] Preface']);
+});
+
+test('a throw on a later file keeps the lines of the files before it', t => {
+  const v = archive(t);
+  v.write('tools/ext/extractors/boom.mjs', [
+    "export const kinds = ['pdf'];",
+    "export const extensions = ['.boom'];",
+    "export const version = '1';",
+    "export function extract() { return { get kind() { throw new Error('exploded'); } }; }",
+    '',
+  ].join('\n'));
+  const config = JSON.parse(v.read('vault.config.json'));
+  v.write('vault.config.json', JSON.stringify({ ...config, extractors: [...config.extractors, 'boom'] }));
+  const ok = 'raw/refs/ok.echo';
+  v.write(ok, echoed({ kind: 'pdf', parts: [{ page: 1, text: 'Fine.' }] }));
+  v.write('raw/refs/bad.boom', Buffer.from([0xff, 0x01]));
+  v.write('raw/refs/last.echo', echoed({ kind: 'pdf', parts: [{ page: 1, text: 'Last.' }] }));
+  const r = extract(v, ok, 'raw/refs/bad.boom', 'raw/refs/last.echo');
+  assert.equal(r.code, 1);
+  assert.deepEqual(r.stdout.trimEnd().split('\n'), [
+    `wrote ${ok}: derived/${hashOf(v, ok)}.md (echo 2, 1 page)`,
+    'failed raw/refs/bad.boom: exploded',
+    `wrote raw/refs/last.echo: derived/${hashOf(v, 'raw/refs/last.echo')}.md (echo 2, 1 page)`,
+  ]);
+  assert.equal(v.exists(`derived/${hashOf(v, ok)}.md`), true);
+});
+
+test('an extractor can not declare an extension that extname never returns', async t => {
+  const v = archive(t);
+  v.write('tools/ext/extractors/tarball.mjs', "export const kinds = ['pdf'];\nexport const extensions = ['.tar.gz'];\nexport const version = '1';\nexport function extract() {}\n");
+  const config = JSON.parse(v.read('vault.config.json'));
+  v.write('vault.config.json', JSON.stringify({ ...config, extractors: [...config.extractors, 'tarball'] }));
+  assert.ok((await configErrors(v)).includes('extractors: tools/ext/extractors/tarball.mjs must export extensions, a list of lowercase file extensions each with its dot, such as .pdf'));
+});
+
+test('config() gives extractors as a list, whatever the file holds', async t => {
+  for (const [held, want] of [[undefined, []], ['fixture', []], [{ a: 1 }, []], [['fixture'], ['fixture']]]) {
+    const v = makeVault(t, { config: held === undefined ? {} : { extractors: held } });
+    assert.deepEqual((await v.import('lib/vault.mjs')).config().extractors, want, JSON.stringify(held));
+  }
+});

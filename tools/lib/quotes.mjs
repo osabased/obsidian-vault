@@ -1,7 +1,7 @@
 import fs from 'node:fs';
 import { readJsonl, vaultPath } from './vault.mjs';
 import { escapeRegExp, isUserPage, parseNote, userWords } from './rules.mjs';
-import { IMAGE, derivedText, hashFile, isAnchor } from './sources.mjs';
+import { fileText, derivedText, hashFile, isAnchor } from './sources.mjs';
 
 // Claude Code logs tool output, skill text, compaction summaries, injected context and prompts the app or a script
 // sent as user entries too, so only the text the user typed counts as their words: their prompts, queued or not, and
@@ -90,27 +90,25 @@ const markdownText = md => md
 // web page is quoted as it reads, not as its markup: inline tags sit inside words and other tags between them. Markdown
 // is quoted either as written or as it reads.
 export function sourceTexts(rel) {
-  const text = utf8Text(fs.readFileSync(vaultPath(...rel.split('/'))));
+  const text = fileText(vaultPath(...rel.split('/')));
   if (text === null) return null;
   if (/\.html?$/i.test(rel)) return [htmlText(text)];
   return /\.(?:md|markdown)$/i.test(rel) ? [text, markdownText(text)] : [text];
 }
 
-// The bytes as text, or null when they aren't UTF-8 or hold a NUL, as a binary does.
-export function utf8Text(buf) {
-  let text;
-  try { text = new TextDecoder('utf-8', { fatal: true }).decode(buf); } catch { return null; }
-  return text.includes('\0') ? null : text;
-}
+// The image types a quote may meet, wider than the sheets pick.mjs takes, so a .gif quote is told it is an image rather
+// than to run extract, which no extractor answers.
+const IMAGES = /\.(?:png|jpe?g|webp|gif|bmp|tiff?)$/i;
 
 // What a quote from a file under raw/ is checked against: { texts }, or { why } when there is nothing to check it
 // against. A binary is read through its derived text without the anchor lines, so a quote may run across a page break.
-// What an image shows is a reading, whatever text was taken from it.
-export function quoteTexts(rel) {
+// What an image shows is a reading, whatever text was taken from it. hashOf is how the caller hashes a binary, so lint
+// can hand over a hash it has already taken.
+export function quoteTexts(rel, hashOf = hashFile) {
   const texts = sourceTexts(rel);
   if (texts) return { texts };
-  const derived = derivedText(hashFile(rel));
-  if (derived ? derived.data.kind === 'image' : IMAGE.test(rel)) return { why: 'image' };
+  const derived = derivedText(hashOf(rel));
+  if (derived ? derived.data.kind === 'image' : IMAGES.test(rel)) return { why: 'image' };
   if (!derived) return { why: 'no derived text' };
   return { texts: [derived.body.split('\n').filter(l => !isAnchor(l)).join('\n')] };
 }

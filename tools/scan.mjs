@@ -2,8 +2,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { vaultPath, vaultRel, plural } from './lib/vault.mjs';
 import { vaultFile } from './lib/rules.mjs';
-import { hashPath } from './lib/sources.mjs';
-import { utf8Text } from './lib/quotes.mjs';
+import { hashPath, fileText } from './lib/sources.mjs';
 import { unallowedSecrets, shownSecret } from './lib/secrets.mjs';
 
 const USAGE = `usage: node tools/scan.mjs <file>...
@@ -15,7 +14,7 @@ const fromRoot = ref => (path.isAbsolute(ref) && vaultRel(ref)) || ref;
 // The text a file's quotes come from: its own, or a binary's derived text, whose lines the line numbers count.
 function textOf(rel) {
   const file = vaultPath(...rel.split('/'));
-  const own = utf8Text(fs.readFileSync(file));
+  const own = fileText(file);
   if (own !== null) return own;
   try { return fs.readFileSync(vaultPath('derived', `${hashPath(file)}.md`), 'utf8'); } catch { return null; }
 }
