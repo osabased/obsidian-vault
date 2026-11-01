@@ -1,6 +1,6 @@
 import { runHook, config, inVaultFolder, readableDomains, everywhereDomains } from '../lib/vault.mjs';
 import { loadNotes, settledNotes, liveRules, livePages, alwaysIn, ruleLine, pageLine, fitContext, cmp, mentions } from '../lib/rules.mjs';
-import { touchSession, sessionDomains, markAlways, markShown, markFirst, markPages } from '../lib/sessions.mjs';
+import { touchSession, turnStarted, sessionDomains, markAlways, markShown, markFirst, markPages } from '../lib/sessions.mjs';
 
 // Session start marks the always rules it loads, so these are the ones written, reworded or settled since,
 // or the ones of a domain the session moved into. A section's keys are the rules its items show.
@@ -24,6 +24,7 @@ function excerpts(sid, scope, rules, said) {
 runHook('prompt', input => {
   const sid = input.session_id;
   if (!sid) return null;
+  turnStarted(sid);
   const doms = sessionDomains(sid, input.cwd);
   const vaultFolder = inVaultFolder(input.cwd);
   const registered = doms.length > 0 || vaultFolder;

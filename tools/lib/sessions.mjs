@@ -110,6 +110,7 @@ export function marked(kind, sid, key) {
 // Marks the keys not yet marked, in one append, and returns them. Two hooks racing on one key can both see it unmarked,
 // so each may deliver it; parallel tool calls in one agent are the only race, and they cost a repeat, not a miss.
 export function markMany(kind, sid, keys) {
+  if (!keys.length) return [];
   const m = markers(kind, sid);
   const fresh = [...new Set(keys)].filter(k => !marked(kind, sid, k));
   if (!fresh.length) return [];
@@ -155,6 +156,15 @@ export const markShown = (sid, keys) => guarded('mark shown', () => {
   markMany('excerpts', sid, all.map(k => `shown|${k}`));
 });
 export const wasShown = (sid, key) => marked('excerpts', sid, `shown|${key}`);
+
+// The prompt hook stamps when each turn began, so the Stop hook counts only the files saved since. A failed stamp costs
+// that turn's shell-write check, not the prompt's delivery.
+const turnFile = sid => vaultPath('.state', 'turns', safeId(sid), 'started.json');
+export const turnStarted = sid => guarded('turn start', () => writeJson(turnFile(sid), { at: Date.now() }));
+export function turnStart(sid) {
+  const at = readJsonSafe(turnFile(sid))?.at;
+  return Number.isFinite(at) ? at : null;
+}
 
 // Read without creating the folder, since lint reads it and lint changes nothing.
 function registeredIds() {
@@ -244,7 +254,7 @@ export function errorsSinceLint() {
   return size > seen ? hookErrors(errorsLog(), seen) : [...hookErrors(errorsLog('.1'), seen), ...hookErrors()];
 }
 
-const KINDS = ['gate', 'notes', 'excerpts', 'pages', 'repeats', 'delivered'];
+const KINDS = ['gate', 'notes', 'excerpts', 'pages', 'repeats', 'delivered', 'turns'];
 
 // Removes up to `room` marker files of a session, then its folders, and returns how many files it removed. The registry
 // goes last, and only once every folder is gone, so a session left half pruned is tried again next time.
