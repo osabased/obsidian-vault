@@ -163,6 +163,22 @@ test('show leaves out the picks of another domain in the same folder', t => {
   assert.match(v.run('pick.mjs', ['show', sid, 'cards', 'other']).stdout, /words for the other domain/);
 });
 
+test("show lists the taste and knowledge rules of every domain in the project's folder", t => {
+  const v = makeVault(t, { domains: { other: { title: 'Other', topics: ['code', 'naming'], markers: ['other.marker'], showSkipTopics: ['naming'] } } });
+  fs.writeFileSync(path.join(v.project, 'other.marker'), '');
+  v.write('wiki/demo/demo-taste.md', ruleNote({ keywords: ['x'], doLine: 'Demo taste.' }));
+  v.write('wiki/other/other-taste.md', ruleNote({ domain: 'other', keywords: ['x'], doLine: 'Other taste.' }));
+  v.write('wiki/other/other-fact.md', ruleNote({ domain: 'other', kind: 'knowledge', extra: ['as_of: 2026-10-01'], keywords: ['x'], doLine: 'Other fact.' }));
+  v.write('wiki/other/other-name.md', ruleNote({ domain: 'other', topic: 'naming', keywords: ['x'], doLine: 'Other naming.' }));
+  const sid = sessionId();
+  v.startSession(sid);
+  const out = v.run('pick.mjs', ['show', sid, 'cards', 'demo']).stdout;
+  assert.match(out, /\ndemo rules:\n- demo\/demo-taste: Do: Demo taste\./);
+  assert.match(out, /\nother rules, leaving out naming:\n- other\/other-fact: Do: Other fact\.[^\n]*\n- other\/other-taste: Do: Other taste\./);
+  assert.doesNotMatch(out, /other-name/);
+  assert.ok(out.indexOf('demo rules') < out.indexOf('other rules'), 'the chosen domain comes first');
+});
+
 // Two packages that hold one domain's marker, under a root outside every configured path.
 function twoPackages(t) {
   const v = makeVault(t, { domains: { mk: { title: 'Mk', topics: ['code'], markers: ['mk.marker'] } } });
