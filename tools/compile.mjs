@@ -23,14 +23,22 @@ try {
   let refused = false;
   for (const { project, reach } of plan(process.argv.slice(2))) {
     for (const r of compileFor(project, reach)) {
-      if (r.refused) {
+      const refuse = reason => {
         refused = true;
-        console.log(`refused ${r.path}: ${r.refused}`);
+        console.log(`refused ${r.path}: ${reason}`);
+      };
+      if (r.refused) {
+        refuse(r.refused);
       } else if (r.state === 'current') {
         console.log(`unchanged ${r.path}`);
       } else {
-        // A linked file keeps its link, since the rename would otherwise replace the link with a file.
-        writeText(fs.existsSync(r.path) ? fs.realpathSync(r.path) : r.path, r.text);
+        try {
+          // A linked file keeps its link, since the rename would otherwise replace the link with a file.
+          writeText(fs.existsSync(r.path) ? fs.realpathSync(r.path) : r.path, r.text);
+        } catch (e) {
+          refuse(`the file can't be written (${e.code ?? e.message}). Make it writable, then compile again.`);
+          continue;
+        }
         console.log(`wrote ${r.path}: ${plural(r.rules, 'rule')}`);
       }
     }

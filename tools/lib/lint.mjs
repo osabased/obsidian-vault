@@ -884,14 +884,25 @@ function lintCode(add) {
   }
 }
 
-// Some agents read skills from .agents/skills/ rather than .claude/skills/, so each skill file has a byte copy there.
+// Bytes compared with CRLF read as LF, through latin1, which maps each byte to one character and back.
+const lfBytes = buf => buf.toString('latin1').replace(/\r\n/g, '\n');
+
+// Some agents read skills from .agents/skills/ rather than .claude/skills/, so each skill file has a copy there. Line
+// endings don't count: a checkout made before the copies existed can hold the skills with CRLF and the copies with LF.
 function lintSkillCopies(found) {
   for (const rel of filesIn(vaultPath('.claude', 'skills')).sort()) {
     const [from, to] = [`.claude/skills/${rel}`, `.agents/skills/${rel}`];
     const copy = fs.existsSync(vaultPath(to)) ? fs.readFileSync(vaultPath(to)) : null;
-    if (copy?.equals(fs.readFileSync(vaultPath(from)))) continue;
+    if (copy && lfBytes(copy) === lfBytes(fs.readFileSync(vaultPath(from)))) continue;
     const msg = copy ? `differs from ${from}; edit the skill there, then run node tools/lint.mjs --fix to copy it` : `missing; run node tools/lint.mjs --fix to copy ${from}`;
     found.push({ level: 'error', file: to, msg, copyFrom: from });
+  }
+  // An agent would still read a renamed or deleted skill's copy. Deleting is the user's call, so --fix leaves it.
+  const copies = vaultPath('.agents', 'skills');
+  const names = fs.existsSync(copies) ? fs.readdirSync(copies, { withFileTypes: true }).filter(e => e.isDirectory() && !e.name.startsWith('.')).map(e => e.name) : [];
+  for (const name of names.sort()) {
+    if (fs.existsSync(vaultPath('.claude', 'skills', name))) continue;
+    found.push({ level: 'error', file: `.agents/skills/${name}/`, msg: `.claude/skills/${name}/ no longer exists; delete .agents/skills/${name}/` });
   }
 }
 
