@@ -134,6 +134,42 @@ test('a move is gated on both paths, and a malformed patch fails loudly', t => {
   assert.match(r.stderr, /^vault edit failed: [^\n]*is empty[^\n]*; see \.state\/errors\.log\n$/);
 });
 
+test("a move deletes its source and gives the destination the source's new text, and hunks on one path apply in order", async t => {
+  const v = codexVault(t);
+  const { events } = await v.import('adapters/codex/adapter.mjs');
+  fs.mkdirSync(path.join(v.project, 'docs'));
+  fs.writeFileSync(path.join(v.project, 'docs', 'a.txt'), 'a\nkeep\n');
+  const edits = ops => events('edit', patchCall('s', v.project, ops)).map(e => ({ path: e.target.path, added: e.added, after: e.after }));
+  const [source, dest] = edits([{ update: 'docs/a.txt', moveTo: 'src/b.txt', chunks: [{ lines: ['-a', '+set x to 1'] }] }]);
+  assert.deepEqual([source.path, source.added, source.after('a\nkeep\n')], ['docs/a.txt', '', '']);
+  assert.deepEqual([dest.path, dest.added, dest.after('what was at the destination\n')], ['src/b.txt', 'set x to 1', 'set x to 1\nkeep\n']);
+  const [, gone] = edits([{ update: 'docs/missing.txt', moveTo: 'src/b.txt', chunks: [{ lines: ['-a', '+b'] }] }]);
+  assert.equal(gone.after(''), null, "a source that can't be read gives null");
+  const [added, updated] = edits([{ add: 'src/n.txt', lines: ['one'] }, { update: 'src/n.txt', chunks: [{ lines: [' one', '+two'] }] }]);
+  assert.deepEqual([added.after(''), updated.after('')], ['one\n', 'one\ntwo\n'], 'an update after an add applies to the added text');
+  const [, second] = edits([{ update: 'docs/a.txt', chunks: [{ lines: ['-a', '+A'] }] }, { update: 'docs/a.txt', chunks: [{ lines: ['-A', '+Z'] }] }]);
+  assert.equal(second.after('a\nkeep\n'), 'Z\nkeep\n', 'the second update applies to the first one\'s result');
+  const [, , , moved] = edits([{ update: 'docs/a.txt', chunks: [{ lines: ['-keep', '+kept'] }] }, { delete: 'src/b.txt' }, { update: 'docs/a.txt', moveTo: 'src/b.txt', chunks: [{ lines: ['-a', '+b'] }] }]);
+  assert.equal(moved.after(''), 'b\nkept\n', 'a move carries the earlier updates of its source');
+  const [, readded] = edits([{ delete: 'docs/a.txt' }, { add: 'docs/a.txt', lines: ['fresh'] }]);
+  assert.equal(readded.after('a\nkeep\n'), 'fresh\n');
+});
+
+test('a move onto a page and an add then update on a page are guarded as the text Codex writes', t => {
+  const v = codexVault(t);
+  const sid = sessionId();
+  const said = '- 2026-10-01 · session 1a2b3c4d · "the cards breathe"';
+  v.write('raw/refs/cards.md', 'Cards.\n');
+  v.write('wiki/glim/sources/source-cards.md', sourcePage({ source: 'raw/refs/cards.md', body: ['## You said', said, '', "## Agent's reading", 'Roomy cards.', '', '## Rules'] }));
+  v.write('wiki/glim/concepts/x.md', pageNote({ kind: 'concept', body: ['Something else entirely.'] }));
+  const edit = ops => hook(v, 'edit', patchCall(sid, v.root, ops));
+  const over = denied(edit([{ update: 'wiki/glim/concepts/x.md', moveTo: 'wiki/glim/sources/source-cards.md', chunks: [{ context: '', lines: ['+more'] }] }])) ?? '';
+  assert.match(over, /This edit removes the user's words or a rule's evidence from wiki\/glim\/sources\/source-cards\.md/);
+  const page = ['---', 'kind: concept', 'domain: glim', '---', 'Body.'];
+  const claimed = denied(edit([{ add: 'wiki/glim/concepts/n.md', lines: page }, { update: 'wiki/glim/concepts/n.md', chunks: [{ lines: [' domain: glim', '+author: user'] }] }])) ?? '';
+  assert.match(claimed, /wiki\/glim\/concepts\/n\.md would be marked author: user/);
+});
+
 test("after() on wiki notes: dropping the user's words is refused, notes under ## Agent notes pass, and an unfound chunk refuses a user's page", t => {
   const v = codexVault(t);
   const sid = sessionId();
