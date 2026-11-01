@@ -23,13 +23,10 @@ test('a project whose lockfile pins pkg 2 delivers only the v2 rule, and review 
   assert.match(pairs.join('\n'), /almanac\/ledger-v2 and almanac\/ledger-v3, .* · almanac\/ledger-v2 ranks first: /);
 });
 
-// Until package V delivers the label, the refusal and the start of a session show the rule without it, so both tests
-// fail on their last assertion.
-const LABEL_TODO = '6.2a, phase 4: the source changed label comes with version delivery';
 const rawFiles = v => Object.fromEntries(fs.readdirSync(v.at('raw'), { recursive: true, withFileTypes: true })
   .filter(e => e.isFile()).map(e => [path.relative(v.root, path.join(e.parentPath, e.name)).replace(/\\/g, '/'), sha256(fs.readFileSync(path.join(e.parentPath, e.name)))]));
 
-test('refresh labels a rule unverified once the URL source it cites has changed', { todo: LABEL_TODO }, async t => {
+test('refresh labels a rule unverified once the URL source it cites has changed', async t => {
   const server = await serve(t, { '/ledger': { body: LEDGER_GUIDE, etag: '"ledger-1"' } });
   const repo = gitRepo(t, { 'docs/ledger.md': LEDGER_REPO });
   const v = makeVault(t, { presets: ['almanac'], sources: { url: server.url('/ledger'), repo: repo.dir, commit: repo.commit } });
@@ -55,7 +52,7 @@ test('refresh labels a rule unverified once the URL source it cites has changed'
   assert.match(ledgerEdit(v, sid), /- almanac\/ledger-v2: .* source changed on \d{4}-\d\d-\d\d/);
 });
 
-test('refresh labels a rule unverified once the git source it cites has changed upstream', { todo: LABEL_TODO }, async t => {
+test('refresh labels a rule unverified once the git source it cites has changed upstream', async t => {
   const repo = gitRepo(t, { 'docs/ledger.md': LEDGER_REPO });
   const v = makeVault(t, { presets: ['almanac'], sources: { repo: repo.dir, commit: repo.commit } });
   const cwd = v.projects.almanac;
