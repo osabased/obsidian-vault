@@ -2,7 +2,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { isBuiltin } from 'node:module';
 import {
-  config, vaultPath, plural, today, datedFiles, filesIn, pickRows, rewriteText, lf, readJson, readJsonSafe, toPosix, memo, isVaultOnly, isMarkerName, clock,
+  config, vaultPath, plural, today, datedFiles, filesIn, pickRows, rewriteText, lf, readJson, readJsonSafe, toPosix, memo, isVaultOnly, isMarkerName, clock, FILE_TOOLS, EDIT_HOOK_MATCHER,
 } from './vault.mjs';
 import {
   vaultFile, loadNotes, noteErrors, ruleText, ruleTextParts, liveRules, knownDomain, alwaysSize, isUrl, validDay, normTopic, topicNotes, rawFile, toKey, resolver, linksUnder, noteLinks, byTopic, isTopicPage, isSourcePage, PAGE_KINDS, joinList,
@@ -11,6 +11,7 @@ import {
 } from './rules.mjs';
 import { setField } from './frontmatter.mjs';
 import { NAMESPACE_NAME } from './glob.mjs';
+import { EXTENSION_NAME, hasExtension, extensionRel } from './ext.mjs';
 import { build } from './build.mjs';
 import { transcriptFor } from './sessions.mjs';
 import { typedMessages, saidIn, sourceTexts, userPageTexts } from './quotes.mjs';
@@ -217,12 +218,29 @@ export function lintConfig(add) {
       else if (typeof ns.separator === 'string' && ns.separator.includes(ns.escape)) bad(`${at}.escape ${ns.escape} is in the separator. Pick another character`);
     }
   }
+  const declared = ns => isMap(namespaces) && typeof ns === 'string' && ns !== 'file' && Object.hasOwn(namespaces, ns);
+  for (const [d, x] of Object.entries(isMap(c.domains) ? c.domains : {})) {
+    if (x?.aliases === undefined) continue;
+    const at = `${d}.aliases`;
+    if (!isMap(x.aliases)) {
+      bad(`${at} must be an object of alias extension names by namespace`);
+      continue;
+    }
+    for (const [ns, name] of Object.entries(x.aliases)) {
+      if (!declared(ns)) bad(`${at}.${ns}: ${ns} isn't a namespace that vault.config.json declares under namespaces`);
+      if (typeof name !== 'string' || !EXTENSION_NAME.test(name)) bad(`${at}.${ns} must name an extension in lowercase letters, digits, - or _`);
+      else if (!hasExtension('aliases', name)) bad(`${at}.${ns} names ${name}, and ${extensionRel('aliases', name)} doesn't exist`);
+    }
+  }
   const editTools = c.editTools ?? {};
   if (!isMap(editTools)) return bad('editTools must be an object of { namespace, path, after } by tool name');
   const FIELD = /^tool_input\.\S+$/;
+  const hooked = new RegExp(`^(?:${EDIT_HOOK_MATCHER})$`);
   for (const [tool, t] of Object.entries(editTools)) {
     const at = `editTools.${tool}`;
     if (!/^\S+$/.test(tool)) bad(`${at}: a tool name has no spaces`);
+    else if (FILE_TOOLS.includes(tool)) bad(`${at}: ${tool} edits a file, which the edit hook reads from the call itself; take it out of editTools`);
+    else if (!hooked.test(tool)) bad(`${at}: the edit hook's matcher, ${EDIT_HOOK_MATCHER}, never sends ${tool} to the hook, so it would never be gated`);
     if (!isMap(t)) {
       bad(`${at} must be an object with namespace, path and after`);
       continue;

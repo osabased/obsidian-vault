@@ -1,5 +1,5 @@
 import { runHook, sessionReach, inVaultFolder, readableDomains, vaultPath, toolsPath, toPosix, guarded, config, plural, clock } from '../lib/vault.mjs';
-import { alwaysContext, alwaysIn, loadNotes, settledNotes, liveRules, domainTopics, joinList, clip, undelivered, knownDomain } from '../lib/rules.mjs';
+import { alwaysContext, alwaysIn, indexNote, loadNotes, settledNotes, liveRules, clip, undelivered, knownDomain } from '../lib/rules.mjs';
 import { build } from '../lib/build.mjs';
 import { changedSinceBuild, markBuilt } from '../lib/cache.mjs';
 import { touchSession, clearMarkers, markAlways, markShown, tidy, errorsSinceLint, sinceLint } from '../lib/sessions.mjs';
@@ -27,16 +27,6 @@ function pickNote(sid) {
     `to \`node "${script}" ${sid}\` the same way; a pick you make alone while the user is away is provisional.`,
     `Before building or reviewing a piece that has picks, run \`node "${script}" show ${sid} <subject>\` and keep to what it prints.`,
     `\`node "${script}" --help\` lists the fields.`,
-  ].join(' ');
-}
-
-function indexNote(scope, notes) {
-  const all = domainTopics(notes);
-  const topics = [...new Set(scope.flatMap(d => all.get(d) ?? []))];
-  if (!topics.length) return '';
-  return [
-    `Taste vault: when the task touches ${joinList(topics, 'or')}, read \`${toPosix(vaultPath('index.md'))}\` and the pages it lists under those topics.`,
-    `File a useful answer that draws on the vault back as a page, as \`${toPosix(vaultPath('AGENTS.md'))}\` says under Pages.`,
   ].join(' ');
 }
 
