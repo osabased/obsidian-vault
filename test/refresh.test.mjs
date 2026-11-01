@@ -2,9 +2,10 @@ import fs from 'node:fs';
 import http from 'node:http';
 import os from 'node:os';
 import path from 'node:path';
+import { execFileSync } from 'node:child_process';
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { makeVault, sessionId, ruleNote, sourcePage, sha256, sectionOf, withFields, serve, gitRepo, LEDGER_GUIDE } from './fixture.mjs';
+import { makeVault, sessionId, ruleNote, sourcePage, sha256, sectionOf, withFields, serve, gitRepo, cleanEnv, LEDGER_GUIDE } from './fixture.mjs';
 import { today } from '../tools/lib/vault.mjs';
 
 // What refresh does to raw/refs/ and .state/derived.json (design §8 item 4). Every server is one the test starts on
@@ -83,6 +84,152 @@ test('each failed git check records its reason and writes nothing under raw/', a
   assert.ok(lines(r).includes(`failed ${repo.dir} docs/b.md: docs/b.md is gone at ${removed.slice(0, 8)}`), r.stdout);
   assert.equal(derived(v).sources[`${repo.dir} docs/b.md`].checked, '2026-10-01');
   assert.deepEqual(filesUnder(v, 'raw'), before, 'a failed check wrote under raw/');
+});
+
+test('a git source whose fields could reach git as options runs nothing and fails with its reason', async t => {
+  const repo = gitRepo(t, { 'README.md': 'Read me.\n' });
+  const v = makeVault(t);
+  const mark = v.at('PWNED').replace(/\\/g, '/');
+  saved(v, 'raw/refs/pack.md', { repo: `--upload-pack=touch ${mark};`, path: 'README.md', commit: 'a1b2c3d4', fetched: '2026-10-01' }, 'Read me.\n');
+  saved(v, 'raw/refs/out.md', { repo: repo.dir, path: 'README.md', commit: `--output=${mark}`, fetched: '2026-10-01' }, 'Read me.\n');
+  saved(v, 'raw/refs/slash.md', { repo: repo.dir, path: 'docs\\a.md', commit: repo.commit, fetched: '2026-10-01' }, 'Read me.\n');
+  const before = filesUnder(v, 'raw');
+  const r = await refresh(v);
+  assert.ok(!fs.existsSync(mark), 'git ran a command or wrote a file a source named');
+  const check = id => derived(v).sources[id];
+  assert.match(check(`--upload-pack=touch ${mark}; README.md`).why, /^git clone exited \d+/, r.stdout);
+  assert.equal(check(`${repo.dir} README.md`).why, 'raw/refs/out.md: commit must be 7 to 64 hex digits', r.stdout);
+  assert.equal(check(`${repo.dir} docs\\a.md`).why, 'raw/refs/slash.md: path must be a relative path inside the repo', r.stdout);
+  assert.equal(lines(r).at(-1), '3 sources: 0 unchanged, 0 changed, 0 baseline, 3 failed. 0 notes unverified.');
+  assert.deepEqual(filesUnder(v, 'raw'), before);
+});
+
+const git = (cwd, ...args) => execFileSync('git', ['-C', cwd, ...args], { env: cleanEnv({ GIT_CONFIG_NOSYSTEM: '1', GIT_CONFIG_GLOBAL: '/dev/null' }), stdio: 'pipe' }).toString('utf8').trim();
+const cloneOf = (v, repo) => v.at('.sources', `${repo.dir.split('/').at(-1)}-${sha256(repo.dir).slice(0, 8)}`);
+
+test('a git source whose upstream renamed its default branch is checked on the new one', async t => {
+  const repo = gitRepo(t, { 'docs/a.md': 'Alpha.\n' });
+  const v = makeVault(t);
+  saved(v, 'raw/refs/a.md', { repo: repo.dir, path: 'docs/a.md', commit: repo.commit, fetched: '2026-10-01' }, 'Alpha.\n');
+  assert.ok(lines(await refresh(v)).includes(`unchanged ${repo.dir} docs/a.md`));
+  git(repo.dir, 'branch', '-m', 'trunk');
+  const now = repo.change({ 'docs/a.md': 'Alpha, renamed.\n' });
+  const r = await refresh(v);
+  assert.ok(lines(r).includes(`changed ${repo.dir} docs/a.md: raw/refs/a.${now.slice(0, 8)}.md`), r.stdout);
+});
+
+test('a clone left with no origin is cloned again, and one with no origin/HEAD gets it back', async t => {
+  const repo = gitRepo(t, { 'docs/a.md': 'Alpha.\n' });
+  const v = makeVault(t);
+  saved(v, 'raw/refs/a.md', { repo: repo.dir, path: 'docs/a.md', commit: repo.commit, fetched: '2026-10-01' }, 'Alpha.\n');
+  const dir = cloneOf(v, repo);
+  fs.mkdirSync(dir, { recursive: true });
+  git(dir, 'init', '-q');
+  let r = await refresh(v);
+  assert.ok(lines(r).includes(`unchanged ${repo.dir} docs/a.md`), r.stdout);
+  git(dir, 'remote', 'set-head', 'origin', '-d');
+  r = await refresh(v);
+  assert.ok(lines(r).includes(`unchanged ${repo.dir} docs/a.md`), r.stdout);
+});
+
+test('paths cited from one repo share one clone or fetch', async t => {
+  const repo = gitRepo(t, { 'docs/a.md': 'Alpha.\n', 'docs/b.md': 'Beta.\n', 'docs/c.md': 'Gamma.\n' });
+  const v = makeVault(t);
+  for (const p of ['a', 'b', 'c']) saved(v, `raw/refs/${p}.md`, { repo: repo.dir, path: `docs/${p}.md`, commit: repo.commit, fetched: '2026-10-01' }, '');
+  const trace = v.at('git-trace.txt');
+  const count = re => (fs.existsSync(trace) ? fs.readFileSync(trace, 'utf8').split('\n').filter(l => re.test(l)).length : 0);
+  await refresh(v, { env: { GIT_TRACE: trace } });
+  assert.equal(count(/trace: built-in: git clone\b/), 1);
+  fs.rmSync(trace);
+  await refresh(v, { env: { GIT_TRACE: trace } });
+  assert.equal(count(/trace: built-in: git fetch\b/), 1);
+});
+
+test('a git check that finds the cited text again after a revert writes no copy', async t => {
+  const repo = gitRepo(t, { 'docs/a.md': 'Alpha.\n' });
+  const v = makeVault(t);
+  saved(v, 'raw/refs/a.md', { repo: repo.dir, path: 'docs/a.md', commit: repo.commit, fetched: '2026-10-01' }, 'Alpha.\n');
+  v.write('wiki/glim/rules/alpha-fact.md', knowledgeRule('glim', 'raw/refs/a.md', 'Alpha'));
+  repo.change({ 'docs/a.md': 'Alpha, briefly.\n' });
+  const back = repo.change({ 'docs/a.md': 'Alpha.\n' });
+  const before = filesUnder(v, 'raw');
+  const r = await refresh(v);
+  assert.ok(lines(r).includes(`unchanged ${repo.dir} docs/a.md (same text at ${back.slice(0, 8)})`), r.stdout);
+  assert.deepEqual(filesUnder(v, 'raw'), before);
+  assert.deepEqual(derived(v).unverified, {});
+});
+
+test('a git body over refresh.maxBytes fails as a fetched one does', async t => {
+  const repo = gitRepo(t, { 'docs/a.md': 'Alpha.\n' });
+  const v = makeVault(t, { config: { refresh: { maxBytes: 64 } } });
+  saved(v, 'raw/refs/a.md', { repo: repo.dir, path: 'docs/a.md', commit: repo.commit, fetched: '2026-10-01' }, 'Alpha.\n');
+  repo.change({ 'docs/a.md': 'x'.repeat(200) });
+  const before = filesUnder(v, 'raw');
+  const r = await refresh(v);
+  assert.ok(lines(r).includes(`failed ${repo.dir} docs/a.md: body over 64 bytes`), r.stdout);
+  assert.deepEqual(filesUnder(v, 'raw'), before);
+});
+
+test('a body with \\r\\r\\n line ends is saved with the sha256 lint reads', async t => {
+  const server = await serve(t, { '/crlf': { body: 'line one\r\r\nline two\n' } });
+  const v = makeVault(t);
+  const url = server.url('/crlf');
+  saved(v, 'raw/refs/crlf.md', { url, fetched: '2026-10-01', sha256: sha256('Old.\n') }, 'Old.\n');
+  const r = await refresh(v);
+  assert.ok(lines(r).some(l => l.startsWith(`changed ${url}: `)), r.stdout);
+  assert.deepEqual(v.run('lint.mjs').stdout.split('\n').filter(l => l.startsWith('warn raw/refs/crlf')), []);
+});
+
+test('two refreshes whose fetches overlap save one new copy', async t => {
+  let waiting = [];
+  const answer = () => {
+    for (const w of waiting) w.writeHead(200).end('Newer.\n');
+    waiting = [];
+  };
+  const server = http.createServer((req, res) => {
+    waiting.push(res);
+    if (waiting.length === 2) answer();
+    else setTimeout(answer, 5000);
+  });
+  await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
+  t.after(() => new Promise(resolve => {
+    server.closeAllConnections();
+    server.close(resolve);
+  }));
+  const url = `http://127.0.0.1:${server.address().port}/page`;
+  const v = makeVault(t);
+  saved(v, 'raw/refs/page.md', { url, fetched: '2026-10-01', sha256: sha256('Old.\n') }, 'Old.\n');
+  const before = Object.keys(filesUnder(v, 'raw'));
+  const runs = await Promise.all([refresh(v), refresh(v)]);
+  const added = Object.keys(filesUnder(v, 'raw')).filter(f => !before.includes(f));
+  assert.deepEqual(added, [`raw/refs/page.${sha256('Newer.\n').slice(0, 8)}.md`], runs.map(r => r.stdout).join('\n'));
+  assert.deepEqual(v.run('lint.mjs').stdout.split('\n').filter(l => l.startsWith('warn raw/refs/page')), []);
+});
+
+test("a doc set's dropped page is named once, by its newest copy", async t => {
+  const server = await serve(t, {});
+  const page = p => server.url(`/docs/${p}`);
+  const manifest = links => `# pkg\n\n${links.map(p => `- [${p}](${page(p)})`).join('\n')}\n`;
+  const old = manifest(['one.md', 'two.md']);
+  server.set('/llms.txt', { body: manifest(['two.md']) });
+  server.set('/docs/one.md', { body: 'Page one, again.\n' });
+  const v = makeVault(t);
+  saved(v, 'raw/refs/docs/llms.txt', { url: server.url('/llms.txt'), fetched: '2026-10-01', sha256: sha256(old) }, old);
+  saved(v, 'raw/refs/docs/one.md', { url: page('one.md'), fetched: '2026-10-01', sha256: sha256('Page one.\n') }, 'Page one.\n');
+  saved(v, 'raw/refs/docs/one.aaaaaaaa.md', { url: page('one.md'), fetched: '2026-10-02', sha256: sha256('Page one, again.\n'), replaces: 'raw/refs/docs/one.md' }, 'Page one, again.\n');
+  const r = await refresh(v);
+  assert.ok(lines(r).some(l => l.startsWith('changed raw/refs/docs: ') && l.endsWith('; cited pages no longer listed: one.aaaaaaaa.md')), r.stdout);
+});
+
+test('refresh reports a config it cannot read as a failure, and arguments as a usage error first', t => {
+  const v = makeVault(t);
+  v.write('vault.config.json', '{ not json');
+  let r = v.run('refresh.mjs');
+  assert.equal(r.code, 1);
+  assert.match(r.stderr, /^refresh failed: /);
+  r = v.run('refresh.mjs', ['--all']);
+  assert.equal(r.code, 2);
+  assert.equal(r.stderr, 'usage: node tools/refresh.mjs\n');
 });
 
 test('a source saved with no sha256 gets a baseline copy, which marks nothing unverified, and later checks compare with it', async t => {
