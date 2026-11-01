@@ -10,6 +10,11 @@ import { setField } from './frontmatter.mjs';
 import { build } from './build.mjs';
 import { transcriptFor } from './sessions.mjs';
 import { typedMessages, saidIn, sourceTexts } from './quotes.mjs';
+import { parse } from './frontmatter.mjs';
+import { bundleOf, locate } from './rules.mjs';
+import {
+  KINDS, LOCATORS, filled, hashFile, lineCount, clockTime, parseLocator, anchorsIn, derivedAnchors, manifestLine, sourceProblems, refSources,
+} from './sources.mjs';
 
 const memo = f => {
   const seen = new Map();
@@ -53,6 +58,9 @@ export function lint(notes = loadNotes()) {
   const textsOf = memo(rel => {
     try { return sourceTexts(rel); } catch { return null; }
   });
+  const hashOf = memo(rel => { try { return hashFile(rel); } catch { return null; } });
+  const lines = memo(lineCount);
+  const anchors = memo(rel => { const hash = hashOf(rel); return hash && derivedAnchors(hash); });
   let rows;
   const rowOf = id => (rows ??= new Map(pickRows().map(r => [r.id, r]))).get(id);
 
@@ -68,7 +76,7 @@ export function lint(notes = loadNotes()) {
     lintLinks(n, noteAt, named, md, add);
     if (n.type === 'page') {
       lintPage(n, () => watched(n), add);
-      lintFootnotes(n, add);
+      lintFootnotes(n, { lines, anchors }, add);
       lintSaid(n, typedIn, add);
     }
     if (n.type !== 'rule') continue;
@@ -93,6 +101,9 @@ export function lint(notes = loadNotes()) {
   lintTopicPages(notes, add);
   lintOrphans(notes, resolve, add);
   lintPicks(add);
+  lintSources(add);
+  lintBundles(add, hashOf);
+  lintDerived(add, hashOf);
   const rules = liveRules(notes);
   for (const d of Object.keys(domains)) {
     const size = alwaysSize(rules, ['global', d]);
@@ -143,9 +154,9 @@ function relink(rel, target, note) {
   }));
 }
 
-function refootnote(rel, id, target, to) {
+function refootnote(rel, id, target, from, to) {
   return text => editBody(text, rel, n => footnotes(n).defs.filter(d => d.id === id && d.target === target)
-    .map(d => ({ at: d.at, length: d.raw.length, text: d.raw === d.target ? to : `\`${to}\`` })));
+    .map(d => ({ at: d.at, length: d.raw.length, text: d.raw.replace(from, () => to) })));
 }
 
 // The model picks topics freely, so a topic only one rule has, and that its domain doesn't list, is likely a typo
@@ -199,17 +210,101 @@ function lintOrphans(notes, resolve, add) {
   }
 }
 
-function lintFootnotes(n, add) {
+// A locator is checked against the source only when the source can say: lines in a text file, pages and times in derived text.
+function lintFootnotes(n, { lines, anchors }, add) {
   const { defs, cited } = footnotes(n);
-  for (const { id, target } of defs) {
+  for (const d of defs) {
+    const { id, target } = d;
+    const { base, fragment } = locate(d);
+    const locator = fragment === null ? null : parseLocator(fragment);
     if (!cited.has(id)) add('warn', n.rel, `footnote [^${id}] is never cited`);
-    if (isUrl(target)) continue;
-    const rel = rawFile(target);
-    if (!rel) add('warn', n.rel, `footnote [^${id}] names ${target || 'nothing'}. Cite a URL or a file under raw/ that exists`);
-    else if (rel !== target) add('warn', n.rel, `footnote [^${id}] names ${target}. Write it as ${rel}, the path from the vault root`, refootnote(n.rel, id, target, rel));
+    if (isUrl(target)) {
+      if (locator?.problem) add('warn', n.rel, `footnote [^${id}] has #${fragment}. ${locator.problem}`);
+      continue;
+    }
+    const rel = rawFile(base) ?? bundleOf(base);
+    if (!rel) {
+      add('warn', n.rel, `footnote [^${id}] names ${target || 'nothing'}. Cite a URL or a file under raw/ that exists`);
+      continue;
+    }
+    if (rel !== base) add('warn', n.rel, `footnote [^${id}] names ${target}. Write it as ${rel}${fragment === null ? '' : `#${fragment}`}, the path from the vault root`, refootnote(n.rel, id, target, base, rel));
+    if (fragment === null) continue;
+    if (!locator) add('warn', n.rel, `footnote [^${id}] ends with #${fragment}, which isn't a locator. ${LOCATORS}`);
+    else if (locator.problem) add('warn', n.rel, `footnote [^${id}] has #${fragment}. ${locator.problem}`);
+    else if (locator.kind === 'lines') {
+      const count = lines(rel);
+      const span = locator.from === locator.to ? `line ${locator.from}` : `lines ${locator.from}-${locator.to}`;
+      if (count !== null && locator.to > count) add('warn', n.rel, `footnote [^${id}] cites ${span} of ${rel}, which has ${plural(count, 'line')}`);
+    } else if (locator.kind === 'page' || (locator.kind === 'time' && locator.start !== null)) {
+      const found = anchors(rel);
+      if (found && locator.kind === 'page' && !found.pages.has(locator.page)) {
+        add('warn', n.rel, `footnote [^${id}] cites page ${locator.page} of ${rel}, and its derived text has no [p. ${locator.page}]`);
+      } else if (found && locator.kind === 'time' && !found.times.has(locator.start)) {
+        add('warn', n.rel, `footnote [^${id}] cites ${clockTime(locator.start)} of ${rel}, and its derived text has no [t=${clockTime(locator.start)}]`);
+      }
+    }
   }
   const written = new Set(defs.map(d => d.id));
   for (const id of cited) if (!written.has(id)) add('warn', n.rel, `cites [^${id}], which has no footnote`);
+}
+
+// Raw files are append-only, so a saved source's fields are warnings: a fix is a new file, not an edit.
+function lintSources(add) {
+  for (const f of refSources().loose.filter(x => x.endsWith('.md'))) {
+    let parsed;
+    try { parsed = parse(fs.readFileSync(vaultPath(...f.split('/')), 'utf8')); } catch { continue; }
+    if (!parsed.ok || (parsed.data.url == null && parsed.data.repo == null)) continue;
+    for (const msg of sourceProblems(parsed.data, { body: parsed.body })) add('warn', f, msg);
+  }
+}
+
+function lintBundles(add, hashOf) {
+  for (const dir of refSources().bundles) {
+    const rel = `${dir}/source.md`;
+    let parsed;
+    try { parsed = parse(fs.readFileSync(vaultPath(...rel.split('/')), 'utf8')); } catch { continue; }
+    const { data, ok } = parsed;
+    if (!ok) {
+      add('warn', rel, "no frontmatter. A bundle's source.md starts with url and commit, or sha256");
+      continue;
+    }
+    for (const msg of sourceProblems(data, { bundle: true })) add('warn', rel, msg);
+    if (data.commit == null && data.sha256 == null) add('warn', rel, "no commit or sha256. A bundle's source.md pins the folder with a commit, or a sha256 line for each file");
+    else if (data.commit != null && data.url == null && data.repo == null) add('warn', rel, 'a commit needs a url or repo. Say where the folder came from');
+    if (data.sha256 != null && !Array.isArray(data.sha256)) add('warn', rel, "sha256 must be a list of '<64 hex>  <path>' lines, as sha256sum writes them");
+    for (const line of Array.isArray(data.sha256) ? data.sha256 : []) {
+      const entry = manifestLine(line);
+      if (!entry) add('warn', rel, `sha256 line "${clip(line, 100)}" isn't '<64 hex>  <path in the folder>', as sha256sum writes it`);
+      else if (!rawFile(`${dir}/${entry.file}`)) add('warn', rel, `sha256 lists ${entry.file}, which isn't a file in the folder`);
+      else if (hashOf(`${dir}/${entry.file}`) !== entry.hash) add('warn', rel, `${entry.file} doesn't match its sha256 line in source.md`);
+    }
+  }
+}
+
+// Extraction writes derived text, so the file a name or source points at is what shows it is still current.
+function lintDerived(add, hashOf) {
+  for (const f of filesIn(vaultPath('derived'), '', 'derived').sort()) {
+    const name = f.slice('derived/'.length);
+    const hash = /^[0-9a-f]{64}\.md$/.test(name) ? name.slice(0, 64) : null;
+    if (!hash) add('warn', f, `named ${name}. Derived text is derived/<sha256>.md, the SHA-256 of the file it was taken from`);
+    if (!f.endsWith('.md')) continue;
+    let parsed;
+    try { parsed = parse(fs.readFileSync(vaultPath(...f.split('/')), 'utf8')); } catch { continue; }
+    const { data, body, ok } = parsed;
+    if (!ok) {
+      add('warn', f, 'no frontmatter. Derived text starts with kind, extractor, extractor_version and source');
+      continue;
+    }
+    if (!KINDS.includes(data.kind)) add('warn', f, `kind must be ${joinList(KINDS, 'or')}`);
+    if (!filled(data.extractor)) add('warn', f, 'no extractor. Name the program that made the text');
+    if (!filled(data.extractor_version)) add('warn', f, 'no extractor_version. Give the version of the program that made the text');
+    const { source } = data;
+    if (!filled(source)) add('warn', f, 'no source. Give the path under raw/ of the file the text was taken from');
+    else if (!source.startsWith('raw/')) add('warn', f, 'source must be a file under raw/');
+    else if (!rawFile(source)) add('warn', f, `source ${source} is gone, so the text can't be checked against it`);
+    else if (hash && hashOf(rawFile(source)) !== hash) add('warn', f, `source ${rawFile(source)} has changed: its SHA-256 isn't ${hash}. Extract the text again for the new file`);
+    for (const anchor of anchorsIn(body).bad) add('warn', f, `anchor ${anchor} isn't [p. N] or [t=hh:mm:ss]`);
+  }
 }
 
 // A session the registry has dropped, or whose transcript is gone, can't be checked, so its lines pass.
@@ -286,8 +381,11 @@ function lintPage(n, watched, add) {
   // Another page gets only the warning below that these fields are for source pages, not errors on their values.
   if (isSourcePage(n)) {
     if (source != null && !isUrl(source)) {
-      const rel = rawFile(source);
-      if (!rel) add('error', n.rel, 'source must be a URL or a file under raw/ that exists');
+      const file = rawFile(source);
+      const bundle = bundleOf(file ?? source);
+      const rel = bundle ?? file;
+      if (!rel) add('error', n.rel, 'source must be a URL, a file under raw/ that exists, or a folder under raw/refs/ with a source.md');
+      else if (bundle && file) add('error', n.rel, `write source as ${bundle}, the bundle it is in`, text => setField(text, 'source', bundle));
       else if (rel !== source) add('error', n.rel, `write source as ${rel}, the path from the vault root`, text => setField(text, 'source', rel));
     }
     if (dated != null && !validDay(dated)) add('error', n.rel, 'source_date must be a date as YYYY-MM-DD');

@@ -483,15 +483,40 @@ export const noteLinks = n => noteLinkSpans(n).map(s => s.target);
 export const linkedKeys = (n, resolve) => noteLinks(n).map(t => resolve(toKey(t)));
 
 // A footnote's target is a file under raw/ or a URL, in backticks or not, then ` · ` and its date when it has one.
+// It may end in a #locator, which fragment holds without the #, or null when the target has none.
 // Definitions are read with inline code kept, so a target in backticks survives. A citation may sit before a colon,
 // so only a definition's own [^id]: at the start of its line is left out of the citations.
 export function footnotes(n) {
   const defs = [...proseBody(n).matchAll(/^\[\^([^\]\s]+)\]:[ \t]*(.*)$/gm)].map(m => {
     const raw = m[2].split(' · ')[0].trim();
-    return { id: m[1], target: raw.replace(/^`([^`]*)`$/, '$1'), raw, at: m.index + m[0].length - m[2].length };
+    const target = raw.replace(/^`([^`]*)`$/, '$1');
+    const hash = target.indexOf('#');
+    return {
+      id: m[1], target, raw, at: m.index + m[0].length - m[2].length,
+      base: hash < 0 ? target : target.slice(0, hash), fragment: hash < 0 ? null : target.slice(hash + 1),
+    };
   });
   const cited = new Set([...unquoted(n).replace(/^\[\^[^\]\s]+\]:/gm, '').matchAll(/\[\^([^\]\s]+)\]/g)].map(m => m[1]));
   return { defs, cited };
+}
+
+// A file whose name holds a # is taken whole, so only a target that names no such file is split at it.
+export const locate = d => (isUrl(d.target) || !rawFile(d.target) ? { base: d.base, fragment: d.fragment } : { base: d.target, fragment: null });
+
+// A folder under raw/refs/ holding a source.md is one source, so is the outermost such folder around a path in it.
+// The path may be a file, the folder, or the folder with a slash or a different case; the folder comes back as the disk
+// spells it, or null when the path is in no bundle.
+export function bundleOf(ref) {
+  if (typeof ref !== 'string' || !ref) return null;
+  let real;
+  try { real = fs.realpathSync.native(vaultPath(ref)); } catch { return null; }
+  const parts = path.relative(fs.realpathSync.native(vaultPath()), real).split(path.sep);
+  if (parts[0] !== 'raw' || parts[1] !== 'refs') return null;
+  const dirs = fs.statSync(real).isDirectory() ? parts : parts.slice(0, -1);
+  for (let i = 3; i <= dirs.length; i++) {
+    if (fs.statSync(vaultPath(...dirs.slice(0, i), 'source.md'), { throwIfNoEntry: false })?.isFile()) return dirs.slice(0, i).join('/');
+  }
+  return null;
 }
 
 export const sourceOf = s => (typeof s.data.source === 'string' ? s.data.source : s.key);
@@ -522,14 +547,16 @@ function normUrl(u) {
 export function citedSources(notes, resolve) {
   const urls = new Map();
   const idOf = ref => {
-    const rel = rawFile(ref);
-    if (rel && !urls.has(rel)) urls.set(rel, savedUrl(rel));
+    const file = rawFile(ref);
+    const bundle = bundleOf(file ?? ref);
+    const rel = bundle ?? file;
+    if (rel && !urls.has(rel)) urls.set(rel, savedUrl(bundle ? `${bundle}/source.md` : rel));
     const url = rel ? urls.get(rel) : isUrl(ref) ? ref : null;
     return url ? normUrl(url) : rel ?? ref;
   };
   const idAt = new Map(notes.filter(isSourcePage).map(n => [n.key, idOf(sourceOf(n))]));
   return n => {
-    const cited = new Set(footnotes(n).defs.flatMap(d => (d.target ? [idOf(d.target)] : [])));
+    const cited = new Set(footnotes(n).defs.flatMap(d => (d.target ? [idOf(locate(d).base)] : [])));
     const linked = new Set(linkedKeys(n, resolve).filter(k => idAt.has(k)));
     return {
       sources: new Set([...cited, ...[...linked].map(k => idAt.get(k))]),
