@@ -291,3 +291,16 @@ test('config() gives extractors as a list, whatever the file holds', async t => 
     assert.deepEqual((await v.import('lib/vault.mjs')).config().extractors, want, JSON.stringify(held));
   }
 });
+
+test("a failure writing derived/ is a run that can't finish, not a failed line for the file", t => {
+  const v = archive(t);
+  const rel = 'raw/refs/ok.echo';
+  v.write(rel, echoed({ kind: 'pdf', parts: [{ page: 1, text: 'Fine.' }] }));
+  v.write('raw/refs/next.echo', echoed({ kind: 'pdf', parts: [{ page: 1, text: 'Next.' }] }));
+  // A folder where the text belongs, so the write can't land.
+  fs.mkdirSync(v.at('derived', `${hashOf(v, rel)}.md`));
+  const r = extract(v, PAPER, rel, 'raw/refs/next.echo');
+  assert.equal(r.code, 2, r.stdout + r.stderr);
+  assert.equal(r.stdout, `unchanged ${PAPER}: derived/${hashOf(v, PAPER)}.md\n`, 'the line of a file done before it stays, and none follows');
+  assert.match(r.stderr, /^extract failed: /);
+});

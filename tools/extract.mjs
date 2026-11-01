@@ -14,6 +14,9 @@ extractors that reads its extension. --force extracts again when the text is alr
 // A bad result from an extractor: its line is failed, and nothing is written for that file.
 class Failed extends Error {}
 
+// A failure writing the vault's own files isn't the file's fault, so the run stops rather than print a failed line.
+class Unfinished extends Error {}
+
 const field = s => (plainSafe(s) ? s : yamlQuote(s));
 
 // The parts of one shape, with pages or times that rise, so the anchors the core writes are ones lint can read back.
@@ -58,6 +61,7 @@ async function extractOne(rel, extractors, force) {
   try {
     return await extractFile(rel, extractors, force);
   } catch (e) {
+    if (e instanceof Unfinished) throw e;
     return `failed ${rel}: ${e?.message ?? e}`;
   }
 }
@@ -97,7 +101,11 @@ async function extractFile(rel, extractors, force) {
     const it = secrets.length === 1 ? 'it' : 'them';
     return [`failed ${rel}: its text holds ${plural(secrets.length, 'key- or token-shaped value')}. Remove ${it}, or add an allow id to privacy.allow in vault.config.json if it isn't a secret, then extract again:`, ...found].join('\n');
   }
-  writeText(vaultPath('derived', `${hash}.md`), text);
+  try {
+    writeText(vaultPath('derived', `${hash}.md`), text);
+  } catch (e) {
+    throw new Unfinished(`${rel}: derived/${hash}.md couldn't be written (${e.code ?? e.message})`);
+  }
   if (!old || same) return `wrote ${rel}: ${out} (${name} ${mod.version}, ${count})`;
   return `replaced ${rel}: ${out} (${name} ${mod.version} over ${old.data.extractor} ${old.data.extractor_version})`;
 }
