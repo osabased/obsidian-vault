@@ -5,7 +5,7 @@ import { plainSafe, yamlQuote } from './lib/frontmatter.mjs';
 import { hashFile, derivedText, clockTime, isAnchor } from './lib/sources.mjs';
 import { sourceTexts } from './lib/quotes.mjs';
 import { loadExtractor } from './lib/extractors.mjs';
-import { unallowedSecrets } from './lib/secrets.mjs';
+import { unallowedSecrets, shownSecret } from './lib/secrets.mjs';
 
 const USAGE = `usage: node tools/extract.mjs <file>... [--force]
 Writes derived/<sha256>.md, the text of each binary file under raw/, with the first extractor in vault.config.json's
@@ -79,7 +79,13 @@ async function extractOne(rel, extractors, force) {
     throw e;
   }
   const secrets = unallowedSecrets(text);
-  if (secrets.length) return `failed ${rel}: its text holds ${plural(secrets.length, 'key-shaped value')}; run node tools/scan.mjs ${rel}`;
+  // Nothing is written, so scan.mjs would skip the file. The findings are listed here as scan.mjs lists them, with lines
+  // counted in the text extract would have written, so the user can remove or allow each one.
+  if (secrets.length) {
+    const found = secrets.map(x => `${rel}:${x.line} ${shownSecret(x)} · allow ${x.allow}`);
+    const it = secrets.length === 1 ? 'it' : 'them';
+    return [`failed ${rel}: its text holds ${plural(secrets.length, 'key- or token-shaped value')}. Remove ${it}, or add an allow id to privacy.allow in vault.config.json if it isn't a secret, then extract again:`, ...found].join('\n');
+  }
   writeText(vaultPath('derived', `${hash}.md`), text);
   if (!old || same) return `wrote ${rel}: ${out} (${name} ${mod.version}, ${count})`;
   return `replaced ${rel}: ${out} (${name} ${mod.version} over ${old.data.extractor} ${old.data.extractor_version})`;
