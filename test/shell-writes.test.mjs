@@ -26,25 +26,27 @@ const write = (v, rel, text, saved) => {
 const stop = (v, sid, active = false) => v.hook('stop', { session_id: sid, cwd: v.project, hook_event_name: 'Stop', stop_hook_active: active });
 const context = out => out?.hookSpecificOutput?.additionalContext ?? null;
 
-test('a rule-covered file a shell command wrote this turn gets that rule once as Stop additionalContext', t => {
-  const v = makeVault(t);
+test('6.3d: a rule-covered file a shell command wrote this turn gets that rule once as Stop additionalContext', t => {
+  const v = makeVault(t, { presets: ['glim'] });
   gitProject(v);
-  v.write('wiki/glim/rules/ui-rule.md', ruleNote({ applies_to: ['src/**/*.txt'], doLine: 'Start with strict.', notLine: 'Leave nonstrict.' }));
   const sid = sessionId();
   v.startSession(sid);
   prompt(v, sid, 'write the file with a script');
-  write(v, 'src/a.txt', 'hello');
+  write(v, 'src/a.zq', 'set x to 1\n');
   write(v, 'notes.md', 'no rule covers this');
   const out = stop(v, sid);
   assert.equal(out.hookSpecificOutput.hookEventName, 'Stop');
   assert.equal(out.decision, undefined, 'the turn continues without a block');
   assert.equal(context(out), [
     'Taste rules apply to a file this turn wrote. Re-read the change against them before you stop.',
-    'src/a.txt:',
-    '- glim/ui-rule: Do: Start with strict. Not: Leave nonstrict.',
+    'src/a.zq:',
+    '- glim/zq-trigger: Do: Set values through a named step. Not: Set a value inline. Because: The user traces values by step name.',
   ].join('\n'));
   assert.equal(stop(v, sid, true), null, 'the next stop passes');
-  assert.equal(editFile(v, sid, 'src/a.txt'), null, 'a later edit of the file is not refused with the rule again');
+  // Stop shows rules only, so the page on the file still comes up on its first edit.
+  const later = denied(editFile(v, sid, 'src/a.zq')) ?? '';
+  assert.match(later, /glim\/zq-files \(concept page\)/);
+  assert.doesNotMatch(later, /zq-trigger/, 'a later edit of the file is not refused with the rule again');
 });
 
 test('files changed before the turn started are left to the user', t => {
@@ -69,7 +71,7 @@ test('a file written through the gated Edit path is not taken for a shell write'
   prompt(v, sid, 'edit the file');
   assert.ok(denied(editFile(v, sid, 'src/a.txt')));
   assert.equal(editFile(v, sid, 'src/a.txt'), null);
-  write(v, 'src/a.txt', 'local x = 1\n-- TODO later\n');
+  write(v, 'src/a.txt', 'set x to 1\n# TODO later\n');
   assert.equal(stop(v, sid), null);
 });
 
@@ -91,7 +93,7 @@ test('a shell-written file fires a rule by its triggers against the file as it i
   v.startSession(sid);
   prompt(v, sid, 'write files with a script');
   write(v, 'src/clean.txt', 'nothing to see');
-  write(v, 'src/todo.txt', '-- TODO later');
+  write(v, 'src/todo.txt', '# TODO later');
   const ctx = context(stop(v, sid)) ?? '';
   assert.match(ctx, /^src\/todo\.txt:\n- glim\/todo-rule: Do: Track work in issues\./m);
   assert.doesNotMatch(ctx, /clean\.txt/);
@@ -106,7 +108,7 @@ test('a file a subagent wrote through the gated Edit path is not taken for a she
   prompt(v, sid, 'have a subagent edit the file');
   assert.ok(denied(editFile(v, sid, 'src/a.txt', { agent: 'agent-1' })));
   assert.equal(editFile(v, sid, 'src/a.txt', { agent: 'agent-1' }), null);
-  write(v, 'src/a.txt', 'local x = 1');
+  write(v, 'src/a.txt', 'set x to 1');
   assert.equal(stop(v, sid), null);
 });
 
@@ -117,23 +119,23 @@ test('a file the gate let through on a trigger miss is checked again when a shel
   const sid = sessionId();
   v.startSession(sid);
   prompt(v, sid, 'edit the file');
-  assert.equal(editFile(v, sid, 'src/a.txt', { text: 'local x = 1' }), null, 'the trigger misses the edit');
-  write(v, 'src/a.txt', 'local x = 1\n');
+  assert.equal(editFile(v, sid, 'src/a.txt', { text: 'set x to 1' }), null, 'the trigger misses the edit');
+  write(v, 'src/a.txt', 'set x to 1\n');
   assert.equal(stop(v, sid), null);
   prompt(v, sid, 'now add a note with a script');
-  write(v, 'src/a.txt', 'local x = 1\n-- TODO later\n');
+  write(v, 'src/a.txt', 'set x to 1\n# TODO later\n');
   assert.match(context(stop(v, sid)) ?? '', /^src\/a\.txt:\n- glim\/todo-rule: Do: Track work in issues\./m);
 });
 
 test('a shell-written file with a BOM and CRLF line ends fires triggers as the edit hook reads text', t => {
   const v = makeVault(t);
   gitProject(v);
-  v.write('wiki/glim/rules/head-rule.md', withTriggers(ruleNote({ applies_to: ['src/**/*.txt'], doLine: 'Head the file.' }), '^-- head'));
+  v.write('wiki/glim/rules/head-rule.md', withTriggers(ruleNote({ applies_to: ['src/**/*.txt'], doLine: 'Head the file.' }), '^# head'));
   v.write('wiki/glim/rules/pair-rule.md', withTriggers(ruleNote({ applies_to: ['src/**/*.txt'], doLine: 'Pair the lines.' }), 'one[^a-z]two'));
   const sid = sessionId();
   v.startSession(sid);
   prompt(v, sid, 'write the file with a script');
-  write(v, 'src/a.txt', '\uFEFF-- head\r\none\r\ntwo\r\n');
+  write(v, 'src/a.txt', '\uFEFF# head\r\none\r\ntwo\r\n');
   const ctx = context(stop(v, sid)) ?? '';
   assert.match(ctx, /glim\/head-rule/);
   assert.match(ctx, /glim\/pair-rule/);
