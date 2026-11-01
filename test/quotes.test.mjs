@@ -230,6 +230,19 @@ test('a quote from a session whose transcript is gone is checked against the row
   assert.deepEqual(await wikiFound(v, 'wiki'), []);
 });
 
+test('a row another session recorded does not back a quote from a session whose transcript is gone, but a rule renamed since still passes', async t => {
+  const v = session(t, [userTurn('please, I want scripts in strict mode always')]);
+  assert.equal(v.propose(SID, rule({ quote: 'I want scripts in strict mode always' })).code, 0);
+  fs.rmSync(v.at('.transcripts', `${SID}.jsonl`));
+  const text = v.read('wiki/glim/rules/strict-scripts.md');
+  const id = text.match(/\((a-[0-9a-f]{8})\)/)[1];
+  v.write('wiki/glim/rules/borrowed.md', ruleNote({ keywords: ['borrow'], evidence: [`- 2026-10-02 · stated · session deadbeef · "I want scripts in strict mode always" (${id})`] }));
+  assert.deepEqual((await wikiFound(v, 'wiki/glim/rules/borrowed.md')).map(f => f.msg), [`"I want scripts in strict mode always" isn't in what row ${id} recorded for session deadbeef: it was recorded in session ${SID.slice(0, 8)}`]);
+  assert.deepEqual(await wikiFound(v, 'wiki/glim/rules/strict-scripts.md'), []);
+  v.write('wiki/glim/rules/renamed.md', text);
+  assert.deepEqual(await wikiFound(v, 'wiki/glim/rules/renamed.md'), []);
+});
+
 const goneSession = (v, extra = '') => {
   v.write('wiki/glim/rules/no-row.md', ruleNote({ keywords: ['x'], evidence: ['- 2026-10-01 · stated · session 0badc0de · "do the thing" (a-0badc0de)', '- 2026-10-01 · stated · session 0badc0de · "and no id at all"'] }));
   v.write('wiki/glim/rules/from-url.md', ruleNote({ keywords: ['y'], kind: 'knowledge', basis: 'source', extra: ['as_of: 2026-10-01'], evidence: [`- 2026-10-01 · source · session 0badc0de · https://example.com/notes · dated 2026-10-01 · "what the page says${extra}" (a-0badc0df)`] }));
