@@ -1,16 +1,14 @@
 import fs from 'node:fs';
 import path from 'node:path';
-import { vaultPath, vaultRel, filesIn, writeText, plural } from './lib/vault.mjs';
-import { isUrl, bundleOf } from './lib/rules.mjs';
+import { vaultPath, filesIn, writeText, plural, fromRoot } from './lib/vault.mjs';
+import { isUrl, bundleOf, diskRel, manifestNames } from './lib/rules.mjs';
 import { hashFile } from './lib/sources.mjs';
-import { plainSafe, yamlQuote } from './lib/frontmatter.mjs';
+import { yamlQuote, yamlScalar } from './lib/frontmatter.mjs';
 import { UsageError, refuse, failure } from './lib/input.mjs';
 
 const USAGE = `usage: node tools/bundle.mjs raw/refs/<folder> [--url <u> | --repo <r>] [--commit <c>]
 Writes the folder's source.md: the url or repo with the commit the folder was taken at, given both, or else a sha256
 line for each file in it.`;
-
-class NotAFolder extends Error {}
 
 function parseArgs(args) {
   const flags = {};
@@ -35,16 +33,22 @@ function parseArgs(args) {
 
 // The folder as the disk spells it, from the vault root, so its lines match what lint and the source pages read.
 function folderOf(ref) {
-  const rel = (path.isAbsolute(ref) && vaultRel(ref)) || ref;
-  let real;
-  try { real = fs.realpathSync.native(vaultPath(...rel.split(/[\\/]/))); } catch { throw new NotAFolder(ref); }
-  if (!fs.statSync(real).isDirectory()) throw new NotAFolder(ref);
-  const at = path.relative(fs.realpathSync.native(vaultPath()), real).split(path.sep).join('/');
-  if (!/^raw\/refs\/[^/]/.test(at)) throw new NotAFolder(ref);
-  return at;
+  const at = diskRel(fromRoot(ref).replace(/\\/g, '/'));
+  if (!at?.stat.isDirectory() || !/^raw\/refs\/[^/]/.test(at.rel)) throw new UsageError(`${ref} isn't a folder under raw/refs/.`);
+  return at.rel;
 }
 
-const scalar = s => (plainSafe(s) ? s : yamlQuote(s));
+// A source.md or a manifest anywhere inside would make the folder swallow a source, or turn it into a doc set.
+function swallowed(dir, files) {
+  const manifests = manifestNames();
+  for (const f of files) {
+    const name = path.posix.basename(f);
+    const inner = path.posix.dirname(f);
+    if (name === 'source.md') return `${dir} holds ${dir}/${f}, a bundle of its own, so it would swallow it.`;
+    if (manifests.includes(name)) return `${dir} holds ${dir}/${f}, which makes ${inner === '.' ? 'it' : `${dir}/${inner}`} a doc set, one source already.`;
+  }
+  return null;
+}
 
 function bundle(args) {
   const { ref, flags } = parseArgs(args);
@@ -54,8 +58,10 @@ function bundle(args) {
   if (outer && outer !== dir) refuse(`${dir} is inside ${outer}, which is one source already.`);
   const files = filesIn(vaultPath(...dir.split('/'))).sort();
   if (!files.length) refuse(`${dir} holds no files.`);
+  const clash = swallowed(dir, files);
+  if (clash) refuse(clash);
   const fields = flags.commit
-    ? [flags.url ? `url: ${scalar(flags.url)}` : `repo: ${scalar(flags.repo)}`, `commit: ${yamlQuote(flags.commit)}`]
+    ? [flags.url ? `url: ${yamlScalar(flags.url)}` : `repo: ${yamlScalar(flags.repo)}`, `commit: ${yamlQuote(flags.commit)}`]
     : ['sha256:', ...files.map(f => `  - ${yamlQuote(`${hashFile(`${dir}/${f}`)}  ${f}`)}`)];
   const rel = `${dir}/source.md`;
   writeText(vaultPath(...rel.split('/')), `---\n${fields.join('\n')}\n---\n`);
@@ -65,12 +71,7 @@ function bundle(args) {
 try {
   console.log(bundle(process.argv.slice(2)));
 } catch (e) {
-  if (e instanceof NotAFolder) {
-    console.error(`${e.message} isn't a folder under raw/refs/.\n${USAGE}`);
-    process.exitCode = 2;
-  } else {
-    const f = failure(e, 'bundle', USAGE, 'Not written');
-    console.error(f.message);
-    process.exitCode = f.code;
-  }
+  const f = failure(e, 'bundle', USAGE, 'Not written');
+  console.error(f.message);
+  process.exitCode = f.code;
 }

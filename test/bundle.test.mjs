@@ -69,3 +69,25 @@ test('it writes with writeText, and lint checks the result as it checks any bund
   fs.writeFileSync(v.at('raw', 'refs', 'lib', 'b.txt'), 'changed\n');
   assert.deepEqual((await bundleFound(v)).map(f => [f.file, f.msg]), [['raw/refs/lib/source.md', "b.txt doesn't match its sha256 line in source.md"]]);
 });
+
+test('a folder that holds a bundle, a doc set or a source.md of its own is refused, since it would swallow it', t => {
+  const v = makeVault(t);
+  v.write('raw/refs/kit/inner/a.txt', 'a\n');
+  v.write('raw/refs/kit/b.txt', 'b\n');
+  assert.equal(bundle(v, ['raw/refs/kit/inner']).code, 0);
+  const holdsBundle = bundle(v, ['raw/refs/kit']);
+  assert.deepEqual([holdsBundle.code, holdsBundle.stderr], [1, 'Not written: raw/refs/kit holds raw/refs/kit/inner/source.md, a bundle of its own, so it would swallow it.\n']);
+  assert.equal(fs.existsSync(v.at('raw', 'refs', 'kit', 'source.md')), false);
+
+  v.write('raw/refs/docs/llms.txt', '# Docs\n- [A](https://example.com/a.md)\n');
+  v.write('raw/refs/docs/a.md', 'A page.\n');
+  const docSet = bundle(v, ['raw/refs/docs']);
+  assert.deepEqual([docSet.code, docSet.stderr], [1, 'Not written: raw/refs/docs holds raw/refs/docs/llms.txt, which makes it a doc set, one source already.\n']);
+  assert.equal(fs.existsSync(v.at('raw', 'refs', 'docs', 'source.md')), false);
+
+  v.write('raw/refs/outer/x.txt', 'x\n');
+  v.write('raw/refs/outer/sub/llms.txt', '# Docs\n');
+  const nested = bundle(v, ['raw/refs/outer']);
+  assert.deepEqual([nested.code, nested.stderr], [1, 'Not written: raw/refs/outer holds raw/refs/outer/sub/llms.txt, which makes raw/refs/outer/sub a doc set, one source already.\n']);
+  assert.equal(fs.existsSync(v.at('raw', 'refs', 'outer', 'source.md')), false);
+});

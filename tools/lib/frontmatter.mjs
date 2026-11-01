@@ -354,6 +354,8 @@ export const yamlQuote = s => (/[\r\n]/.test(s)
   ? `"${String(s).replace(/[\\"]/g, '\\$&').replace(/\n/g, '\\n').replace(/\r/g, '\\r')}"`
   : `'${String(s).replace(/'/g, "''")}'`);
 
+export const yamlScalar = s => (plainSafe(s) ? s : yamlQuote(s));
+
 // Where a value written after `key: ` ends: after its closing quote, or where a comment starts in a plain one.
 function valueEnd(rest) {
   const q = rest[0];
