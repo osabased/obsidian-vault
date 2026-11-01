@@ -201,6 +201,24 @@ test('a later copy of a page in a doc set, or of a loose file, is a newer source
   }
 });
 
+test('a copy in raw/refs/ is read again when its size or mtime changes, or when it may have changed within one mtime', async t => {
+  const v = makeVault(t);
+  const { sourceChains } = await v.import('lib/sources.mjs');
+  const ids = () => [...sourceChains().chains.keys()];
+  const copy = word => withFields({ url: `https://pkg.invalid/${word}`, fetched: '2026-10-01' }, 'hello\n');
+  // Saved just before it is read, so the same mtime may yet hold other text.
+  const recent = new Date(Date.now() - 500);
+  v.write('raw/refs/a.md', copy('one'), { saved: recent });
+  assert.deepEqual(ids(), ['https://pkg.invalid/one']);
+  v.write('raw/refs/a.md', copy('two'), { saved: recent });
+  assert.deepEqual(ids(), ['https://pkg.invalid/two'], 'same size and mtime, read within moments of its save');
+  const old = new Date(Date.now() - 3600e3);
+  v.write('raw/refs/a.md', copy('three'), { saved: old });
+  assert.deepEqual(ids(), ['https://pkg.invalid/three'], 'a new mtime');
+  v.write('raw/refs/a.md', copy('fourth'), { saved: old });
+  assert.deepEqual(ids(), ['https://pkg.invalid/fourth'], 'a new size');
+});
+
 test('a manifest goes by its exact name, so LLMS.txt makes no doc set on any machine, and lint warns on it', async t => {
   for (const name of ['llms.txt', 'LLMS.txt']) {
     const v = makeVault(t);

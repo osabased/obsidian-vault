@@ -2,7 +2,8 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { createHash } from 'node:crypto';
 import { parse } from './frontmatter.mjs';
-import { filesIn, vaultPath, memo, config } from './vault.mjs';
+import { filesIn, vaultPath, memo, config, shortHash } from './vault.mjs';
+import { cachedFiles } from './cache.mjs';
 import { checkDeadline } from './deadline.mjs';
 import {
   isUrl, validDay, rawFile, bundleOf, bundleAbove, folderNames, isDocSet, manifestNames, filled, parsedFile, normUrl, evidenceSources, footnotes, locate, linkedKeys,
@@ -219,11 +220,19 @@ function ordered(rels, files) {
   return out;
 }
 
+const withReplaces = ({ data, ok, errors }, id) => ({ id, data, ok, errors, replacesFile: typeof data.replaces === 'string' ? rawFile(data.replaces) : null });
+
 const fileEntry = (rel, id) => {
   const parsed = parsedFile(rel);
-  if (!parsed) return null;
-  const replacesFile = typeof parsed.data.replaces === 'string' ? rawFile(parsed.data.replaces) : null;
-  return { id, data: parsed.data, body: parsed.body, ok: parsed.ok, errors: parsed.errors, replacesFile };
+  return parsed && withReplaces(parsed, id);
+};
+
+// A copy is kept only once its path is the one the disk spells, so the cache must not outlive raw/refs/ resolving to
+// itself, nor the code that parses and spells.
+const copyStamp = read => {
+  let real = '';
+  try { real = path.relative(fs.realpathSync.native(vaultPath()), fs.realpathSync.native(vaultPath('raw', 'refs'))); } catch {}
+  return shortHash([...['frontmatter.mjs', 'rules.mjs', 'cache.mjs'].map(f => fs.readFileSync(path.join(import.meta.dirname, f), 'utf8')), String(read), real].join('\0'));
 };
 
 // A doc set's manifest and the copies refresh saved of it, oldest first, each as { rel, data }.
@@ -244,7 +253,7 @@ export function manifestChain(folder) {
 // Every saved source in raw/refs/, each as the chain of its copies: a file saved from a URL, one from a git repo, each
 // page of a doc set, and a doc set's manifest, whose id is the set's folder. chains holds only the ones refresh can check,
 // so not a set whose latest manifest gives no url. A bundle with a source.md is left out, since nothing fetches one yet.
-// files maps each copy to { id, set, data, body, ok, errors, replacesFile }; unreadable lists the files that couldn't be read.
+// files maps each copy to { id, set, data, ok, errors, replacesFile }; unreadable lists the files that couldn't be read.
 export function sourceChains() {
   const files = new Map();
   const unreadable = [];
@@ -253,19 +262,25 @@ export function sourceChains() {
   // The walk spells each path as the disk does, so a file's bundle goes by its folder, looked up once per folder.
   const bundleAt = memo(dir => bundleAbove(dir, listed));
   const setOf = memo(folder => (folder && isDocSet(folder, listed) ? folder : null));
+  const copies = [];
   for (const f of filesIn(vaultPath('raw', 'refs'), '', 'raw/refs')) {
     checkDeadline();
     const bundle = bundleAt(path.posix.dirname(f));
     const set = setOf(bundle);
     if (bundle && !set) continue;
     const manifest = Boolean(set) && path.posix.dirname(f) === set && isManifest(f, names);
-    if (!manifest && !f.endsWith('.md')) continue;
-    if (rawFile(f) !== f) continue;
-    const entry = fileEntry(f, null);
-    if (!entry) {
-      unreadable.push(f);
-      continue;
-    }
+    if (manifest || f.endsWith('.md')) copies.push({ f, set, manifest });
+  }
+  const read = f => {
+    if (rawFile(f) !== f) return null;
+    const parsed = parsedFile(f);
+    if (!parsed) unreadable.push(f);
+    return parsed && { data: parsed.data, ok: parsed.ok, errors: parsed.errors };
+  };
+  const got = cachedFiles(copies.map(c => c.f), read, copyStamp(read));
+  for (const { f, set, manifest } of copies) {
+    if (!got.has(f)) continue;
+    const entry = withReplaces(got.get(f), null);
     entry.id = manifest ? set : sourceId(entry.data);
     if (entry.id) files.set(f, { ...entry, set, manifest });
   }
