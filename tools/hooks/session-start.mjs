@@ -1,6 +1,7 @@
 import { runHook, sessionReach, inVaultFolder, readableDomains, vaultPath, toolsPath, toPosix, guarded, config, plural, clock } from '../lib/vault.mjs';
 import { alwaysContext, alwaysIn, fitContext, indexNote, scopeTopics, loadNotes, settledNotes, liveRules, clip, undelivered, knownDomain } from '../lib/rules.mjs';
 import { build } from '../lib/build.mjs';
+import { remaining } from '../lib/deadline.mjs';
 import { changedSinceBuild, noteTimes } from '../lib/cache.mjs';
 import { touchSession, clearMarkers, markAlways, markShown, tidy, errorsSinceLint, sinceLint } from '../lib/sessions.mjs';
 
@@ -78,7 +79,7 @@ runHook('session-start', input => {
   // A build another tool is running already writes what changed, and one that waits longer would spend the hook's time.
   guarded('build', () => {
     if (!changedSinceBuild(notes, walked)) return;
-    try { build({ waitMs: 2000 }); } catch (e) { if (!/^build\.lock is held/.test(e?.message)) throw e; }
+    try { build({ waitMs: Math.min(2000, remaining()) }); } catch (e) { if (e?.code !== 'ELOCKED') throw e; }
   });
   const ready = settledNotes(notes);
   const rules = liveRules(ready);

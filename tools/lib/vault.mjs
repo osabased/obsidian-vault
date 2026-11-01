@@ -472,7 +472,7 @@ export function withLock(file, fn, { waitMs = 60_000, staleMs = 30_000 } = {}) {
   fs.mkdirSync(path.dirname(file), { recursive: true });
   const giveUp = Date.now() + waitMs;
   while (!tryLock(file, token, staleMs)) {
-    if (Date.now() > giveUp) throw new Error(`${path.basename(file)} is held by another process`);
+    if (Date.now() >= giveUp) throw Object.assign(new Error(`${path.basename(file)} is held by another process`), { code: 'ELOCKED' });
     sleep(50);
   }
   try { return fn(); } finally { if (readToken(file) === token) fs.rmSync(file, { force: true }); }
