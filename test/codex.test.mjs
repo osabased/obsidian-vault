@@ -238,6 +238,31 @@ test("the provider keeps user.text, drops injected kinds and the question reply,
   assert.equal(typedMessages(v.at('.transcripts', 'missing.jsonl')), null);
 });
 
+test('two Codex sessions whose ids share their first 8 characters keep their own short names, inbox files and quotes', async t => {
+  const v = codexVault(t);
+  const [a, b] = ['019a0fb1-aaaa-7000-8000-0000aaaa0001', '019a0fb1-bbbb-7000-8000-0000bbbb0002'];
+  const said = { [a]: 'keep the cards roomy', [b]: 'keep the tabs tight' };
+  for (const sid of [a, b]) hook(v, 'session-start', codexInput('SessionStart', { session_id: sid, cwd: v.project, transcript_path: codexRollout(v, sid, [said[sid]]) }));
+  const rule = (slug, quote, line, not) => ({ domain: 'glim', slug, topic: slug, basis: 'stated', do: `${line}.`, not: `${not}.`, because: '', applies_to: [`${slug}/**`], quote });
+  for (const [sid, r] of [[a, rule('roomy-cards', said[a], 'Give cards room', 'Pack cards in')], [b, rule('tight-tabs', said[b], 'Set tabs close', 'Spread tabs out')]]) {
+    const out = v.propose(sid, r);
+    assert.equal(out.code, 0, out.stderr);
+  }
+  assert.match(v.read('wiki/glim/rules/roomy-cards.md'), /· session aaaa0001 · "keep the cards roomy"/);
+  assert.match(v.read('wiki/glim/rules/tight-tabs.md'), /· session bbbb0002 · "keep the tabs tight"/);
+  assert.deepEqual(fs.readdirSync(v.at('raw', 'inbox')).map(f => f.slice(11)).filter(f => /^(aaaa|bbbb|019a)/.test(f)).sort(), ['aaaa0001.jsonl', 'bbbb0002.jsonl']);
+  const { transcriptFor } = await v.import('lib/sessions.mjs');
+  assert.deepEqual([transcriptFor('aaaa0001')?.session, transcriptFor('bbbb0002')?.session, transcriptFor('019a0fb1')], [a, b, null]);
+  v.write('raw/refs/cards.md', 'Cards.\n');
+  v.write('wiki/glim/sources/source-cards.md', sourcePage({ source: 'raw/refs/cards.md', body: ['## You said', `- 2026-10-01 · session aaaa0001 · "${said[a]}"`, `- 2026-10-01 · session bbbb0002 · "${said[a]}"`, '', "## Agent's reading", '', '## Rules'] }));
+  const quotes = async () => (await v.import('lib/lint.mjs')).lint().filter(f => /isn't in|can't be checked/.test(f.msg)).map(f => `${f.file}: ${f.msg}`);
+  assert.deepEqual(await quotes(), [`wiki/glim/sources/source-cards.md: "${said[a]}" isn't in what the user typed in session bbbb0002. Quote their exact words, with … where you leave some out`]);
+  const id = v.read('wiki/glim/rules/tight-tabs.md').match(/\((a-[0-9a-f]{8})\)/)[1];
+  v.write('wiki/glim/rules/borrowed.md', ruleNote({ keywords: ['borrow'], evidence: [`- 2026-10-02 · stated · session aaaa0001 · "${said[b]}" (${id})`] }));
+  for (const sid of [a, b]) fs.rmSync(v.at('.transcripts', `rollout-2026-11-01T00-00-00-${sid}.jsonl`));
+  assert.deepEqual((await quotes()).filter(q => q.startsWith('wiki/glim/rules/')), [`wiki/glim/rules/borrowed.md: "${said[b]}" isn't in what row ${id} recorded for session aaaa0001: it was recorded in session bbbb0002`]);
+});
+
 test('SessionStart source maps to the reason, an unknown one read as new', async t => {
   const v = codexVault(t);
   const { events } = await v.import('adapters/codex/adapter.mjs');

@@ -81,7 +81,7 @@ function neverShown() {
     const created = validDay(n.data.created) ? n.data.created : '';
     const behind = new Set(evidenceSessions(n));
     const missed = registered.filter(t => (r.domain === 'global' || domains.get(t.id).includes(r.domain))
-      && localDay(t.last) >= created && !behind.has(t.id.slice(0, 8))).length;
+      && localDay(t.last) >= created && !behind.has(t.name)).length;
     return missed ? [{ k, missed, line: `- ${k}: ${plural(missed, 'session')}${created ? ` since ${created}` : ''}` }] : [];
   }).sort((a, b) => b.missed - a.missed || cmp(a.k, b.k)).map(x => x.line);
 }

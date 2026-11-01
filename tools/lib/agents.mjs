@@ -35,6 +35,10 @@ export function currentSession(env = process.env) {
   return null;
 }
 
+// A session's short name, which pages, raw/inbox and raw/picks file names and log lines call it by, as its agent's
+// adapter gives it. A session whose agent isn't known is named as the first agent names it.
+export const shortName = (sid, name) => agent(hasAgent(name) ? name : FIRST_AGENT).shortName(String(sid));
+
 // The user's typed messages in a registered session, read by the adapter of the agent that registered it. Null when the
 // transcript can't be read.
 export function typedFor(entry) {

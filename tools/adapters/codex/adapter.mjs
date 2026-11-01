@@ -12,6 +12,10 @@ export const capabilities = { start: true, prompt: true, deny: true, stopContext
 
 export const sessionVar = 'CODEX_THREAD_ID';
 
+// Thread ids are UUIDv7: the first 8 hex digits are a timestamp that threads started in the same minute share, and the
+// last ones are random.
+export const shortName = sid => sid.slice(-8);
+
 // Codex has no safe-mode variable: the user turns hooks off in /hooks or with features.hooks = false.
 export const disabled = () => false;
 

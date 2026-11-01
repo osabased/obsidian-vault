@@ -16,7 +16,7 @@ import { NAMESPACE_NAME } from './glob.mjs';
 import { EXTENSION_NAME, hasExtension, extensionRel, extension } from './ext.mjs';
 import { SCHEMES } from './versions.mjs';
 import { build } from './build.mjs';
-import { transcriptFor } from './sessions.mjs';
+import { transcriptFor, sessionsByName, sessionName } from './sessions.mjs';
 import { saidIn, quoteTexts, userPageTexts } from './quotes.mjs';
 import { loadExtractor } from './extractors.mjs';
 import {
@@ -64,8 +64,9 @@ export function lint(notes = loadNotes(), chains = sourceChains()) {
       ...sourcePages.filter(s => pages.has(s.key) || (onTopic && s.topic && s.domain === page.domain && s.topic === page.topic)),
     ];
   };
-  const typedIn = memo(prefix => {
-    const entry = transcriptFor(prefix);
+  let byName;
+  const typedIn = memo(name => {
+    const entry = transcriptFor(name, byName ??= sessionsByName());
     return entry ? typedFor(entry) : null;
   });
   // A file that can't be hashed for now is skipped, not reported as changed.
@@ -512,7 +513,9 @@ function checkTyped(n, { session, quote, id }, { typedIn, inboxRow, unchecked },
   }
   const row = id && inboxRow(id);
   if (!row) unchecked.push({ note: n.rel, cites: `session ${session}`, quote, gone: true });
-  else if (!String(row.session ?? '').startsWith(session)) add('warn', n.rel, `"${quote}" isn't in what row ${id} recorded for session ${session}: it was recorded in session ${String(row.session ?? '').slice(0, 8) || 'unknown'}`);
+  else if (!row.session || ![sessionName(String(row.session), row.agent), String(row.session)].includes(session)) {
+    add('warn', n.rel, `"${quote}" isn't in what row ${id} recorded for session ${session}: it was recorded in session ${row.session ? sessionName(String(row.session), row.agent) : 'unknown'}`);
+  }
   else if (!saidIn(quote, [String(row.text ?? '')])) add('warn', n.rel, `"${quote}" isn't in what row ${id} recorded`);
 }
 
