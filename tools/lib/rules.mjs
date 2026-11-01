@@ -764,9 +764,16 @@ export function footnotes(n) {
 // A file whose name holds a # is taken whole, so only a target that names no such file is split at it.
 export const locate = d => (isUrl(d.target) || !rawFile(d.target) ? { base: d.base, fragment: d.fragment } : { base: d.target, fragment: null });
 
-// A folder under raw/refs/ holding a source.md is one source, so is the outermost such folder around a path in it.
-// The path may be a file, the folder, or the folder with a slash or a different case; the folder comes back as the disk
-// spells it, or null when the path is in no bundle.
+const isFileAt = (...xs) => fs.statSync(vaultPath(...xs), { throwIfNoEntry: false })?.isFile() ?? false;
+
+// A folder under raw/refs/ holding a manifest such as llms.txt and no source.md is a doc set: one source, whose pages
+// each have their own url and copies.
+export const manifestNames = () => [].concat(config().docSets?.manifests ?? []).filter(m => filled(m) && !/[\\/]/.test(m));
+export const isDocSet = folder => !isFileAt(...folder.split('/'), 'source.md') && manifestNames().some(m => isFileAt(...folder.split('/'), m));
+
+// A folder under raw/refs/ holding a source.md is one source, a bundle, and so is a doc set; so is the outermost such
+// folder around a path in it. The path may be a file, the folder, or the folder with a slash or a different case; the
+// folder comes back as the disk spells it, or null when the path is in no bundle or doc set.
 export function bundleOf(ref) {
   if (typeof ref !== 'string' || !ref) return null;
   let real;
@@ -774,8 +781,10 @@ export function bundleOf(ref) {
   const parts = path.relative(rootOnDisk(), real).split(path.sep);
   if (parts[0] !== 'raw' || parts[1] !== 'refs') return null;
   const dirs = fs.statSync(real).isDirectory() ? parts : parts.slice(0, -1);
+  const manifests = manifestNames();
   for (let i = 3; i <= dirs.length; i++) {
-    if (fs.statSync(vaultPath(...dirs.slice(0, i), 'source.md'), { throwIfNoEntry: false })?.isFile()) return dirs.slice(0, i).join('/');
+    const dir = dirs.slice(0, i);
+    if (isFileAt(...dir, 'source.md') || manifests.some(m => isFileAt(...dir, m))) return dir.join('/');
   }
   return null;
 }
@@ -797,7 +806,7 @@ export function savedUrl(rel) {
 }
 
 // One web page however a note spells it: without its #fragment or a trailing slash, and with its host in lowercase.
-function normUrl(u) {
+export function normUrl(u) {
   try {
     const url = new URL(u);
     url.hash = '';

@@ -1,0 +1,233 @@
+import fs from 'node:fs';
+import path from 'node:path';
+import { createHash } from 'node:crypto';
+import { config, vaultPath, writeText, readJson, statePath, today, plural, toPosix } from './lib/vault.mjs';
+import { isUrl, normUrl, cmp } from './lib/rules.mjs';
+import { yamlQuote } from './lib/frontmatter.mjs';
+import { sourceChains, copyStem } from './lib/sources.mjs';
+import { clone, fetchOrigin, hasCommit, remoteHead, changedSince, showAt } from './lib/git.mjs';
+import { build } from './lib/build.mjs';
+
+const USAGE = 'usage: node tools/refresh.mjs';
+const sha256 = s => createHash('sha256').update(s).digest('hex');
+const { timeoutSeconds, maxBytes } = config().refresh;
+const timeout = timeoutSeconds * 1000;
+
+// A failed check: its reason is recorded, and nothing is written under raw/.
+class Failed extends Error {}
+
+// Lines as parse() reads a saved file's body, so the sha256 of the text is the one lint checks.
+function asText(bytes) {
+  let text;
+  try { text = new TextDecoder('utf-8', { fatal: true }).decode(bytes); } catch { throw new Failed("body isn't UTF-8 text"); }
+  return text.split(/\r?\n/).join('\n');
+}
+
+async function readCapped(body) {
+  const chunks = [];
+  let size = 0;
+  const reader = body.getReader();
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    size += value.length;
+    if (size > maxBytes) {
+      await reader.cancel().catch(() => {});
+      throw new Failed(`body over ${maxBytes} bytes`);
+    }
+    chunks.push(value);
+  }
+  return Buffer.concat(chunks);
+}
+
+// Redirects aren't followed, so a moved source is saved again under its new URL.
+async function fetchText(url, { etag, lastModified }) {
+  try {
+    const res = await fetch(url, {
+      redirect: 'manual',
+      signal: AbortSignal.timeout(timeout),
+      headers: { ...(etag ? { 'If-None-Match': etag } : {}), ...(lastModified ? { 'If-Modified-Since': lastModified } : {}) },
+    });
+    if (res.status === 304) {
+      await res.body?.cancel().catch(() => {});
+      return { status: 304 };
+    }
+    if (res.status >= 300 && res.status < 400) {
+      await res.body?.cancel().catch(() => {});
+      throw new Failed(`redirected to ${res.headers.get('location') ?? '(no Location)'}`);
+    }
+    if (res.status < 200 || res.status >= 300) {
+      await res.body?.cancel().catch(() => {});
+      throw new Failed(`HTTP ${res.status}`);
+    }
+    const bytes = res.body ? await readCapped(res.body) : Buffer.alloc(0);
+    return { status: res.status, text: asText(bytes), etag: res.headers.get('etag'), lastModified: res.headers.get('last-modified') };
+  } catch (e) {
+    if (e instanceof Failed) throw e;
+    if (e?.name === 'TimeoutError' || e?.name === 'AbortError') throw new Failed(`no answer in ${timeoutSeconds} s`);
+    const code = e?.cause?.code ?? e?.cause?.errors?.[0]?.code ?? e?.cause?.message ?? e?.message;
+    throw new Failed(`fetch failed: ${code}`);
+  }
+}
+
+// A clone per repo, named so two repos called alike don't share a folder.
+const cloneDir = repo => {
+  const name = String(repo).replace(/[\\/]+$/, '').split(/[\\/:]/).at(-1).replace(/\.git$/i, '').replace(/[^\w.-]/g, '-') || 'repo';
+  return vaultPath('.sources', `${name}-${sha256(String(repo)).slice(0, 8)}`);
+};
+
+const linksIn = (text, base) => new Set([...text.matchAll(/\]\(\s*<?([^)\s>]+)|(?<![(<\w])(https?:\/\/[^\s)>\]]+)/g)].flatMap(m => {
+  try { return [normUrl(new URL(m[1] ?? m[2], base).href)]; } catch { return []; }
+}));
+
+function frontmatter(fields) {
+  const line = ([k, v]) => `${k}: ${typeof v === 'string' && !/^\d{4}-\d\d-\d\d$/.test(v) ? yamlQuote(v) : v}`;
+  return `---\n${Object.entries(fields).filter(([, v]) => v !== null && v !== undefined).map(line).join('\n')}\n---\n`;
+}
+
+// A copy goes next to the one it replaces, as <stem>.<8 hex><ext>, with -2, -3 when a body comes back to an earlier
+// version whose name is taken.
+function copyName(prev, hash, ext) {
+  const dir = path.posix.dirname(prev);
+  const stem = `${dir}/${copyStem(prev)}.${hash.slice(0, 8)}`;
+  for (let i = 1; ; i++) {
+    const rel = `${stem}${i === 1 ? '' : `-${i}`}${ext}`;
+    if (!fs.existsSync(vaultPath(...rel.split('/')))) return rel;
+  }
+}
+
+async function checkUrl(id, chain, chains, was) {
+  const latest = chain.at(-1);
+  const { data, body } = chains.files.get(latest);
+  // A stored etag belongs to the copy that was latest when it came, so a copy saved since then sends its own.
+  const stored = was?.chain?.at(-1) === latest && (was.etag || was.lastModified);
+  const sent = stored ? { etag: was.etag, lastModified: was.lastModified } : { etag: data.etag, lastModified: data.last_modified };
+  const got = await fetchText(data.url, { etag: typeof sent.etag === 'string' ? sent.etag : null, lastModified: typeof sent.lastModified === 'string' ? sent.lastModified : null });
+  if (got.status === 304) return { result: 'unchanged', note: ' (304)', etag: sent.etag ?? null, lastModified: sent.lastModified ?? null };
+  const hash = sha256(got.text);
+  const headers = { etag: got.etag, lastModified: got.lastModified };
+  if (data.sha256 && hash === data.sha256) return { result: 'unchanged', ...headers };
+  const manifest = chains.files.get(latest).manifest;
+  const result = data.sha256 ? 'changed' : 'baseline';
+  const ext = manifest ? path.posix.extname(latest) : '.md';
+  const copy = {
+    after: latest, hash, ext,
+    text: got.text,
+    fields: {
+      url: data.url, fetched: today(), etag: got.etag, last_modified: got.lastModified, sha256: hash, replaces: latest, ...(result === 'baseline' ? { baseline: true } : {}),
+    },
+  };
+  let detail = '';
+  if (manifest) {
+    const before = linksIn(body, data.url);
+    const now = linksIn(got.text, data.url);
+    const added = [...now].filter(u => !before.has(u)).length;
+    const removed = [...before].filter(u => !now.has(u)).length;
+    const gone = [...chains.files].filter(([, e]) => e.set === id && !e.manifest && isUrl(e.data.url) && !now.has(normUrl(e.data.url))).map(([r]) => r.slice(id.length + 1));
+    detail = `, ${plural(added, 'link')} added, ${removed} removed${gone.length ? `; cited pages no longer listed: ${[...new Set(gone)].sort(cmp).join(', ')}` : ''}`;
+  }
+  return { result, copy, detail, ...headers };
+}
+
+function checkGit(chain, chains) {
+  const latest = chain.at(-1);
+  const { data } = chains.files.get(latest);
+  const repo = String(data.repo);
+  const commit = typeof data.commit === 'string' ? data.commit : null;
+  if (!commit) throw new Failed(`${latest} gives no commit`);
+  const dir = cloneDir(repo);
+  if (!fs.existsSync(path.join(dir, '.git'))) clone(repo, toPosix(dir), { timeout });
+  else fetchOrigin(dir, { timeout });
+  if (!remoteHead(dir, { timeout })) throw new Failed('remote has no default branch');
+  if (!hasCommit(dir, commit, { timeout })) throw new Failed(`commit ${commit} isn't in ${repo}`);
+  const changes = changedSince(dir, commit, data.path, { timeout });
+  if (!changes.length) return { result: 'unchanged' };
+  const newest = changes[0].commit;
+  const bytes = showAt(dir, newest, data.path, { timeout });
+  if (!bytes) throw new Failed(`${data.path} is gone at ${newest.slice(0, 8)}`);
+  return {
+    result: 'changed',
+    copy: { after: latest, hash: newest, ext: '.md', text: asText(bytes), fields: { repo, path: data.path, commit: newest, fetched: today(), replaces: latest } },
+  };
+}
+
+async function check(id, chain, chains, was) {
+  try {
+    const { data } = chains.files.get(chain.at(-1));
+    return isUrl(data.url) ? await checkUrl(id, chain, chains, was) : checkGit(chain, chains);
+  } catch (e) {
+    if (e instanceof Failed || /^(?:git |no answer in )/.test(e.message)) return { result: 'failed', why: e.message };
+    throw e;
+  }
+}
+
+// Fetches run a few at a time, so a vault offline doesn't wait out each timeout in turn.
+async function inPool(items, n, f) {
+  const out = new Array(items.length);
+  let next = 0;
+  await Promise.all(Array.from({ length: Math.min(n, items.length) }, async () => {
+    while (next < items.length) {
+      const i = next++;
+      out[i] = await f(items[i]);
+    }
+  }));
+  return out;
+}
+
+async function main() {
+  const chains = sourceChains();
+  if (chains.unreadable.length) throw new Error(`can't read ${chains.unreadable.join(', ')}`);
+  const before = readJson(statePath('derived.json'), {});
+  const ids = [...chains.chains.keys()].sort(cmp);
+  const isGit = id => !isUrl(chains.files.get(chains.chains.get(id).at(-1)).data.url);
+  const results = new Map();
+  for (const id of ids.filter(isGit)) results.set(id, await check(id, chains.chains.get(id), chains, before.sources?.[id]));
+  const urls = ids.filter(id => !isGit(id));
+  (await inPool(urls, 8, id => check(id, chains.chains.get(id), chains, before.sources?.[id]))).forEach((r, i) => results.set(urls[i], r));
+
+  const day = today();
+  // The copies are written under build.lock, where their names are taken, and before build reads raw/refs/ for the chains.
+  build({
+    apply: derived => {
+      const sources = { ...(derived.sources ?? {}) };
+      for (const [id, r] of results) {
+        const w = sources[id] ?? {};
+        if (r.copy) {
+          r.copy.rel = copyName(r.copy.after, r.copy.hash, r.copy.ext);
+          writeText(vaultPath(...r.copy.rel.split('/')), `${frontmatter(r.copy.fields)}${r.copy.text}`);
+        }
+        sources[id] = r.result === 'failed'
+          ? { ...w, result: 'failed', why: r.why }
+          : { ...w, checked: day, result: r.result, why: null, ...('etag' in r ? { etag: r.etag ?? null, lastModified: r.lastModified ?? null } : {}) };
+      }
+      return { ...derived, sources };
+    },
+  });
+  const after = readJson(statePath('derived.json'), {});
+  const tally = { unchanged: 0, changed: 0, baseline: 0, failed: 0 };
+  const lines = ids.map(id => {
+    const r = results.get(id);
+    tally[r.result]++;
+    if (r.result === 'failed') return `failed ${id}: ${r.why}`;
+    if (!r.copy) return `unchanged ${id}${r.note ?? ''}`;
+    const shown = chains.files.get(r.copy.after).manifest ? r.copy.rel.slice(id.length + 1) : r.copy.rel;
+    return `${r.result} ${id}: ${shown}${r.detail ?? ''}`;
+  });
+  const unverified = Object.keys(after.unverified ?? {}).length;
+  console.log([
+    ...lines,
+    `${plural(ids.length, 'source')}: ${Object.entries(tally).map(([k, n]) => `${n} ${k}`).join(', ')}. ${plural(unverified, 'note')} unverified.`,
+  ].join('\n'));
+}
+
+if (process.argv.length > 2) {
+  console.error(USAGE);
+  process.exitCode = 2;
+} else {
+  try {
+    await main();
+  } catch (e) {
+    console.error(`refresh failed: ${e.message}`);
+    process.exitCode = 1;
+  }
+}

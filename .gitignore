@@ -4,4 +4,5 @@
 .obsidian/cache
 .trash/
 .live/
+.sources/
 vault.local.json
