@@ -72,7 +72,8 @@ function lintNote(notes) {
 
 runHook('session-start', input => {
   guarded('tidy', tidy);
-  const doms = [...new Set(sessionReach(input.cwd).map(d => d.domain))];
+  const hits = sessionReach(input.cwd);
+  const doms = [...new Set(hits.map(d => d.domain))];
   const vaultFolder = inVaultFolder(input.cwd);
   const readable = readableDomains(doms, vaultFolder);
   // Compaction can drop the rules the gate and excerpts already showed, so they show them again.
@@ -89,7 +90,7 @@ runHook('session-start', input => {
   let pick = '';
   // Vault sessions register so /ingest can propose; the skill tells them how, so they get no note.
   if (input.session_id && (doms.length || vaultFolder)) {
-    touchSession(input, doms);
+    touchSession(input, hits);
     // Only the rules that fit count as shown, but those cut for size are marked too, so the next prompt doesn't
     // deliver what didn't fit here.
     for (const k of always.keys) markShown(input.session_id, k);

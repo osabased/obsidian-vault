@@ -148,7 +148,7 @@ test('validGlob checks a namespace against the declared ones', () => {
   assert.equal(validGlob('example-ui:', NS), false);
   assert.equal(validGlob('example-ui:A.{b', NS), false);
   assert.equal(validGlob('example-ui:A.\\{b', NS), true);
-  assert.equal(validGlob('example-ui:Main'), true);
+  assert.equal(validGlob('example-ui:Main'), false);
   assert.equal(validGlob('src/a.md', NS), true);
   assert.equal(validGlob('c:/x', NS), true);
   assert.equal(validGlob('constructor:x', NS), false);

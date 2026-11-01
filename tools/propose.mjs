@@ -12,7 +12,7 @@ import { build } from './lib/build.mjs';
 import { entryKey } from './lib/glob.mjs';
 import { typedMessages, saidIn, normText, sourceTexts, userPageTexts } from './lib/quotes.mjs';
 import { ownEntry, marked, mark, wasShown, carryMarkers } from './lib/sessions.mjs';
-import { setField } from './lib/frontmatter.mjs';
+import { setField, yamlQuote } from './lib/frontmatter.mjs';
 import { subjectRows, laterRows, endedBy, otherLabels } from './lib/picks.mjs';
 import { UsageError, readInput, refuse, failure, line } from './lib/input.mjs';
 
@@ -277,8 +277,8 @@ function checkReadBack(n, f) {
   if (bad) refuse(`${bad[0]} doesn't survive as YAML. Rephrase it.`);
 }
 
-const yaml = s => (/^[a-z0-9-]+$/i.test(s) ? s : `'${s.replace(/'/g, "''")}'`);
-const yamlList = (name, xs) => (xs.length ? [`${name}:`, ...xs.map(x => `  - '${x.replace(/'/g, "''")}'`)] : [`${name}: []`]);
+const yaml = s => (/^[a-z0-9-]+$/i.test(s) ? s : yamlQuote(s));
+const yamlList = (name, xs) => (xs.length ? [`${name}:`, ...xs.map(x => `  - ${yamlQuote(x)}`)] : [`${name}: []`]);
 
 // A pick is cited from the day and session it was recorded in, and a page of the user's by its path.
 const citation = (f, e) => `- ${e.day ?? f.day} · ${e.label ?? e.kind} · ${e.page ?? `session ${e.session ?? f.sid.slice(0, 8)}`} · ${e.cite}`;

@@ -1,11 +1,10 @@
 import fs from 'node:fs';
 import path from 'node:path';
-import { parse } from './frontmatter.mjs';
+import { parse, yamlQuote } from './frontmatter.mjs';
 import { validGlob, overlapping, entryParts, globListProblems } from './glob.mjs';
-import { config, vaultPath, shortHash, toPosix, today, inside, plural } from './vault.mjs';
+import { config, vaultPath, shortHash, toPosix, today, inside, plural, isVaultOnly, memo } from './vault.mjs';
 
 export const LIST_FIELDS = ['applies_to', 'triggers', 'keywords', 'tools'];
-const PAGE_LIST_FIELDS = ['applies_to', 'triggers', 'keywords', 'tools'];
 // Slugs and domains take lowercase letters, modifier letters (ー, 々, ʻ), letters of scripts with no case (CJK and the
 // like), digits and combining marks, read in NFC, so a name never has an uppercase letter and two spellings of one name
 // compare equal.
@@ -45,11 +44,20 @@ export const keyOf = ref => {
   return parts.length > 2 ? `${parts[0]}/${parts.at(-1)}` : parts.join('/');
 };
 
+// The vault root as the disk spells it, which doesn't change while a tool runs.
+let realRoot;
+const rootOnDisk = () => (realRoot ??= fs.realpathSync.native(vaultPath()));
+
+// A file's frontmatter and body, or null when it can't be read.
+export function parsedFile(rel) {
+  try { return parse(fs.readFileSync(vaultPath(...rel.split('/')), 'utf8')); } catch { return null; }
+}
+
 // A file's path from the vault root as the disk spells it, so each file has one spelling; null when there's no such file.
 export function vaultFile(rel) {
   try {
     const real = fs.realpathSync.native(vaultPath(rel));
-    return fs.statSync(real).isFile() ? path.relative(fs.realpathSync.native(vaultPath()), real).split(path.sep).join('/') : null;
+    return fs.statSync(real).isFile() ? path.relative(rootOnDisk(), real).split(path.sep).join('/') : null;
   } catch {
     return null;
   }
@@ -144,18 +152,18 @@ const shownItem = x => (isMap(x) ? Object.entries(x).map(([k, v]) => `${k}: ${ty
 function itemErrors(data) {
   return [...LIST_FIELDS, 'superseded_by'].flatMap(f => (Array.isArray(data[f]) ? data[f] : []).filter(x => typeof x !== 'string').map(x => {
     const item = shownItem(x);
-    const quoted = `'${item.replace(/'/g, "''")}'`;
+    const quoted = yamlQuote(item);
     return isMap(x) ? `${f} item ${item} reads as a key and value, not text. Single-quote an item that holds ": ", as in ${quoted}`
       : `${f} item ${item} isn't text. Single-quote it, as in ${quoted}`;
   }));
 }
 
-function listErrors(n, fields) {
+function listErrors(n) {
   const { namespaces } = config();
   const globs = n.applies_to ?? [];
   return [
     ...itemErrors(n.data),
-    ...fields.filter(f => n[f] === null).map(f => `${f} must be a list`),
+    ...LIST_FIELDS.filter(f => n[f] === null).map(f => `${f} must be a list`),
     ...globs.filter(g => !validGlob(g, namespaces)).map(g => targetError(g, namespaces)),
     ...globListProblems(globs, namespaces),
     ...(n.tools ?? []).filter(x => !/^\S+$/.test(x)).map(x => `tools must name each tool exactly, with no spaces: ${x === '' ? '(empty)' : x}`),
@@ -168,8 +176,8 @@ export const hasChannel = n => n.always === true || ['applies_to', 'keywords', '
 
 const SEMVER = /^(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)(?:-[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?(?:\+[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?$/;
 const EVENTS = ['introduced', 'fixed', 'last_affected', 'limit'];
-const isMap = x => x !== null && typeof x === 'object' && !Array.isArray(x);
-const filled = x => typeof x === 'string' && x.trim() !== '';
+export const isMap = x => x !== null && typeof x === 'object' && !Array.isArray(x);
+export const filled = x => typeof x === 'string' && x.trim() !== '';
 const oneEvent = e => isMap(e) && Object.keys(e).length === 1 && EVENTS.includes(Object.keys(e)[0]) && filled(Object.values(e)[0]);
 
 // The shape of OSV's affected entries (https://ossf.github.io/osv-schema/). Which ecosystems exist is the version
@@ -205,10 +213,10 @@ function checkNote(n) {
   if (n.domain && n.data.domain !== undefined && (typeof n.data.domain === 'string' ? nfc(n.data.domain) : n.data.domain) !== n.domain) errs.push(`domain is ${n.data.domain} but the note is in wiki/${n.domain}/`);
   if (n.data.domain === undefined) errs.push('no domain');
   if (n.type === 'page') {
-    return [...errs, ...listErrors(n, PAGE_LIST_FIELDS), ...alwaysErrors(n), ...(['user', 'agent'].includes(n.author) ? [] : ['author must be user or agent']), ...requiresErrors(n.requires)];
+    return [...errs, ...listErrors(n), ...alwaysErrors(n), ...(['user', 'agent'].includes(n.author) ? [] : ['author must be user or agent']), ...requiresErrors(n.requires)];
   }
   if (n.type !== 'rule') return errs;
-  if (isResearch(n.domain)) errs.push(`${n.domain} is vault-only, so it holds pages only. Put the rule in a domain that reaches projects, or in global`);
+  if (isVaultOnly(n.domain)) errs.push(`${n.domain} is vault-only, so it holds pages only. Put the rule in a domain that reaches projects, or in global`);
   if (!BASES[n.kind]) errs.push('kind must be taste or knowledge');
   else if (!BASES[n.kind].includes(n.data.basis)) errs.push(wrongBasis(n.kind, n.data.basis));
   if (n.kind === 'knowledge') {
@@ -223,7 +231,7 @@ function checkNote(n) {
   if (!hasChannel(n)) errs.push('a rule needs keywords, applies_to, tools or always: true, or nothing brings it up');
   if (!n.do) errs.push('no **Do:** line');
   if (!n.not) errs.push('no **Not:** line');
-  errs.push(...listErrors(n, LIST_FIELDS), ...alwaysErrors(n));
+  errs.push(...listErrors(n), ...alwaysErrors(n));
   const sup = n.data.superseded_by;
   const badItem = Array.isArray(sup) && sup.some(x => typeof x !== 'string');
   if (sup != null && typeof single(sup) !== 'string' && !badItem) errs.push('superseded_by must name one note');
@@ -261,10 +269,6 @@ export function readNote(key, notes = loadNotes()) {
 }
 
 export const knownDomain = d => d === 'global' || Object.hasOwn(config().domains, d);
-// A vaultOnly domain reaches no project session, so it holds only pages, which sessions read from the vault folder. It
-// is set in vault.config.json rather than read from missing paths, so a domain is vault-only on every machine or none.
-// Global rules apply in every project, so an entry that only lists global's topics doesn't make it one.
-export const isResearch = d => d !== 'global' && Object.hasOwn(config().domains, d) && config().domains[d].vaultOnly === true;
 
 // Why a note never reaches a session, or null when it does. A superseded note says so on its own.
 export function undelivered(n) {
@@ -485,6 +489,11 @@ const sectionNamed = (n, title) => sections(n).slice(1).find(s => heading(s).toL
 export const hasSection = (n, title) => sectionNamed(n, title) !== '';
 
 export const isUserPage = n => n.type === 'page' && n.author === 'user';
+// The edit guard and lint --fix read the file as it is, so any note marked author: user counts, a malformed one too.
+export const authoredByUser = text => parse(text).data.author === 'user';
+
+export const AGENT_NOTES = /^## agent notes\s*$/i;
+export const TOP_HEADING = /^#{1,2}(?:\s|$)/;
 
 // Where `## Agent notes` starts and ends in a note's lines: the heading's index, and the index of the next `# ` or `## `
 // heading or the end. A heading inside a code fence doesn't count.
@@ -498,8 +507,8 @@ export function agentNotesSpan(lines) {
     } else if (f) {
       fence = f;
     } else if (at < 0) {
-      if (/^## agent notes\s*$/i.test(lines[i])) at = i;
-    } else if (/^#{1,2}(?:\s|$)/.test(lines[i])) {
+      if (AGENT_NOTES.test(lines[i])) at = i;
+    } else if (TOP_HEADING.test(lines[i])) {
       return { at, end: i };
     }
   }
@@ -626,7 +635,7 @@ export function bundleOf(ref) {
   if (typeof ref !== 'string' || !ref) return null;
   let real;
   try { real = fs.realpathSync.native(vaultPath(ref)); } catch { return null; }
-  const parts = path.relative(fs.realpathSync.native(vaultPath()), real).split(path.sep);
+  const parts = path.relative(rootOnDisk(), real).split(path.sep);
   if (parts[0] !== 'raw' || parts[1] !== 'refs') return null;
   const dirs = fs.statSync(real).isDirectory() ? parts : parts.slice(0, -1);
   for (let i = 3; i <= dirs.length; i++) {
@@ -635,14 +644,19 @@ export function bundleOf(ref) {
   return null;
 }
 
+// A source as one item: the bundle a path is in, else the file under raw/.
+export function sourceItem(ref) {
+  const file = rawFile(ref);
+  const bundle = bundleOf(file ?? ref);
+  return { file, bundle, rel: bundle ?? file };
+}
+
 export const sourceOf = s => (typeof s.data.source === 'string' ? s.data.source : s.key);
 
 // /ingest saves a web page as a file whose frontmatter gives its url, and saves it again when it changes. A file that
 // can't be read gives none.
 export function savedUrl(rel) {
-  if (!rel.endsWith('.md')) return null;
-  let url;
-  try { ({ url } = parse(fs.readFileSync(vaultPath(rel), 'utf8')).data); } catch { return null; }
+  const url = rel.endsWith('.md') ? parsedFile(rel)?.data.url : null;
   return isUrl(url) ? url : null;
 }
 
@@ -661,18 +675,22 @@ function normUrl(u) {
 // its footnotes cite and the sources of the source pages it links. The source pages it draws on are the ones it links
 // and the ones whose source a footnote cites, not every page on a source it reached through a link.
 export function citedSources(notes, resolve) {
+  // Pages cite the same few files over and over, and each lookup asks the disk.
   const urls = new Map();
-  const idOf = ref => {
-    const file = rawFile(ref);
-    const bundle = bundleOf(file ?? ref);
-    const rel = bundle ?? file;
+  const idOf = memo(ref => {
+    const { bundle, rel } = isUrl(ref) ? {} : sourceItem(ref);
     if (rel && !urls.has(rel)) urls.set(rel, savedUrl(bundle ? `${bundle}/source.md` : rel));
     const url = rel ? urls.get(rel) : isUrl(ref) ? ref : null;
     return url ? normUrl(url) : rel ?? ref;
+  });
+  const defIds = new Map();
+  const defId = d => {
+    if (!defIds.has(d.target)) defIds.set(d.target, idOf(locate(d).base));
+    return defIds.get(d.target);
   };
   const idAt = new Map(notes.filter(isSourcePage).map(n => [n.key, idOf(sourceOf(n))]));
   return n => {
-    const cited = new Set(footnotes(n).defs.flatMap(d => (d.target ? [idOf(locate(d).base)] : [])));
+    const cited = new Set(footnotes(n).defs.flatMap(d => (d.target ? [defId(d)] : [])));
     const linked = new Set(linkedKeys(n, resolve).filter(k => idAt.has(k)));
     return {
       sources: new Set([...cited, ...[...linked].map(k => idAt.get(k))]),

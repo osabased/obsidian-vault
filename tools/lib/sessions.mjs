@@ -1,6 +1,8 @@
 import fs from 'node:fs';
 import path from 'node:path';
-import { config, vaultPath, statePath, stateDir, readJsonSafe, writeJson, safeId, shortHash, logError, guarded, hookErrors, errorsLog, domainsFor, toPosix } from './vault.mjs';
+import {
+  config, vaultPath, statePath, stateDir, readJsonSafe, writeJson, safeId, shortHash, logError, guarded, hookErrors, errorsLog, domainsFor, sessionReach, toPosix,
+} from './vault.mjs';
 
 const DAY = 86400e3;
 
@@ -14,9 +16,9 @@ export function ownEntry(sid) {
 }
 
 // `cwd` stays where the session registered, so a move into the vault folder doesn't let it propose for every domain.
-// Session start passes the domains it found for its folder, markers below it among them, so prompts and propose.mjs
-// read them here rather than scan the tree again.
-export function touchSession(input, reach) {
+// Session start passes what sessionReach found for its folder, markers below it among them, so prompts, pick.mjs and
+// propose.mjs read the domains and their project roots here rather than scan the tree again.
+export function touchSession(input, hits) {
   const id = safeId(input.session_id);
   const file = registry(id);
   const prev = readJsonSafe(file) ?? {};
@@ -25,18 +27,31 @@ export function touchSession(input, reach) {
     transcript: input.transcript_path ?? prev.transcript ?? null,
     cwd: prev.cwd ?? input.cwd ?? null,
     last_seen: new Date().toISOString(),
-    ...(reach ? { reach: { cwd: input.cwd ?? null, domains: reach } } : prev.reach ? { reach: prev.reach } : {}),
+    ...(hits
+      ? { reach: { cwd: input.cwd ?? null, domains: [...new Set(hits.map(h => h.domain))], roots: hits.map(({ domain, root }) => ({ domain, root })) } }
+      : prev.reach ? { reach: prev.reach } : {}),
   };
   writeJson(file, entry);
 }
 
 const samePath = (a, b) => Boolean(a && b) && toPosix(a).toLowerCase() === toPosix(b).toLowerCase();
 
+const recorded = (entry, cwd) => (entry?.reach && samePath(entry.reach.cwd, cwd) ? entry.reach : {});
+const domainsIn = (entry, cwd) => {
+  const { domains } = recorded(entry, cwd);
+  return Array.isArray(domains) ? domains : domainsFor(cwd).map(d => d.domain);
+};
+
 // The domains session start found for this session's folder, or, in a folder it didn't scan, that folder's own.
-export function sessionDomains(sid, cwd) {
-  const reach = sid ? readJsonSafe(registry(safeId(sid)))?.reach : null;
-  if (reach && samePath(reach.cwd, cwd) && Array.isArray(reach.domains)) return reach.domains;
-  return domainsFor(cwd).map(d => d.domain);
+export const sessionDomains = (sid, cwd) => domainsIn(sid ? readJsonSafe(registry(safeId(sid))) : null, cwd);
+
+// Each of a registered session's domains with its project root, as session start found them. An entry without roots,
+// written by older tools, finds them again.
+export function sessionRoots(entry) {
+  const { roots } = recorded(entry, entry?.cwd);
+  if (Array.isArray(roots)) return roots;
+  const names = domainsIn(entry, entry?.cwd);
+  return sessionReach(entry?.cwd).filter(h => names.includes(h.domain));
 }
 
 const marker = (kind, sid, key) => vaultPath('.state', kind, safeId(sid), shortHash(key));
