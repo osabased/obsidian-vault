@@ -124,7 +124,7 @@ test('lint --fix takes --fail-on, and refuses other arguments', t => {
   assert.equal(v.run('lint.mjs', ['--mend']).code, 2);
 });
 
-test('lint errors when a skill has no byte copy in .agents/skills/, and lint --fix writes it', t => {
+test('lint errors when a skill has no copy in .agents/skills/ or one that differs other than in line endings, and lint --fix writes it', t => {
   const v = makeVault(t);
   const skill = '---\nname: ingest\ndescription: Take in a source.\n---\r\n\nSteps with a curly ’quote’.\n';
   v.write('.claude/skills/ingest/SKILL.md', skill);
