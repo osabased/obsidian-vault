@@ -53,19 +53,22 @@ const headingLine = l => /^#{1,2}\s/.test(l);
 
 // A page the user wrote may gain lines under `## Agent notes`, or that heading with lines at its end, and nothing else.
 // Lines added without a heading in the way are the same text wherever the diff puts them, so any placement inside the
-// section is enough.
+// section is enough. Added lines can still move where the section ends, as an unclosed fence does, so the section must
+// end after the edit where it ended before.
 function onlyNotesAdded(before, after) {
   const [b, a] = [before, after].map(s => s.split('\n'));
   const span = agentNotesSpan(b);
+  const now = agentNotesSpan(a);
   if (!span) {
     if (!after.startsWith(before)) return false;
     const rest = after.slice(before.length);
     const gap = rest.match(/^\n*/)[0];
     if (!gap && !before.endsWith('\n')) return false;
     const [first, ...added] = rest.slice(gap.length).split('\n');
-    return /^## agent notes\s*$/i.test(first) && added.some(l => l.trim()) && !added.some(headingLine);
+    const at = a.length - added.length - 1;
+    return /^## agent notes\s*$/i.test(first) && added.some(l => l.trim()) && !added.some(headingLine) && now?.at === at && now.end === a.length;
   }
-  if (a.length < b.length) return false;
+  if (a.length < b.length || now?.at !== span.at || a.length - now.end !== b.length - span.end) return false;
   let head = 0;
   while (head < b.length && a[head] === b[head]) head++;
   let tail = 0;
@@ -74,6 +77,8 @@ function onlyNotesAdded(before, after) {
   const at = Math.max(span.at + 1, b.length - tail);
   return at <= Math.min(span.end, head) && !a.slice(at, at + a.length - b.length).some(headingLine);
 }
+
+const noBom = s => s.replace(/^﻿/, '');
 
 function userNoteGuard(rel, before, after) {
   if (userAuthored(after) && !userAuthored(before)) {
@@ -97,7 +102,7 @@ function noteGuard(input, file, cwd) {
   const after = textAfter(input.tool_name, input.tool_input ?? {}, before ?? '');
   if (after === null) return null;
   // A user's page gets no second try: a retry of an edit that changes their words would be the slip the guard is for.
-  const owned = userNoteGuard(rel, before ?? '', after);
+  const owned = userNoteGuard(rel, noBom(before ?? ''), noBom(after));
   if (owned) return owned;
   if (before === null) return null;
   const was = parseNote(before, rel);
@@ -139,6 +144,9 @@ function matcher(file, cwd) {
   });
 }
 
+// A note with triggers comes up only on an edit whose new text matches one.
+const fires = (note, text) => !note.triggers?.length || note.triggers.some(t => tryRegex(t)?.test(text));
+
 function gate(input, matched) {
   const { maxRulesPerEdit, maxBlockChars } = config().delivery;
   const sid = input.session_id;
@@ -146,7 +154,7 @@ function gate(input, matched) {
   const hits = [];
   for (const { key, note, rel, spec } of matched) {
     const triggered = note.triggers?.length > 0;
-    if (triggered && !note.triggers.some(t => tryRegex(t)?.test(text))) continue;
+    if (!fires(note, text)) continue;
     // The hash is in the id, so a reworded rule is refused once more on files it already gated.
     const id = `${key}|${note.hash}|${rel.toLowerCase()}`;
     if (!marked('gate', sid, id)) hits.push({ key, note, rel, id, triggered, spec });
@@ -184,7 +192,8 @@ runHook('edit', input => {
   const refused = gate(input, matching(liveRules(notes)));
   if (refused) return deny(refused);
   // A page comes up only on an edit that goes through, so the agent reads it beside the work rather than as a refusal.
-  const due = markPages(input, matching(livePages(notes), true).sort((a, b) => bySpecificity(a.spec, b.spec) || cmp(a.key, b.key)));
+  const text = newText(input.tool_name, input.tool_input ?? {});
+  const due = markPages(input, matching(livePages(notes), true).filter(m => fires(m.note, text)).sort((a, b) => bySpecificity(a.spec, b.spec) || cmp(a.key, b.key)));
   if (!due.length) return null;
   const context = pagePointers(`Vault pages on ${due[0].rel}. Read the ones that bear on this work:`, due);
   return { hookSpecificOutput: { hookEventName: 'PreToolUse', additionalContext: context } };

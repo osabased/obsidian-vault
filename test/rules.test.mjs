@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { makeVault, ruleNote, pageNote } from './fixture.mjs';
+import { makeVault, ruleNote, pageNote, denied, sessionId, editFile } from './fixture.mjs';
 
 const vault = async (t, opts) => {
   const v = makeVault(t, opts);
@@ -163,4 +163,36 @@ test('a folded summary reads as its text, or lint refuses it', { todo: '6.6h' },
   const n = rules.parseNote(pageNote({ summary: '>-\n  Shop screens the user liked\n  and why.' }), 'wiki/demo/shop.md');
   assert.ok(n.summary === 'Shop screens the user liked and why.' || rules.noteErrors(n).some(e => /summary/.test(e)),
     `summary reads as ${JSON.stringify(n.summary)} and lint finds no error in it`);
+});
+
+test('a list item that reads as key: value is an error naming the field and the item, and the reader never sees it as text', async t => {
+  const { rules } = await vault(t);
+  const hint = item => `reads as a key and value, not text. Single-quote an item that holds ": ", as in '${item}'`;
+  const narrow = ruleNote({ applies_to: ['**/*.luau'] }).replace('triggers: []', 'triggers:\n  - TextSize: 1[0-9]');
+  const n = rules.parseNote(narrow, 'wiki/demo/narrow.md');
+  assert.deepEqual(n.triggers, []);
+  assert.deepEqual(rules.noteErrors(n), [`triggers item TextSize: 1[0-9] ${hint('TextSize: 1[0-9]')}`]);
+  const keyed = ruleNote({ keywords: ['x'] }).replace('keywords:', 'keywords:\n  - shop: tabs');
+  assert.deepEqual(check(rules, keyed), [`keywords item shop: tabs ${hint('shop: tabs')}`]);
+  assert.deepEqual(check(rules, ruleNote({ keywords: ['x'], extra: ['superseded_by:', '  - demo: new-one'] })), [`superseded_by item demo: new-one ${hint('demo: new-one')}`]);
+  assert.deepEqual(check(rules, ruleNote({ keywords: ['x'], extra: ['tools:', '  - true'] })), ["tools item true isn't text. Single-quote it, as in 'true'"]);
+  const pageText = pageNote({ kind: 'concept', extra: ['applies_to:', '  - src: ui'] });
+  assert.deepEqual(check(rules, pageText, 'wiki/demo/some-page.md'), [`applies_to item src: ui ${hint('src: ui')}`]);
+  assert.deepEqual(check(rules, ruleNote({ applies_to: ['**/*.luau'] }).replace('triggers: []', "triggers:\n  - 'TextSize: 1[0-9]'")), []);
+});
+
+test('an edit is not gated by a rule whose trigger item reads as key: value', t => {
+  const v = makeVault(t);
+  v.write('wiki/demo/narrow.md', ruleNote({ applies_to: ['**/*.luau'] }).replace('triggers: []', 'triggers:\n  - TextSize: 1[0-9]'));
+  assert.equal(denied(editFile(v, sessionId(), 'src/a.luau', { tool: 'Write', text: 'local x = 1' })), null);
+});
+
+test('slugs and domains take modifier letters, as in サーバー, 人々 and ʻokina', async t => {
+  const { rules } = await vault(t);
+  const base = ruleNote({ keywords: ['x'] });
+  for (const slug of ['サーバー', '人々', 'ʻokina']) {
+    assert.deepEqual(check(rules, base, `wiki/demo/${slug}.md`), [], slug);
+    assert.ok(rules.KEY_RE.test(`demo/${slug}`), slug);
+    assert.ok(rules.KEBAB.test(slug), slug);
+  }
 });

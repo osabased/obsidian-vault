@@ -5,10 +5,11 @@ import { validGlob, overlapping, entryParts, globListProblems } from './glob.mjs
 import { config, vaultPath, shortHash, toPosix, today, inside, plural } from './vault.mjs';
 
 export const LIST_FIELDS = ['applies_to', 'triggers', 'keywords', 'tools'];
-const PAGE_LIST_FIELDS = ['applies_to', 'keywords', 'tools'];
-// Slugs and domains take lowercase letters, letters of scripts with no case (CJK and the like), digits and combining
-// marks, read in NFC, so a name never has an uppercase letter and two spellings of one name compare equal.
-export const KEY_RE = /^[\p{Ll}\p{Lo}\p{Nd}\p{M}-]+\/[\p{Ll}\p{Lo}\p{Nd}\p{M}-]+$/u;
+const PAGE_LIST_FIELDS = ['applies_to', 'triggers', 'keywords', 'tools'];
+// Slugs and domains take lowercase letters, modifier letters (ー, 々, ʻ), letters of scripts with no case (CJK and the
+// like), digits and combining marks, read in NFC, so a name never has an uppercase letter and two spellings of one name
+// compare equal.
+export const KEY_RE = /^[\p{Ll}\p{Lm}\p{Lo}\p{Nd}\p{M}-]+\/[\p{Ll}\p{Lm}\p{Lo}\p{Nd}\p{M}-]+$/u;
 export const BASES = { taste: ['stated', 'inferred', 'pick', 'reading'], knowledge: ['stated', 'failure', 'source'] };
 export const PAGE_KINDS = ['topic', 'concept', 'entity', 'synthesis', 'source'];
 const FOLDERS = { topic: 'topics', concept: 'concepts', entity: 'entities', synthesis: 'syntheses', source: 'sources' };
@@ -20,7 +21,7 @@ export const wrongBasis = (kind, basis) => (kind === 'knowledge' ? `a knowledge 
 export const isUrl = s => typeof s === 'string' && /^https?:\/\/\S+$/i.test(s);
 export const normTopic = s => String(s ?? '').trim().toLowerCase();
 export const validDay = s => typeof s === 'string' && /^\d{4}-\d\d-\d\d$/.test(s) && !Number.isNaN(Date.parse(s)) && new Date(s).toISOString().startsWith(s);
-export const KEBAB = /^[\p{Ll}\p{Lo}\p{Nd}\p{M}]+(?:-[\p{Ll}\p{Lo}\p{Nd}\p{M}]+)*$/u;
+export const KEBAB = /^[\p{Ll}\p{Lm}\p{Lo}\p{Nd}\p{M}]+(?:-[\p{Ll}\p{Lm}\p{Lo}\p{Nd}\p{M}]+)*$/u;
 const nfc = s => String(s).normalize('NFC');
 const HEAD = [
   '# Taste rules',
@@ -67,7 +68,8 @@ export function tryRegex(source) {
 export const escapeRegExp = s => String(s).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 export const mentions = (word, text) => new RegExp(`(?<!\\w)${escapeRegExp(word)}(?!\\w)`, 'i').test(text);
 
-const asList = v => (v === null || v === undefined ? [] : Array.isArray(v) ? v.map(String) : null);
+// An item that isn't text, such as `- a: b` read as a map, is the note's error (itemErrors), not a string.
+const asList = v => (v === null || v === undefined ? [] : Array.isArray(v) ? v.filter(x => typeof x === 'string') : null);
 // Obsidian writes a list-type property as a list even when it holds one link.
 const single = v => (Array.isArray(v) && v.length === 1 ? v[0] : v);
 
@@ -134,15 +136,30 @@ function targetError(entry, namespaces) {
     : `applies_to names namespace ${namespace}, which vault.config.json doesn't declare under namespaces`;
 }
 
+const shownItem = x => (isMap(x) ? Object.entries(x).map(([k, v]) => `${k}: ${typeof v === 'string' ? v : JSON.stringify(v)}`).join(', ')
+  : typeof x === 'string' ? x : JSON.stringify(x));
+
+// YAML reads an unquoted `- TextSize: 1[0-9]` as a map, as Obsidian does, so a list item is checked for text before
+// anything reads it.
+function itemErrors(data) {
+  return [...LIST_FIELDS, 'superseded_by'].flatMap(f => (Array.isArray(data[f]) ? data[f] : []).filter(x => typeof x !== 'string').map(x => {
+    const item = shownItem(x);
+    const quoted = `'${item.replace(/'/g, "''")}'`;
+    return isMap(x) ? `${f} item ${item} reads as a key and value, not text. Single-quote an item that holds ": ", as in ${quoted}`
+      : `${f} item ${item} isn't text. Single-quote it, as in ${quoted}`;
+  }));
+}
+
 function listErrors(n, fields) {
   const { namespaces } = config();
   const globs = n.applies_to ?? [];
   return [
+    ...itemErrors(n.data),
     ...fields.filter(f => n[f] === null).map(f => `${f} must be a list`),
     ...globs.filter(g => !validGlob(g, namespaces)).map(g => targetError(g, namespaces)),
     ...globListProblems(globs, namespaces),
-    ...(Array.isArray(n.data.tools) ? n.data.tools : []).filter(x => typeof x !== 'string' || !/^\S+$/.test(x))
-      .map(x => `tools must name each tool exactly, with no spaces: ${x === '' ? '(empty)' : x}`),
+    ...(n.tools ?? []).filter(x => !/^\S+$/.test(x)).map(x => `tools must name each tool exactly, with no spaces: ${x === '' ? '(empty)' : x}`),
+    ...(n.triggers ?? []).filter(t => !tryRegex(t)).map(t => `bad regex in triggers: ${t}`),
   ];
 }
 
@@ -178,6 +195,8 @@ function requiresErrors(req) {
   });
 }
 
+const alwaysErrors = n => (n.data.always != null && typeof n.data.always !== 'boolean' ? ['always must be true or false'] : []);
+
 function checkNote(n) {
   const errs = n.clash ? [`${joinList(n.clash, 'and')} ${n.clash.length > 1 ? 'have' : 'has'} this note's name too. Rename one: each name is used once in a domain`] : [];
   if (!n.ok) return [...errs, 'no frontmatter'];
@@ -186,7 +205,7 @@ function checkNote(n) {
   if (n.domain && n.data.domain !== undefined && (typeof n.data.domain === 'string' ? nfc(n.data.domain) : n.data.domain) !== n.domain) errs.push(`domain is ${n.data.domain} but the note is in wiki/${n.domain}/`);
   if (n.data.domain === undefined) errs.push('no domain');
   if (n.type === 'page') {
-    return [...errs, ...listErrors(n, PAGE_LIST_FIELDS), ...(['user', 'agent'].includes(n.author) ? [] : ['author must be user or agent']), ...requiresErrors(n.requires)];
+    return [...errs, ...listErrors(n, PAGE_LIST_FIELDS), ...alwaysErrors(n), ...(['user', 'agent'].includes(n.author) ? [] : ['author must be user or agent']), ...requiresErrors(n.requires)];
   }
   if (n.type !== 'rule') return errs;
   if (isResearch(n.domain)) errs.push(`${n.domain} is vault-only, so it holds pages only. Put the rule in a domain that reaches projects, or in global`);
@@ -204,10 +223,10 @@ function checkNote(n) {
   if (!hasChannel(n)) errs.push('a rule needs keywords, applies_to, tools or always: true, or nothing brings it up');
   if (!n.do) errs.push('no **Do:** line');
   if (!n.not) errs.push('no **Not:** line');
-  errs.push(...listErrors(n, LIST_FIELDS));
-  for (const t of n.triggers ?? []) if (!tryRegex(t)) errs.push(`bad regex in triggers: ${t}`);
-  if (n.data.always !== undefined && n.data.always !== null && typeof n.data.always !== 'boolean') errs.push('always must be true or false');
-  if (n.data.superseded_by != null && typeof single(n.data.superseded_by) !== 'string') errs.push('superseded_by must name one note');
+  errs.push(...listErrors(n, LIST_FIELDS), ...alwaysErrors(n));
+  const sup = n.data.superseded_by;
+  const badItem = Array.isArray(sup) && sup.some(x => typeof x !== 'string');
+  if (sup != null && typeof single(sup) !== 'string' && !badItem) errs.push('superseded_by must name one note');
   return errs;
 }
 
@@ -311,7 +330,7 @@ export function livePages(notes = loadNotes()) {
   const pages = {};
   for (const n of notes) {
     if (n.type !== 'page' || !(n.keywords?.length || n.applies_to?.length) || undelivered(n)) continue;
-    pages[n.key] = { rel: n.rel, domain: n.domain, kind: n.kind, summary: n.summary, keywords: n.keywords, applies_to: n.applies_to };
+    pages[n.key] = { rel: n.rel, domain: n.domain, kind: n.kind, summary: n.summary, keywords: n.keywords, applies_to: n.applies_to, triggers: n.triggers };
   }
   return pages;
 }
@@ -467,7 +486,7 @@ export const hasSection = (n, title) => sectionNamed(n, title) !== '';
 
 export const isUserPage = n => n.type === 'page' && n.author === 'user';
 
-// Where `## Agent notes` starts and ends in a note's lines: the heading's index, and the index of the next `## `
+// Where `## Agent notes` starts and ends in a note's lines: the heading's index, and the index of the next `# ` or `## `
 // heading or the end. A heading inside a code fence doesn't count.
 export function agentNotesSpan(lines) {
   let fence = null;
@@ -480,7 +499,7 @@ export function agentNotesSpan(lines) {
       fence = f;
     } else if (at < 0) {
       if (/^## agent notes\s*$/i.test(lines[i])) at = i;
-    } else if (lines[i].startsWith('## ')) {
+    } else if (/^#{1,2}(?:\s|$)/.test(lines[i])) {
       return { at, end: i };
     }
   }
