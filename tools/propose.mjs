@@ -72,7 +72,7 @@ function list(p, name) {
 function sessionOf(sid) {
   const { entry, notOwn } = ownEntry(sid);
   if (notOwn) refuse(notOwn);
-  const domains = proposeDomains(entry?.cwd);
+  const domains = proposeDomains(entry);
   if (!domains.length) refuse(`the taste vault has no session ${sid} from a domain's project folder or the vault folder. Pass the session id from the taste vault's note at session start, or $CLAUDE_CODE_SESSION_ID in the vault folder.`);
   return { ...entry, domains };
 }

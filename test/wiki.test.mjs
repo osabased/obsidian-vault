@@ -238,7 +238,7 @@ test('lint skips a session whose transcript it can\'t read', async t => {
 });
 
 test('a source page stales the pages that link it, and not those that link another source page on the same file', async t => {
-  const v = makeVault(t, { domains: { other: { title: 'Other', projects: [], topics: ['code'] } } });
+  const v = makeVault(t, { domains: { other: { title: 'Other', vaultOnly: true, topics: ['code'] } } });
   const saved = new Date(2026, 8, 1);
   v.write('raw/refs/shop.md', 'The shop.\n');
   v.write('wiki/demo/source-shop.md', sourcePage({ source: 'raw/refs/shop.md' }));

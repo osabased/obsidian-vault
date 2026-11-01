@@ -1,6 +1,6 @@
-import { runHook, config, domainsFor, inVaultFolder, readableDomains } from '../lib/vault.mjs';
+import { runHook, config, inVaultFolder, readableDomains, everywhereDomains } from '../lib/vault.mjs';
 import { settledNotes, liveRules, livePages, alwaysIn, ruleLine, pagePointers, cmp, mentions } from '../lib/rules.mjs';
-import { touchSession, markAlways, markShown, markFirst, markPages } from '../lib/sessions.mjs';
+import { touchSession, sessionDomains, markAlways, markShown, markFirst, markPages } from '../lib/sessions.mjs';
 
 // Session start marks the always rules it loads, so these are the ones written, reworded or settled since,
 // or the ones of a domain the session moved into.
@@ -26,18 +26,20 @@ function excerpts(sid, scope, rules, said) {
 runHook('prompt', input => {
   const sid = input.session_id;
   if (!sid) return null;
-  const doms = domainsFor(input.cwd).map(d => d.domain);
+  const doms = sessionDomains(sid, input.cwd);
   const vaultFolder = inVaultFolder(input.cwd);
   const registered = doms.length > 0 || vaultFolder;
   if (registered) touchSession(input);
   const scope = ['global', ...doms];
   const said = String(input.prompt ?? '');
+  // An everywhere domain's keyword rules reach every session; its always rules only the sessions its reach puts it in.
+  const heard = [...new Set([...scope, ...everywhereDomains()])];
   const notes = settledNotes();
   const rules = liveRules(notes);
   const pages = markPages(input, mentioned(Object.entries(livePages(notes)), readableDomains(doms, vaultFolder), said));
   const context = [
     registered ? late(sid, scope, rules) : '',
-    excerpts(sid, scope, rules, said),
+    excerpts(sid, heard, rules, said),
     pagePointers('Vault pages on this request. Read the ones that bear on it:', pages),
   ].filter(Boolean).join('\n\n');
   return context ? { hookSpecificOutput: { hookEventName: 'UserPromptSubmit', additionalContext: context } } : null;

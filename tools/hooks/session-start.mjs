@@ -1,4 +1,4 @@
-import { runHook, domainsFor, inVaultFolder, readableDomains, vaultPath, toolsPath, toPosix, guarded, config, plural, clock } from '../lib/vault.mjs';
+import { runHook, sessionReach, inVaultFolder, readableDomains, vaultPath, toolsPath, toPosix, guarded, config, plural, clock } from '../lib/vault.mjs';
 import { alwaysContext, alwaysIn, loadNotes, settledNotes, liveRules, domainTopics, joinList, clip, undelivered, knownDomain } from '../lib/rules.mjs';
 import { build } from '../lib/build.mjs';
 import { touchSession, clearMarkers, markAlways, markShown, tidy, errorsSinceLint, sinceLint } from '../lib/sessions.mjs';
@@ -72,7 +72,7 @@ function lintNote(notes) {
 
 runHook('session-start', input => {
   guarded('tidy', tidy);
-  const doms = domainsFor(input.cwd).map(d => d.domain);
+  const doms = sessionReach(input.cwd).map(d => d.domain);
   const vaultFolder = inVaultFolder(input.cwd);
   const readable = readableDomains(doms, vaultFolder);
   // Compaction can drop the rules the gate and excerpts already showed, so they show them again.
@@ -89,7 +89,7 @@ runHook('session-start', input => {
   let pick = '';
   // Vault sessions register so /ingest can propose; the skill tells them how, so they get no note.
   if (input.session_id && (doms.length || vaultFolder)) {
-    touchSession(input);
+    touchSession(input, doms);
     // Only the rules that fit count as shown, but those cut for size are marked too, so the next prompt doesn't
     // deliver what didn't fit here.
     for (const k of always.keys) markShown(input.session_id, k);
