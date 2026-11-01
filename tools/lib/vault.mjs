@@ -28,6 +28,7 @@ const DEFAULTS = {
   namespaces: {},
   editTools: {},
   privacy: { allow: [] },
+  compile: { maxBytes: 16_384 },
 };
 
 const strings = xs => (Array.isArray(xs) ? xs.filter(x => typeof x === 'string' && x.trim()) : []);

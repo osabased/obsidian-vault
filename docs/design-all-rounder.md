@@ -1158,7 +1158,7 @@ The phases build mechanism only. Adding real knowledge and taste is the user's c
      - **Opt-in.** `domains.<d>.compile` in `vault.config.json` lists the adapters whose format that domain's projects get, for example `["codex"]`. It is unset by default. Lint errors on a name whose adapter has no `compile.mjs`.
      - **Command.** `node tools/compile.mjs <project>...`.
        - A project's domains are those `sessionReach(project)` finds, as at session start, that have `compile`. Its formats are the union of their lists.
-       - It exits 2 for a path that isn't a folder, and for a project no opted-in domain reaches.
+       - It exits 2 for a path that isn't a folder, a folder in the vault, and a project no opted-in domain reaches. It checks every path before it writes any file.
      - **What compiles.** The live, settled rules of global and those domains:
        - always rules;
        - `file` namespace glob rules, grouped by their `applies_to`;
@@ -1170,7 +1170,7 @@ The phases build mechanism only. Adding real knowledge and taste is the user's c
        - namespace globs, since the formats know only files;
        - `tools` rules;
        - pages, whose paths are this machine's vault.
-     - **Interface.** The core builds `{ always: [line], files: [{ globs, lines }], keywords: [{ keywords, lines }] }`, with each line from `ruleLine`. `tools/adapters/<agent>/compile.mjs` exports `compile(sections, root)`, which returns `[{ path, text }]`. A Cursor or Copilot format would be one more adapter folder holding only `compile.mjs`, with every capability false.
+     - **Interface.** The core builds `{ always: [line], files: [{ globs, lines }], keywords: [{ keywords, lines }] }`, with each line from `ruleLine`. `tools/adapters/<agent>/compile.mjs` exports `compile(sections, root)`, which reads the project's file, writes nothing, and returns `[{ path, text, rules, state, changed }]` (plus `refused`, the reason, when it won't write). `state` is `missing`, `current`, `stale`, `edited` or `refused`; `changed` counts the rules whose line differs from the section's now. `lib/compile.mjs` loads the format by its path, so an agent with no hooks needs no `adapter.mjs`. A Cursor or Copilot format would be one more adapter folder holding only `compile.mjs`, with every capability false.
      - **The Codex format** is a marked section of `<root>/AGENTS.md`:
 
        ```md
@@ -1194,7 +1194,9 @@ The phases build mechanism only. Adding real knowledge and taste is the user's c
        - The hash is `shortHash` of the text between the two markers.
        - The rest of the file is kept byte for byte. A new file holds the section alone.
        - The section takes the file's line endings: CRLF when the file already has any.
-       - It fits `compile.maxBytes` (16,384 by default, half of Codex's 32 KiB for all AGENTS.md files together) through `fitContext`, whose overflow line names what it left out.
+       - It fits `compile.maxBytes` (16,384 by default, half of Codex's 32 KiB for all AGENTS.md files together) through `fitContext`, whose overflow line names what it left out. The cap counts bytes, so the format cuts again until the section fits.
+       - A glob of a domain whose project root sits below the folder compiled into starts with that path. A `!` entry reads as "except" in the heading. A rule with globs and keywords is listed under both.
+       - Markers it can't pair (a begin with no end, two begins, an end before a begin) and a file that isn't UTF-8 text are `refused`, with nothing written.
      - **Output.** One line per file, then exit 0, or 1 when any line is `refused`:
 
        ```
@@ -1204,7 +1206,7 @@ The phases build mechanism only. Adding real knowledge and taste is the user's c
        ```
 
      - **Rebuilds.** A section is rebuilt only when the user runs the command. No hook, build or git hook writes one (decision 4).
-     - **Drift.** Lint checks each project root on this machine that an opted-in domain reaches. All three findings are warnings, since the project is another repo and lint runs in the vault's pre-commit hook:
+     - **Drift.** Lint checks each folder that an opted-in domain lists under `paths` in `vault.local.json`, since a project reached only by a marker has no root to look in. A section whose markers don't pair is also a warning, with the `refused` reason. All three findings are warnings, since the project is another repo and lint runs in the vault's pre-commit hook:
        - no section: `not compiled; run node tools/compile.mjs <root>`;
        - a hash that doesn't match: `edited by hand since it was compiled`;
        - a body that differs from what compiling now would write: `stale: 3 rules changed since it was compiled; run node tools/compile.mjs <root>`.

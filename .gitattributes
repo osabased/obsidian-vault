@@ -1,2 +1,5 @@
 # Bundle hashes cover raw bytes, so git never rewrites the line endings of a source.
 raw/** -text
+# Lint compares each skill with its copy in .agents/skills/ byte for byte, so checkout writes both with the same line endings.
+.claude/skills/** text eol=lf
+.agents/skills/** text eol=lf
