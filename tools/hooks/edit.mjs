@@ -1,5 +1,5 @@
 import fs from 'node:fs';
-import { runHook, config, domainsFor, inside, vaultRel, toPosix, cwdOf, FILE_TOOLS, toolFile, shortHash, lf } from '../lib/vault.mjs';
+import { runHook, config, domainsFor, everywhereDomains, inside, vaultRel, toPosix, cwdOf, FILE_TOOLS, toolFile, shortHash, lf } from '../lib/vault.mjs';
 import { settledNotes, liveRules, livePages, ruleLine, pagePointers, tryRegex, cmp, clip, parseNote, QUOTED } from '../lib/rules.mjs';
 import { bestMatch, specificity, bySpecificity } from '../lib/glob.mjs';
 import { marked, mark, markShown, markPages } from '../lib/sessions.mjs';
@@ -9,6 +9,7 @@ function vaultGuard(file, cwd) {
   if (rel === null) return null;
   const low = rel.toLowerCase();
   if (low === 'active.md' || low === 'index.md') return `${rel} is generated from the notes. Edit the notes instead, then run \`node tools/build.mjs\`.`;
+  if (low === 'vault.local.json') return `${rel} lists this machine's project folders for each domain. Leave it to the user.`;
   if (low === 'decisions.md') return `${rel} is generated from the picks in raw/picks/. Record picks with tools/pick.mjs instead.`;
   if (low === '.state' || low.startsWith('.state/')) return ".state/ is the hooks' own bookkeeping. Leave it to them.";
   if (low === '.live' || low.startsWith('.live/')) return '`.live/` is a copy of `tools/` as of the last commit. Change `tools/` and commit instead.';
@@ -80,11 +81,15 @@ function newText(tool, ti) {
 }
 
 // Global's globs are read from the file's first project folder, or from the session's folder when no domain has the file.
+// An everywhere domain's pages reach every edit, read as global's when its reach doesn't take in the file; its rules
+// gate only where its reach does.
 function matcher(file, cwd) {
   const doms = domainsFor(file, cwd);
   const fallback = doms[0]?.rel ?? inside(cwd, file, cwd);
-  return notes => Object.entries(notes).flatMap(([key, note]) => {
-    const rel = note.domain === 'global' ? fallback : doms.find(d => d.domain === note.domain)?.rel;
+  const everywhere = everywhereDomains();
+  return (notes, pages = false) => Object.entries(notes).flatMap(([key, note]) => {
+    const own = doms.find(d => d.domain === note.domain)?.rel;
+    const rel = note.domain === 'global' || (pages && own === undefined && everywhere.includes(note.domain)) ? fallback : own;
     if (!note.applies_to?.length || typeof rel !== 'string') return [];
     const glob = bestMatch(note.applies_to, rel);
     return glob ? [{ key, note, rel, spec: specificity(glob) }] : [];
@@ -136,7 +141,7 @@ runHook('edit', input => {
   const refused = gate(input, matching(liveRules(notes)));
   if (refused) return deny(refused);
   // A page comes up only on an edit that goes through, so the agent reads it beside the work rather than as a refusal.
-  const due = markPages(input, matching(livePages(notes)).sort((a, b) => bySpecificity(a.spec, b.spec) || cmp(a.key, b.key)));
+  const due = markPages(input, matching(livePages(notes), true).sort((a, b) => bySpecificity(a.spec, b.spec) || cmp(a.key, b.key)));
   if (!due.length) return null;
   const context = pagePointers(`Vault pages on ${due[0].rel}. Read the ones that bear on this work:`, due);
   return { hookSpecificOutput: { hookEventName: 'PreToolUse', additionalContext: context } };

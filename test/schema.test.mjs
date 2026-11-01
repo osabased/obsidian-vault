@@ -7,8 +7,8 @@ const SID = '9f8e7d6c-0000-4000-8000-000000000003';
 
 const parsed = (rules, opts) => rules.parseNote(page(opts), 'wiki/demo/code.md');
 
-// A research domain has no project folders; the vault folder is where its pages are read.
-const researchVault = t => makeVault(t, { domains: { reading: { title: 'Reading', projects: [], topics: ['solvers'] } } });
+// A vault-only domain reaches no project; the vault folder is where its pages are read.
+const researchVault = t => makeVault(t, { domains: { reading: { title: 'Reading', vaultOnly: true, topics: ['solvers'] } } });
 
 test('a page needs a kind from the list, and only a topic page is a topic page', async t => {
   const v = makeVault(t);
@@ -29,7 +29,7 @@ test('a page needs a kind from the list, and only a topic page is a topic page',
   assert.ok(rules.domainTopics().get('demo').includes('drafts'));
 });
 
-test('a global entry in vault.config.json is not a research domain', async t => {
+test('a global entry in vault.config.json is not a vault-only domain', async t => {
   const v = makeVault(t, { domains: { global: { title: 'Global', topics: ['code'] } } });
   v.write('wiki/global/some-rule.md', ruleNote({ domain: 'global', keywords: ['x'] }));
   assert.deepEqual((await lintFound(v, /./)).filter(f => f.level === 'error'), []);
@@ -86,19 +86,19 @@ test('lint warns on a source page with no source, and on no other page for it', 
   assert.equal(found[0].msg, 'no source. A source page names the file under raw/ or the URL it is about');
 });
 
-test('a research domain holds pages, and a rule there is an error', async t => {
+test('a vault-only domain holds pages, and a rule there is an error', async t => {
   const v = researchVault(t);
   v.write('wiki/reading/solver-history.md', page({ domain: 'reading', topic: 'solvers', kind: 'concept' }));
   v.write('wiki/reading/use-new-solver.md', ruleNote({ domain: 'reading', topic: 'solvers', keywords: ['solver'] }));
   const found = await lintFound(v, /./);
   assert.deepEqual(found.filter(f => f.level === 'error').map(f => [f.file, f.msg]), [
-    ['wiki/reading/use-new-solver.md', 'reading is a research domain, with no project folders, so it holds pages only. Put the rule in a project domain or global'],
+    ['wiki/reading/use-new-solver.md', 'reading is vault-only, so it holds pages only. Put the rule in a domain that reaches projects, or in global'],
   ]);
   const rules = await v.import('lib/rules.mjs');
   assert.deepEqual(Object.keys(rules.liveRules()), []);
 });
 
-test('propose refuses a rule in a research domain', t => {
+test('propose refuses a rule in a vault-only domain', t => {
   const v = researchVault(t);
   v.startSession(SID, { cwd: v.root, transcript: v.transcript(SID, [userTurn('always use the new solver')]) });
   const r = v.propose(SID, {
@@ -106,7 +106,7 @@ test('propose refuses a rule in a research domain', t => {
     do: 'Use the new solver.', not: 'Use the old solver.', because: '', applies_to: [], keywords: ['solver'],
   });
   assert.equal(r.code, 1);
-  assert.match(r.stderr, /reading is a research domain/);
+  assert.match(r.stderr, /reading is vault-only/);
   assert.equal(v.exists('wiki/reading/use-new-solver.md'), false);
 });
 
@@ -117,7 +117,7 @@ test('a session in the vault folder hears every domain\'s topics, and a project 
   assert.match(context(v.project), /touches layout or code,/);
 });
 
-test('review status does not list a research domain\'s topics as missing rules', t => {
+test('review status does not list a vault-only domain\'s topics as missing rules', t => {
   const v = researchVault(t);
   const out = v.run('review.mjs', ['status']).stdout;
   assert.match(out, /demo: layout, code/);

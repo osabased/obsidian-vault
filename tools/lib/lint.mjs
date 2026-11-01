@@ -8,6 +8,7 @@ import {
 } from './rules.mjs';
 import { setField } from './frontmatter.mjs';
 import { build } from './build.mjs';
+import { readJsonSafe, toPosix } from './vault.mjs';
 import { transcriptFor } from './sessions.mjs';
 import { typedMessages, saidIn, sourceTexts } from './quotes.mjs';
 
@@ -93,6 +94,7 @@ export function lint(notes = loadNotes()) {
   lintTopicPages(notes, add);
   lintOrphans(notes, resolve, add);
   lintPicks(add);
+  lintReach(add);
   const rules = liveRules(notes);
   for (const d of Object.keys(domains)) {
     const size = alwaysSize(rules, ['global', d]);
@@ -493,5 +495,47 @@ function lintCode(add) {
   const root = vaultPath('tools');
   for (const rel of filesIn(root, '.mjs').sort()) {
     for (const msg of codeErrors(rel, fs.readFileSync(path.join(root, rel), 'utf8'))) add('error', `tools/${rel}`, msg);
+  }
+}
+
+const isList = (v, ok) => Array.isArray(v) && v.every(ok);
+const isFileName = m => typeof m === 'string' && Boolean(m.trim()) && !/[\/]/.test(m);
+const isFolder = p => typeof p === 'string' && Boolean(p.trim()) && path.isAbsolute(p);
+
+// Reach comes from vault.config.json, which every machine shares, and the paths in vault.local.json, which only this
+// machine has, so each file is read as written rather than through config(), which keeps only what parses.
+function lintReach(add) {
+  const shared = readJsonSafe(vaultPath('vault.config.json'))?.domains ?? {};
+  const localFile = vaultPath('vault.local.json');
+  const local = fs.existsSync(localFile) ? readJsonSafe(localFile) : {};
+  const mine = local?.domains ?? {};
+  if (!local || typeof mine !== 'object' || Array.isArray(mine)) {
+    add('error', 'vault.local.json', 'vault.local.json must be JSON in the form { "domains": { "<domain>": { "paths": ["<folder>"] } } }');
+    return;
+  }
+  const pathsOf = d => (Array.isArray(mine[d]?.paths) ? mine[d].paths : []);
+  for (const [d, c = {}] of Object.entries(shared).map(([k, x]) => [k, x ?? undefined])) {
+    if (c.markers !== undefined && !isList(c.markers, isFileName)) add('error', 'vault.config.json', `${d}: markers must be a list of file names, with no folders in them`);
+    for (const flag of ['everywhere', 'vaultOnly']) {
+      if (c[flag] !== undefined && typeof c[flag] !== 'boolean') add('error', 'vault.config.json', `${d}: ${flag} must be true or false`);
+    }
+    const marked = Array.isArray(c.markers) && c.markers.length > 0;
+    if (c.vaultOnly === true && (marked || c.everywhere === true)) add('error', 'vault.config.json', `${d} is vaultOnly, so it holds only pages and takes no markers or everywhere`);
+    if (c.projects !== undefined) add('warn', 'vault.config.json', `${d}: projects does nothing. Put its folders in vault.local.json as paths, or give it markers`);
+    if (c.paths !== undefined) add('warn', 'vault.config.json', `${d}: paths in vault.config.json do nothing. Put them in vault.local.json, which holds this machine's folders`);
+    if (d !== 'global' && c.vaultOnly !== true && !marked && !pathsOf(d).length && c.everywhere !== true) {
+      add('warn', 'vault.config.json', `${d} reaches no project on this machine. Add its folders to vault.local.json as paths, give it markers, or set vaultOnly: true if it holds only pages`);
+    }
+  }
+  for (const [d, x] of Object.entries(mine)) {
+    if (d === 'global') add('error', 'vault.local.json', 'global reaches every project, so it takes no paths');
+    else if (!Object.hasOwn(shared, d)) add('error', 'vault.local.json', `${d} isn't a domain in vault.config.json`);
+    else if (shared[d]?.vaultOnly === true && pathsOf(d).length) add('error', 'vault.local.json', `${d} is vaultOnly in vault.config.json, so it takes no paths`);
+    else if (x?.paths !== undefined && !isList(x.paths, isFolder)) add('error', 'vault.local.json', `${d}: paths must be a list of absolute folder paths`);
+    else {
+      for (const p of pathsOf(d)) {
+        if (!fs.statSync(toPosix(p), { throwIfNoEntry: false })?.isDirectory()) add('error', 'vault.local.json', `${d}'s path ${p} doesn't exist on this machine. Fix it or remove it`);
+      }
+    }
   }
 }

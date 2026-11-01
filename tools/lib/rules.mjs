@@ -136,7 +136,7 @@ function checkNote(n) {
   if (n.data.domain === undefined) errs.push('no domain');
   if (n.type === 'page') return [...errs, ...listErrors(n, PAGE_LIST_FIELDS)];
   if (n.type !== 'rule') return errs;
-  if (isResearch(n.domain)) errs.push(`${n.domain} is a research domain, with no project folders, so it holds pages only. Put the rule in a project domain or global`);
+  if (isResearch(n.domain)) errs.push(`${n.domain} is vault-only, so it holds pages only. Put the rule in a domain that reaches projects, or in global`);
   if (!BASES[n.kind]) errs.push('kind must be taste or knowledge');
   else if (!BASES[n.kind].includes(n.data.basis)) errs.push(wrongBasis(n.kind, n.data.basis));
   if (n.kind === 'knowledge') {
@@ -182,9 +182,10 @@ export function loadNotes() {
 export const readNote = (key, notes = loadNotes()) => (KEY_RE.test(key) ? notes.find(n => n.key === key) ?? null : null);
 
 export const knownDomain = d => d === 'global' || Object.hasOwn(config().domains, d);
-// No session runs in a research domain's projects, so it holds only pages, which sessions read from the vault folder.
+// A vaultOnly domain reaches no project session, so it holds only pages, which sessions read from the vault folder. It
+// is set in vault.config.json rather than read from missing paths, so a domain is vault-only on every machine or none.
 // Global rules apply in every project, so an entry that only lists global's topics doesn't make it one.
-export const isResearch = d => d !== 'global' && Object.hasOwn(config().domains, d) && !config().domains[d].projects?.length;
+export const isResearch = d => d !== 'global' && Object.hasOwn(config().domains, d) && config().domains[d].vaultOnly === true;
 
 // Why a note never reaches a session, or null when it does. A superseded note says so on its own.
 export function undelivered(n) {
@@ -261,16 +262,20 @@ const pageLine = (k, p) => `- ${k} (${kindLabel(p.kind)}): ${p.summary ? `${clip
 
 export const pagePointers = (head, due) => (due.length ? [head, ...due.map(h => pageLine(h.key, h.note))].join('\n') : '');
 
-// For each pair of two domains' project folders where one holds the other, the folder each domain's globs sit under
-// when both are read from the outer one, since the gate matches a domain's globs from its own folder.
+// For each pair of two domains' paths where one holds the other, the folder each domain's globs sit under when both
+// are read from the outer one, since the gate matches a domain's globs from its own folder. Two domains with markers
+// meet in a folder that holds both markers, read from the same root; where a marker folder sits in another domain's
+// path can't be known ahead, so that pair isn't listed.
 function nestedFolders(da, db) {
-  const projects = d => config().domains[d]?.projects ?? [];
-  return projects(da).flatMap(pa => projects(db).flatMap(pb => {
+  const paths = d => config().domains[d]?.paths ?? [];
+  const marked = d => Array.isArray(config().domains[d]?.markers) && config().domains[d].markers.length > 0;
+  const nested = paths(da).flatMap(pa => paths(db).flatMap(pb => {
     const bUnderA = inside(pa, pb);
     if (bUnderA !== null) return [['', bUnderA]];
     const aUnderB = inside(pb, pa);
     return aUnderB !== null ? [[aUnderB, '']] : [];
   }));
+  return marked(da) && marked(db) ? [['', ''], ...nested] : nested;
 }
 
 // The globs two rules on one topic share, when both can gate one file: a domain's rules meet its own and global's,

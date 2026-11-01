@@ -80,7 +80,7 @@ test('a rule that refuses an edit holds the pages back for the retry', t => {
 });
 
 test('pages reach the sessions their domain\'s rules reach, and every page reaches a session in the vault folder', t => {
-  const v = makeVault(t, { domains: { reading: { title: 'Reading', projects: [], topics: ['solvers'] } } });
+  const v = makeVault(t, { domains: { reading: { title: 'Reading', vaultOnly: true, topics: ['solvers'] } } });
   v.write('wiki/global/solver-basics.md', pushed({ domain: 'global', keywords: ['solver'] }));
   v.write('wiki/reading/solver-history.md', pushed({ domain: 'reading', topic: 'solvers', keywords: ['solver'] }));
   assert.deepEqual(pointed(prompt(v, sessionId(), 'which solver?')), ['global/solver-basics']);
@@ -109,7 +109,7 @@ test('at most delivery.maxPages come up at a time, and the rest on the next matc
 });
 
 test('lint checks a page\'s keywords and applies_to as it does a rule\'s, and warns on the fields only rules take', async t => {
-  const v = makeVault(t, { domains: { reading: { title: 'Reading', projects: [], topics: ['solvers'] } } });
+  const v = makeVault(t, { domains: { reading: { title: 'Reading', vaultOnly: true, topics: ['solvers'] } } });
   v.write('wiki/demo/code.md', page({ body: ['[[bad-glob]] [[rule-fields]]', '', '## Rules'] }));
   v.write('wiki/demo/bad-glob.md', pushed({ applies_to: ['src/{a'] }));
   v.write('wiki/demo/rule-fields.md', pushed({ extra: ['always: true', 'triggers: []'] }));
@@ -124,10 +124,10 @@ test('lint checks a page\'s keywords and applies_to as it does a rule\'s, and wa
 });
 
 test('a rule\'s errors keep their order, and a note of another type gets only the type error', async t => {
-  const v = makeVault(t, { domains: { reading: { title: 'Reading', projects: [], topics: ['solvers'] } } });
+  const v = makeVault(t, { domains: { reading: { title: 'Reading', vaultOnly: true, topics: ['solvers'] } } });
   const rules = await v.import('lib/rules.mjs');
   const rule = rules.parseNote(ruleNote({ domain: 'reading', applies_to: ['src/{a'] }), 'wiki/reading/x.md');
-  assert.match(rules.noteErrors(rule)[0], /research domain/);
+  assert.match(rules.noteErrors(rule)[0], /is vault-only/);
   const memo = rules.parseNote(page({ extra: ['keywords: grid'] }).replace('type: page', 'type: memo'), 'wiki/demo/x.md');
   assert.deepEqual(rules.noteErrors(memo), ['type must be rule or page']);
 });

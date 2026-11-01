@@ -163,7 +163,7 @@ test('a compact or clear start clears the markers so the edit gate and prompt re
 });
 
 test('session start names the notes in its domains that an error keeps from delivery', t => {
-  const v = makeVault(t, { domains: { other: { title: 'Other', projects: ['C:/nowhere/other'], topics: [] } } });
+  const v = makeVault(t, { domains: { other: { title: 'Other', markers: ['other.project'], topics: [] } } });
   v.write('wiki/demo/rules/bad.md', ruleNote({ basis: 'bogus', keywords: ['x'] }));
   v.write('wiki/global/rules/no-not.md', ruleNote({ domain: 'global', notLine: '', keywords: ['x'] }));
   v.write('wiki/other/rules/elsewhere.md', ruleNote({ domain: 'other', basis: 'bogus', keywords: ['x'] }));
