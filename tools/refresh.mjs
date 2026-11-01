@@ -138,7 +138,7 @@ function syncClone(repo) {
     try {
       if (hasOrigin(dir, { timeout })) fetchOrigin(dir, { timeout });
       else {
-        removeDir(dir);
+        try { removeDir(dir); } catch (e) { throw new Failed(`can't remove ${toPosix(dir)}: ${e.code ?? e.message}`); }
         clone(repo, toPosix(dir), { timeout });
       }
       if (!remoteHead(dir, { timeout })) throw new Failed('remote has no default branch');
