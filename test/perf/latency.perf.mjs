@@ -40,7 +40,7 @@ test('a gated edit takes under 1,000 ms at 1,000 notes', perf, t => {
   assert.ok(ms < 1000, `${Math.round(ms)} ms`);
 });
 
-test('a gated edit takes under 300 ms at 3,000 notes', { ...perf, todo: '6.2c' }, t => {
+test('a gated edit takes under 300 ms at 3,000 notes', perf, t => {
   const ms = gatedEditMs(t, shared(3000), '3,000', 3);
   assert.ok(ms < 300, `${Math.round(ms)} ms`);
 });

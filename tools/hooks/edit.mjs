@@ -1,7 +1,7 @@
 import fs from 'node:fs';
 import { runHook, config, domainsFor, everywhereDomains, inside, vaultRel, toPosix, cwdOf, FILE_TOOLS, toolFile, shortHash, lf } from '../lib/vault.mjs';
 import {
-  settledNotes, liveRules, livePages, ruleLine, pagePointers, tryRegex, cmp, clip, parseNote, QUOTED, agentNotesSpan, authoredByUser, AGENT_NOTES, TOP_HEADING,
+  loadNotes, settledNotes, liveRules, livePages, ruleLine, pagePointers, tryRegex, cmp, clip, parseNote, QUOTED, agentNotesSpan, authoredByUser, AGENT_NOTES, TOP_HEADING,
 } from '../lib/rules.mjs';
 import { bestMatch, specificity, bySpecificity } from '../lib/glob.mjs';
 import { parse } from '../lib/frontmatter.mjs';
@@ -205,7 +205,7 @@ runHook('edit', input => {
   if (why) return deny(why);
   // The vault's notes and sources are the user's taste, not project work, so no rule gates them and no page applies.
   if (/^(?:wiki|raw)\//i.test(vaultRel(file, cwd) ?? '')) return null;
-  const notes = settledNotes();
+  const notes = settledNotes(loadNotes([...domainsFor(file, cwd).map(d => d.domain), 'global', ...everywhereDomains()]));
   const matching = matcher(file, cwd);
   const refused = gate(input, matching(liveRules(notes)));
   if (refused) return deny(refused);
