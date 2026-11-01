@@ -1,7 +1,7 @@
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { spawnSync } from 'node:child_process';
+import { execFileSync, spawn, spawnSync } from 'node:child_process';
 import { pathToFileURL } from 'node:url';
 
 const TOOLS = path.resolve(import.meta.dirname, '..', 'tools');
@@ -32,17 +32,40 @@ export function makeVault(t, { config = {}, domain = 'demo', topics = ['layout',
     },
     read: rel => fs.readFileSync(at(...rel.split('/')), 'utf8'),
     exists: rel => fs.existsSync(at(...rel.split('/'))),
-    run(script, args = [], { input, env = {}, cwd = root } = {}) {
+    run(script, args = [], { input, env = {}, cwd = root, timeout } = {}) {
       const r = spawnSync(process.execPath, [at('tools', ...script.split('/')), ...args], {
         cwd,
         input: input === undefined ? '' : typeof input === 'string' ? input : JSON.stringify(input),
         env: cleanEnv(env),
         encoding: 'utf8',
+        timeout,
       });
-      return { code: r.status, stdout: r.stdout, stderr: r.stderr };
+      return { code: r.status, stdout: r.stdout, stderr: r.stderr, ...(r.error && { error: r.error }) };
     },
-    hook(name, input) {
-      const r = v.run(`hooks/${name}.mjs`, [], { input, cwd: input.cwd ?? project });
+    // Lets a test run several tools at once. A tool still running at the deadline is killed and resolves with no code.
+    runAsync(script, args = [], { input, env = {}, cwd = root, timeout = 60e3 } = {}) {
+      return new Promise((resolve, reject) => {
+        const child = spawn(process.execPath, [at('tools', ...script.split('/')), ...args], { cwd, env: cleanEnv(env), timeout });
+        let stdout = '';
+        let stderr = '';
+        child.stdout.setEncoding('utf8').on('data', d => { stdout += d; });
+        child.stderr.setEncoding('utf8').on('data', d => { stderr += d; });
+        child.on('error', reject);
+        child.on('close', (code, signal) => resolve({ code, signal, stdout, stderr }));
+        child.stdin.end(input === undefined ? '' : typeof input === 'string' ? input : JSON.stringify(input));
+      });
+    },
+    // Hooks fail open, logging what went wrong and printing nothing, so a hook that crashed would read as one that let
+    // the call through.
+    hook(name, input, { timeout } = {}) {
+      const log = at('.state', 'errors.log');
+      const size = () => (fs.existsSync(log) ? fs.statSync(log).size : 0);
+      const before = size();
+      const r = v.run(`hooks/${name}.mjs`, [], { input, cwd: input.cwd ?? project, timeout });
+      if (r.error?.code === 'ETIMEDOUT') throw new Error(`the ${name} hook was still running at the ${timeout} ms deadline`);
+      if (r.error) throw r.error;
+      if (r.code !== 0) throw new Error(`the ${name} hook exited ${r.code}: ${r.stderr}`);
+      if (size() > before) throw new Error(`the ${name} hook logged an error: ${fs.readFileSync(log).subarray(before).toString('utf8')}`);
       return r.stdout.trim() ? JSON.parse(r.stdout) : null;
     },
     transcript(sid, entries) {
@@ -55,9 +78,25 @@ export function makeVault(t, { config = {}, domain = 'demo', topics = ['layout',
       return v.hook('session-start', { session_id: sid, transcript_path: transcript, cwd, hook_event_name: 'SessionStart', source });
     },
     propose: (sid, input) => v.run('propose.mjs', [sid], { input }),
-    edit: (sid, tool, toolInput, { cwd = project, agent } = {}) => v.hook('edit', {
+    edit: (sid, tool, toolInput, { cwd = project, agent, timeout } = {}) => v.hook('edit', {
       session_id: sid, cwd, hook_event_name: 'PreToolUse', tool_name: tool, tool_input: toolInput, ...(agent ? { agent_id: agent } : {}),
-    }),
+    }, { timeout }),
+    // A git checkout or a sync gives every note a fresh mtime without changing what it says. The commit is there because
+    // the design settles a note by whether git reports it unchanged from HEAD. The user's git config stays out, since a
+    // hooks path, a template or a line-ending check there could fail the commit. Git for Windows reads /dev/null as its
+    // null device and refuses os.devNull's \\.\nul.
+    checkout() {
+      const env = cleanEnv({ GIT_CONFIG_NOSYSTEM: '1', GIT_CONFIG_GLOBAL: '/dev/null' });
+      const git = (...args) => execFileSync('git', ['-c', 'user.name=t', '-c', 'user.email=t@example.com', '-c', 'commit.gpgsign=false', ...args], { cwd: root, env, stdio: 'pipe' });
+      git('init', '-q');
+      git('add', '-A');
+      git('commit', '-q', '--allow-empty', '-m', 'notes');
+      if (!fs.existsSync(at('wiki'))) return;
+      const now = new Date();
+      for (const e of fs.readdirSync(at('wiki'), { recursive: true, withFileTypes: true })) {
+        if (e.isFile()) fs.utimesSync(path.join(e.parentPath, e.name), now, now);
+      }
+    },
     import: rel => import(pathToFileURL(at('tools', ...rel.split('/'))).href),
   };
 
@@ -68,9 +107,10 @@ export function makeVault(t, { config = {}, domain = 'demo', topics = ['layout',
   return v;
 }
 
-// The test run may itself be inside a Claude Code session, whose id would make propose.mjs and pick.mjs refuse the fixture's.
+// The test run may itself be inside a Claude Code session, whose id would make propose.mjs and pick.mjs refuse the fixture's,
+// or inside the pre-commit hook, whose GIT_DIR and GIT_INDEX_FILE would point a test's git at the vault's own repository.
 export function cleanEnv(extra) {
-  const env = { ...process.env };
+  const env = Object.fromEntries(Object.entries(process.env).filter(([k]) => !/^GIT_/i.test(k)));
   delete env.CLAUDE_CODE_SESSION_ID;
   delete env.CLAUDE_CODE_SAFE_MODE;
   return { ...env, ...extra };
@@ -79,10 +119,28 @@ export function cleanEnv(extra) {
 let sessions = 0;
 export const sessionId = () => `a1b2c3d4-0000-4000-8000-${String(++sessions).padStart(12, '0')}`;
 
-export const editFile = (v, sid, rel, { tool = 'Edit', text = 'local x = 1', abs, cwd, agent } = {}) => v.edit(sid, tool, {
+export const editFile = (v, sid, rel, { tool = 'Edit', text = 'local x = 1', abs, cwd, agent, timeout } = {}) => v.edit(sid, tool, {
   file_path: abs ?? path.join(v.project, ...rel.split('/')), ...(tool === 'Write' ? { content: text } : { old_string: 'a', new_string: text }),
-}, { cwd, agent });
+}, { cwd, agent, timeout });
 export const prompt = (v, sid, text, { cwd = v.project } = {}) => v.hook('prompt', { session_id: sid, cwd, prompt: text, hook_event_name: 'UserPromptSubmit' });
+
+// Rules on three topics that share no words, globs or keywords with each other or the perf notes, so proposing them at
+// once fails only if the proposes race.
+export const unrelatedRules = (domain, tag) => [
+  { topic: 'naming', reading: 'The user renamed the shop widgets after their screen.', do: 'Name widgets with a screen prefix.', not: 'Leave widget names bare.' },
+  { topic: 'errors', reading: 'The user asked for quieter save failures.', do: 'Retry a failed save twice before showing a toast.', not: 'Show the toast on the first failure.' },
+  { topic: 'docs', reading: 'The user put a purpose line atop each file.', do: 'Open each file with a one-line purpose comment.', not: 'Start a file straight with its imports.' },
+].map((r, i) => ({ domain, slug: `${tag}-${i}`, basis: 'reading', applies_to: [`src/${tag}-${i}/**/*.txt`], ...r }));
+
+// Every session starts before the first propose, so the proposes overlap.
+export function proposeAtOnce(v, rules, { timeout } = {}) {
+  const sids = rules.map(() => {
+    const sid = sessionId();
+    v.startSession(sid);
+    return sid;
+  });
+  return Promise.all(rules.map((rule, i) => v.runAsync('propose.mjs', [sids[i]], { input: rule, timeout })));
+}
 
 export const denied = out => (out?.hookSpecificOutput?.permissionDecision === 'deny' ? out.hookSpecificOutput.permissionDecisionReason : null);
 
