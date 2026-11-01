@@ -1,6 +1,6 @@
 # All-rounder vault: design draft
 
-Status: draft, 2026-11-01. Phase 0 (checks) and phase 1 (format) are built and merged into main. Phase 2 (delivery) is built and landed on `phase-2-delivery`, not yet merged into main. Phase 3's design (neutral fixtures) is ready on `phase-3-delivery`.
+Status: draft, 2026-11-01. Phase 0 (checks), phase 1 (format) and phase 2 (delivery) are built and merged into main. Phase 3 (neutral fixtures) is built and reviewed on `phase-3-integration`, to land on `phase-3-delivery`.
 
 Scope: structure, design and architecture only. This design adds no knowledge to the vault. It names no domain, platform, package ecosystem or site as built in. Where it needs an example, it uses a placeholder.
 
@@ -573,7 +573,7 @@ The phases build mechanism only. Adding real knowledge and taste is the user's c
    - Every field in 6.1, plus the derived-text and bundle formats (6.4a, 6.4b), target namespaces (6.3b) and `tools` (6.3c).
    - Free while the wiki is empty.
    - Update AGENTS.md with it (§10).
-2. **Delivery that can be trusted.** Built, reviewed at max effort with the findings fixed, and landed on `phase-2-delivery`, not yet merged into main.
+2. **Delivery that can be trusted.** Built, reviewed at max effort with the findings fixed, and merged into main.
    - loud failure, deadline and linear regex (6.6a–c);
    - the cache and content settling (6.2c, 6.6d), with the one git module and the standard and lint check changed to allow it:
      - the cache here is the one cache, the scoped walk and build on change;
@@ -584,7 +584,7 @@ The phases build mechanism only. Adding real knowledge and taste is the user's c
    - subagents and edit surfaces (6.3a, 6.3b);
    - the shell-write Stop hook (6.3d);
    - plugin hooks (6.7d).
-3. **Neutral fixtures.** The tests use invented domains and invented names, not a real ecosystem, so no real domain's file types or words shape what the tests pin. `propose.mjs` and the ingest skill already use `example-ui`; the platform words left are in `test/` and AGENTS.md's examples.
+3. **Neutral fixtures.** Built and reviewed at max effort with the findings fixed. The review also found the frontmatter parser's multi-line values misread, and the fix gives it one continuation rule, YAML's: a value runs on only onto lines indented past its parent. The tests use invented domains and invented names, not a real ecosystem, so no real domain's file types or words shape what the tests pin. `propose.mjs` and the ingest skill already use `example-ui`; the platform words left are in `test/` and AGENTS.md's examples.
    - **Presets.** The five shapes become fixture presets in `test/fixture.mjs`, five and no more. `makeVault(t, { presets: [...] })` adds each named preset's config, project folder and notes. A marker- or path-reached preset gets its own project folder, `v.projects.<key>`, and `glim`'s is `v.project`. The preset writes its `derived/` and `raw/` files directly, and dates `as_of` 30 days before the run, so lint's 180-day warning never fires.
      - **`glim`, code taste.** Reached by its marker, `glim.project`. Files are `src/**/*.zq`, and `.zq` with `.zqx` is the prefix-extension pair the glob tests need. It holds an always rule, a rule on `src/**/*.zq` with a trigger, a keyword rule, a page with `applies_to`, a rule with `tools: [AskUserQuestion]`, and one live pick row in `raw/picks/`. It declares the namespace `glim-tree`, maps the tool `mcp__fixture__set_property` to it in `editTools`, and writes the alias `tools/ext/aliases/fixture.mjs`, which the domain names in `aliases`.
      - **`almanac`, knowledge.** Reached by its marker, `almanac.project`. Its project holds `almanac.lock`, naming `pkg` at 2.4.0, which nothing reads until phase 4's fixture reader does. It holds two knowledge rules on `src/**`, one `requires` `{ ecosystem: fixture, name: pkg }` from 2.0.0 before 3.0.0 and one from 3.0.0, both with `as_of` and the keyword `openLedger`. It also holds a source in `raw/refs/` with `url`, `fetched`, `etag`, `last_modified` and the body's real `sha256`, one with `repo`, `path` and `commit`, and a source page for each.
@@ -600,8 +600,8 @@ The phases build mechanism only. Adding real knowledge and taste is the user's c
      - The perf group's generated vault (`test/perf/notes.mjs`): 6.2c and 6.6f. It needs thousands of notes, so it keeps its own generator, whose domains (`ui`, `backend`, `infra`, `data`) and file types name no platform.
    - **The `todo` checks.** The other five need phase 4 or 5 code. Phase 3 seeds what the format already expresses and writes each as a `todo` test that fails for the reason its section names:
      - 6.1c on `almanac`: only the v2 rule is delivered, and `review status` ranks it first. It fails because nothing reads versions, so both are.
-     - 6.2a on `almanac`: it runs `node tools/refresh.mjs` and expects the rule labelled unverified. It fails because there is no refresh. Phase 4 adds the locally served URL source and the fixture git repo to this test.
-     - 6.2b on `almanac`: the test generates a manifest of 2,000 links and 50 cited pages under `raw/refs/<set>/`, then expects session start under 500 ms and `review.mjs sources` to list the set as one source. The second part fails until doc sets are built. The builder confirms it is red for that reason before marking it.
+     - 6.2a on `almanac`: it runs `node tools/refresh.mjs` and expects the rule labelled unverified. It fails because there is no refresh. Its url source points at `pkg.invalid`, a host that never resolves, so no run can pass it by fetching the internet; phase 4 swaps in the locally served URL source and adds the fixture git repo to this test.
+     - 6.2b on `almanac`: the test generates a manifest of 2,000 links and 50 cited pages under `raw/refs/<set>/`, then expects the first session start after it, and the fastest of three, under 500 ms, and `review.mjs sources` to list the set as one source. The second part fails until doc sets are built. The builder confirms it is red for that reason before marking it.
      - 6.3c on `glim`: the first `AskUserQuestion` is denied with the `tools` rule. It fails because the edit hook doesn't match on `tools`.
      - 6.4a on `archive`: a fabricated quote against `paper.pdf` is refused, and a real one passes. It fails because quotes never read `derived/`. `quotes.test.mjs:178`, which asserts that a binary source is not checked, stays until phase 5 inverts it.
 
@@ -624,12 +624,12 @@ The phases build mechanism only. Adding real knowledge and taste is the user's c
 
 | Check | Passing means | Today |
 |---|---|---|
-| `node --test test/*.test.mjs` | All pass; each `todo` fails for the reason its design section names | 381 tests: 379 pass, 1 skipped (making a link needs Developer Mode on Windows), 1 `todo` (neutral core, §3), 28 s. Lint: 0 errors. |
-| Neutral-core test (§3) | No configured domain's key or title appears in `tools/`, `.claude/skills/`, `test/` or AGENTS.md | Passes on this vault's config. Its `todo` mark comes off in phase 3, once the fixtures name no platform. |
-| Phase 3 check: the suite, then the grep below the table | With the neutral-core `todo` mark removed, the suite passes with 5 `todo` tests (6.1c, 6.2a, 6.2b, 6.3c, 6.4a), each red for its reason, and the grep prints nothing. Then no test, tool, skill or AGENTS.md example leans on one platform, and only the five later-phase checks are open. | Red: the grep prints 849 lines. |
+| `node --test test/*.test.mjs` | All pass; each `todo` fails for the reason its design section names | 410 tests: 404 pass, 1 skipped (making a link needs Developer Mode on Windows), 5 `todo` (6.1c, 6.2a, 6.2b, 6.3c, 6.4a), about 32 s. Lint: 0 errors. |
+| Neutral-core test (§3) | No configured domain's key or title appears in `tools/`, `.claude/skills/`, `test/` or AGENTS.md | Passes on this vault's config, with its `todo` mark removed (phase 3). |
+| Phase 3 check: the suite, then the grep below the table | With the neutral-core `todo` mark removed, the suite passes with 5 `todo` tests (6.1c, 6.2a, 6.2b, 6.3c, 6.4a), each red for its reason, and the grep prints nothing. Then no test, tool, skill or AGENTS.md example leans on one platform, and only the five later-phase checks are open. | Passes (phase 3): the five `todo` tests fail for their reasons, and the grep prints nothing. |
 | The probes as `todo` tests (phase 0) | Each passes with its `todo` mark removed: slow trigger, subagent gate, settle after an mtime change, negated glob, one refusal per file, frontmatter | All pass with their marks removed (phase 2): slow trigger, subagent gate (2), settle after an mtime change (2), one refusal per file, frontmatter, long-path prefix. Negated glob passes (phase 1). |
-| Perf group: `VAULT_PERF=1 node --test test/perf/*.perf.mjs` (about 10 s, outside the default run) | Fastest of 5 gated edits under 1,000 ms at 1,000 notes; fastest of 3 under 300 ms at 3,000; three parallel proposes of unrelated rules at 3,000 notes all succeed (6.6f) | About 135–156 ms; about 250–272 ms; all succeed in about 4.3–5.0 s, since builds run one at a time under `build.lock`. A warm session start at 3,000 notes takes about 340 ms, including the vault-wide stat for the lint reminder. The timings are noisy on this machine. |
-| Each *Check* in §6 | As stated there, against the phase-3 presets. 12 of the 17 pass in phase 3; 6.1c, 6.2a, 6.2b, 6.3c and 6.4a are `todo` until phases 4 and 5 | Not yet against the presets. Most already run as tests on the `demo` fixture (6.2c and 6.6f in the perf group) |
+| Perf group: `VAULT_PERF=1 node --test test/perf/*.perf.mjs` (about 10 s, outside the default run) | Fastest of 5 gated edits under 1,000 ms at 1,000 notes; fastest of 3 under 300 ms at 3,000; three parallel proposes of unrelated rules at 3,000 notes all succeed (6.6f) | About 135–166 ms; about 245–290 ms; all succeed in about 4.3–5.4 s, since builds run one at a time under `build.lock`. A warm session start at 3,000 notes takes about 340 ms, including the vault-wide stat for the lint reminder. The timings are noisy on this machine. |
+| Each *Check* in §6 | As stated there, against the phase-3 presets. 12 of the 17 pass in phase 3; 6.1c, 6.2a, 6.2b, 6.3c and 6.4a are `todo` until phases 4 and 5 | 12 pass against the presets (6.2c and 6.6f in the perf group); 6.1c, 6.2a, 6.2b, 6.3c and 6.4a are `todo` tests, each red for its reason (phase 3) |
 | Transcript provider test (6.7c) | The fields the provider reads still exist in a current transcript | Not built |
 | Linear regex test (6.6c) | `new RegExp(p, 'l')` works after `v8.setFlagsFromString` on the installed Node | Works on Node 22.14 |
 | Vault server trial (6.7g) | A PreToolUse `mcp_tool` hook's JSON deny stops an Edit, and a gated edit is faster than the cached command hook | Run once in a scratch folder, not kept. Deny honored, but it fails open. |
