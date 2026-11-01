@@ -241,3 +241,47 @@ test('a Write that only drops or adds a byte order mark, or adds a note too, is 
   assert.equal(denied(edit(plain, 'Write', { content: `\uFEFF${text}` })), null);
   assert.ok(denied(edit(plain, 'Write', { content: `\uFEFF${text.replace('Cards need', 'Cards want')}` })));
 });
+
+test('a file in a worktree of the vault is guarded as the same file in the vault', t => {
+  const rel = `.claude/worktrees/w1/${REL}`;
+  const v = vault(t, { rel });
+  assert.match(denied(edit(v, 'Edit', change('Tabs should never feel cramped.', 'Tabs may feel cramped.'), rel)) ?? '', /^wiki\/demo\/concepts\/journal\.md is the user's own writing/);
+  v.write('.claude/worktrees/w1/raw/refs/a.md', 'x');
+  assert.match(denied(edit(v, 'Write', { content: 'y' }, '.claude/worktrees/w1/raw/refs/a.md')) ?? '', /raw\/ is append-only: raw\/refs\/a\.md already exists/);
+  assert.match(denied(edit(v, 'Write', { content: 'y' }, '.claude/worktrees/w1/index.md')) ?? '', /^index\.md is generated/);
+});
+
+test("an Edit with an empty old_string, which writes the whole file, may not make a page the user's", t => {
+  const v = makeVault(t);
+  assert.match(denied(edit(v, 'Edit', change('', mine()))) ?? '', /would be marked author: user/);
+  v.write(REL, '\n');
+  assert.match(denied(edit(v, 'Edit', change('', mine()))) ?? '', /would be marked author: user/);
+});
+
+test('an old_string that spells a character as \\uXXXX is matched as Claude Code matches it, and an edit the guard cannot follow is denied', t => {
+  const cafe = ['Café menus stay short.', '', '## Agent notes', SEEN];
+  const v = vault(t, { text: mine(cafe) });
+  assert.ok(denied(edit(v, 'Edit', change('Caf\\u00e9 menus stay short.', 'Menus can be long.'))));
+  assert.equal(denied(edit(v, 'Edit', change(`Caf\\u00e9 menus stay short.\n\n## Agent notes\n${SEEN}`, `${cafe.join('\n')}\n- the grid is 12px`))), null);
+  const escaped = vault(t, { text: mine(['Caf\\u00e9 menus stay short.', '', '## Agent notes', SEEN]) });
+  assert.match(denied(edit(escaped, 'Edit', change('Café menus stay short.', 'Menus can be long.'))) ?? '', /is the user's own writing/);
+});
+
+test("frontmatter lines that read as a heading or a fence don't move ## Agent notes", t => {
+  const head = ['---', 'type: page', 'domain: demo', 'kind: concept', "topic: ''", "summary: ''", 'author: user'];
+  const commented = vault(t, { text: [...head, '## Agent notes', '---', '# Journal', 'Cards need room.', ''].join('\n') });
+  assert.ok(denied(edit(commented, 'Edit', change('## Agent notes\n---', '## Agent notes\nstatus: draft\n---'))));
+  assert.ok(denied(edit(commented, 'Edit', change('## Agent notes\n---', '## Agent notes\nauthor: agent\n---'))));
+  assert.ok(denied(edit(commented, 'Edit', change('---\n# Journal', '---\nThe agent wrote this.\n# Journal'))));
+  const fenced = vault(t, { text: [...head, 'note: |', '  ```js', '  x', '---', 'Cards need room.', '', '## Agent notes', SEEN, ''].join('\n') });
+  assert.equal(denied(edit(fenced, 'Edit', change(`${SEEN}\n`, `${SEEN}\n- the grid is 12px\n`))), null);
+});
+
+test("author: user as a one-item list, or in capitals, still marks the page as the user's", async t => {
+  for (const extra of [['author:', '  - user'], ['author: [user]'], ['author: User']]) {
+    const v = vault(t, { text: mine(BODY, extra) });
+    assert.ok(denied(edit(v, 'Edit', change('Tabs should never feel cramped.', 'Tabs may feel cramped.'))), extra.join(' '));
+  }
+  assert.deepEqual(await lintFound(vault(t, { text: mine(BODY, ['author:', '  - user']) }), /^(?:author|no topic|no summary)/), []);
+  assert.deepEqual((await lintFound(vault(t, { text: mine(BODY, ['author: User']) }), /author/)).map(f => [f.level, f.msg]), [['error', 'author must be user or agent']]);
+});

@@ -171,3 +171,15 @@ test('a fresh checkout with core.autocrlf=true leaves the files in raw/ as they 
   git(dir, 'clone', '-q', origin, clone);
   assert.deepEqual(fs.readFileSync(path.join(clone, 'raw', 'refs', 'a.md')), saved);
 });
+
+test("a rule citing a file in a bundle isn't told the bundle's source page is newer", t => {
+  const v = makeVault(t);
+  v.write('raw/refs/lib/source.md', '---\nurl: https://example.com/lib\ncommit: a1b2c3d4e5f6\n---\n');
+  v.write('raw/refs/lib/a.md', 'x');
+  v.write('wiki/demo/bundle-api.md', ruleNote({
+    kind: 'knowledge', basis: 'source', applies_to: ['src/**'], extra: ['as_of: 2026-01-01'],
+    evidence: ['- 2026-01-01 · source · session 1a2b3c4d · raw/refs/lib/a.md · dated 2026-01-01 · "x" (a-00000001)'],
+  }));
+  v.write('wiki/demo/source-lib.md', sourcePage({ source: 'raw/refs/lib', dated: '2026-10-10' }));
+  assert.deepEqual(sectionOf(v.run('review.mjs', ['status']).stdout, 'Knowledge rules a newer source on their topic may override'), ['None.']);
+});

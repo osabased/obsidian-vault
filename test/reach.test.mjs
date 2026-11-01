@@ -187,3 +187,84 @@ test('a session in the vault folder takes no domain from a marker inside raw/ref
   v.startSession(below, { cwd: folder(t, ['sub/alpha.project']) });
   assert.deepEqual(JSON.parse(v.read(`.state/sessions/${below}.json`)).reach.domains, ['alpha']);
 });
+
+const reachOf = (v, sid) => JSON.parse(v.read(`.state/sessions/${sid}.json`)).reach;
+const widgetRule = domain => ({
+  domain, slug: 'name-widgets', topic: 'code', basis: 'reading', reading: 'The user renamed the widgets.',
+  do: 'Name widgets after their screen.', not: 'Leave widget names bare.', keywords: ['widgetz'],
+});
+const pickFor = (v, sid, domain) => v.run('pick.mjs', [sid], { input: { subject: 'shop', comment: 'cards breathe', domain } });
+
+test('pick and propose reach the domains of the latest session start and of the folder the session began in', t => {
+  const v = makeVault(t, { domains: { alpha: ALPHA, beta: BETA } });
+  const mono = folder(t, ['a/alpha.project', 'b/beta.project']);
+  const compacted = sessionId();
+  v.startSession(compacted, { cwd: mono });
+  v.startSession(compacted, { cwd: path.join(mono, 'a'), source: 'compact' });
+  const kept = pickFor(v, compacted, 'beta');
+  assert.equal(kept.code, 0, kept.stderr);
+  const moved = sessionId();
+  v.startSession(moved);
+  v.startSession(moved, { cwd: mono, source: 'compact' });
+  for (const domain of ['demo', 'beta']) {
+    const p = pickFor(v, moved, domain);
+    assert.equal(p.code, 0, `${domain}: ${p.stderr}`);
+  }
+  const r = v.propose(moved, widgetRule('beta'));
+  assert.equal(r.code, 0, r.stderr);
+  const inA = sessionId();
+  v.startSession(inA, { cwd: path.join(mono, 'a') });
+  assert.notEqual(pickFor(v, inA, 'beta').code, 0);
+  assert.match(v.propose(inA, widgetRule('beta')).stderr, /domain must be alpha or global/);
+});
+
+test('in the vault folder propose takes any domain but a vault-only one', t => {
+  const v = makeVault(t, { domains: { reading: { title: 'Reading', vaultOnly: true, topics: ['code'] }, alpha: ALPHA } });
+  const sid = sessionId();
+  v.startSession(sid, { cwd: v.root });
+  const r = v.propose(sid, widgetRule('nope'));
+  assert.equal(r.stderr, 'Not proposed: domain must be demo, alpha or global.\n');
+});
+
+test('a marker in a worktree of a project makes the main checkout the project root', async t => {
+  const v = makeVault(t, { domains: { alpha: ALPHA, beta: BETA } });
+  const root = folder(t, ['alpha.project', '.claude/worktrees/w1/alpha.project', '.claude/worktrees/w1/pkg/beta.project']);
+  const { domainsFor, sessionReach, toPosix } = await v.import('lib/vault.mjs');
+  const at = (...xs) => toPosix(path.join(root, ...xs));
+  assert.deepEqual(domainsFor(path.join(root, '.claude', 'worktrees', 'w1', 'src', 'a.txt')), [{ domain: 'alpha', root: at(), rel: 'src/a.txt' }]);
+  assert.deepEqual(sessionReach(path.join(root, '.claude', 'worktrees', 'w1')), [{ domain: 'alpha', root: at(), rel: '' }, { domain: 'beta', root: at('pkg') }]);
+});
+
+test("a marker is a file: a folder with a marker's name marks nothing, and a link to a file counts", async t => {
+  const v = makeVault(t, { domains: { alpha: ALPHA } });
+  const dir = folder(t, ['alpha.project/readme.txt', 'src/a.txt', 'pkg/alpha.project/readme.txt']);
+  const { domainsFor, sessionReach } = await v.import('lib/vault.mjs');
+  assert.deepEqual(domainsFor(path.join(dir, 'src', 'a.txt')), []);
+  assert.deepEqual(sessionReach(dir), []);
+  const linked = folder(t, ['target.txt', 'pkg/src/a.txt']);
+  try {
+    fs.symlinkSync(path.join(linked, 'target.txt'), path.join(linked, 'pkg', 'alpha.project'), 'file');
+  } catch (e) {
+    if (e.code === 'EPERM') return t.skip('making a link needs Developer Mode on Windows');
+    throw e;
+  }
+  assert.deepEqual(domainsFor(path.join(linked, 'pkg', 'src', 'a.txt')).map(h => h.domain), ['alpha']);
+  assert.deepEqual(sessionReach(linked).map(h => h.domain), ['alpha']);
+});
+
+test('a marker named . or .. is no file name, so it marks nothing and lint reports it', async t => {
+  const v = makeVault(t, { domains: { alpha: { ...ALPHA, markers: ['.', '..'] } } });
+  const dir = folder(t, ['src/a.txt']);
+  const { domainsFor } = await v.import('lib/vault.mjs');
+  assert.deepEqual(domainsFor(path.join(dir, 'src', 'a.txt')), []);
+  assert.ok((await reachFound(v)).some(([level, , msg]) => level === 'error' && msg === 'alpha: markers must be a list of file names, with no folders in them'));
+});
+
+test('a session in the folder above the vault takes no domain from a marker inside the vault', async t => {
+  const parent = folder(t, ['pkg/alpha.project']);
+  const v = makeVault(t, { domains: { alpha: ALPHA, beta: BETA }, under: parent });
+  v.write('raw/refs/beta.project', '');
+  const sid = sessionId();
+  v.startSession(sid, { cwd: parent });
+  assert.deepEqual(reachOf(v, sid).domains, ['alpha']);
+});

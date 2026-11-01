@@ -24,7 +24,7 @@ Each domain in `vault.config.json` says which sessions it reaches:
 - `everywhere: true`: the domain's pages and keyword rules reach every session. Its `always` and `applies_to` rules still reach only the sessions its markers and paths put it in.
 - `vaultOnly: true`: the domain holds pages only, which sessions in this folder read. `tools/propose.mjs` refuses a rule in it, and lint reports one written any other way as an error, which blocks commits.
 
-Global reaches every session. A domain that isn't vault-only and reaches no project on this machine gets a lint warning. A domain's project root, the marker folder or the path, is where its globs and picks start.
+Global reaches every session. A domain that isn't vault-only and reaches no project on this machine gets a lint warning. A domain's project root, the marker folder or the path, is where its globs and picks start. A marker folder in a worktree under `.claude/worktrees/` has the main checkout as its root.
 
 A note `tools/propose.mjs` writes applies at once. A note saved any other way applies once it has gone `delivery.settleSeconds` (60 by default, in `vault.config.json`) without another save, so a rule being typed in Obsidian doesn't reach sessions half-written. The hooks read each note as it is now:
 

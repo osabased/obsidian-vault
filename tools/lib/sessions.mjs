@@ -1,7 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import {
-  config, vaultPath, statePath, stateDir, readJsonSafe, writeJson, safeId, shortHash, logError, guarded, hookErrors, errorsLog, domainsFor, sessionReach, toPosix,
+  config, vaultPath, statePath, stateDir, readJsonSafe, writeJson, safeId, shortHash, logError, guarded, hookErrors, errorsLog, domainsFor, sessionReach, toPosix, inVaultFolder, isVaultOnly,
 } from './vault.mjs';
 
 const DAY = 86400e3;
@@ -45,13 +45,23 @@ const domainsIn = (entry, cwd) => {
 // The domains session start found for this session's folder, or, in a folder it didn't scan, that folder's own.
 export const sessionDomains = (sid, cwd) => domainsIn(sid ? readJsonSafe(registry(safeId(sid))) : null, cwd);
 
-// Each of a registered session's domains with its project root, as session start found them. An entry without roots,
-// written by older tools, finds them again.
+// Each of a registered session's domains with its project root: those the latest session start found, which compaction
+// or a resume in another folder replaces, and those of the folder the session began in, so pick.mjs and propose.mjs
+// reach the same domains. An entry without roots, written by older tools, finds them again.
 export function sessionRoots(entry) {
-  const { roots } = recorded(entry, entry?.cwd);
-  if (Array.isArray(roots)) return roots;
-  const names = domainsIn(entry, entry?.cwd);
-  return sessionReach(entry?.cwd).filter(h => names.includes(h.domain));
+  const reach = entry?.reach;
+  const latest = Array.isArray(reach?.roots) ? reach.roots
+    : Array.isArray(reach?.domains) ? sessionReach(reach.cwd).filter(h => reach.domains.includes(h.domain)) : [];
+  const first = reach && samePath(reach.cwd, entry?.cwd) ? [] : sessionReach(entry?.cwd);
+  const all = [...latest, ...first].filter(r => typeof r?.domain === 'string' && typeof r?.root === 'string').map(({ domain, root }) => ({ domain, root }));
+  const keys = all.map(r => `${r.domain}|${toPosix(r.root).toLowerCase()}`);
+  return all.filter((r, i) => keys.indexOf(keys[i]) === i);
+}
+
+// /ingest runs in the vault folder and can feed any domain but a vault-only one, which takes no rules.
+export function proposeDomains(entry) {
+  const doms = inVaultFolder(entry?.cwd) ? Object.keys(config().domains) : sessionRoots(entry).map(r => r.domain);
+  return [...new Set(doms)].filter(d => Object.hasOwn(config().domains, d) && !isVaultOnly(d));
 }
 
 const marker = (kind, sid, key) => vaultPath('.state', kind, safeId(sid), shortHash(key));

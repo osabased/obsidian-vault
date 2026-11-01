@@ -305,3 +305,25 @@ test('lintConfig refuses an escape that is a glob character or is in the separat
   assert.deepEqual(await lintOf({ 'demo-tree': { separator: '.', escape: '/' } }), []);
   assert.deepEqual(await lintOf({ 'demo-tree': { separator: '/', escape: '\\' } }), []);
 });
+
+test('a quote inside a plain flow item is text, so the list still splits at its commas', () => {
+  assert.deepEqual(data(["keywords: [don't, x, y]"]).keywords, ["don't", 'x', 'y']);
+  assert.deepEqual(data(['keywords: [say "hi, there", x]']).keywords, ['say "hi', 'there"', 'x']);
+  assert.deepEqual(data(["keywords: ['a, b', c]"]).keywords, ['a, b', 'c']);
+  assert.deepEqual(data(["k: {a: 'b, c', d: it's}"]).k, { a: 'b, c', d: "it's" });
+  assert.deepEqual(data(["k: [x, {a: 'b, c'}]"]).k, ['x', { a: 'b, c' }]);
+});
+
+test('propose quotes a topic YAML would read as something other than text', t => {
+  for (const topic of ['true', '2026']) {
+    const v = makeVault(t, { topics: [topic] });
+    const sid = sessionId();
+    v.startSession(sid);
+    const r = v.propose(sid, {
+      domain: 'demo', slug: 'new-rule', topic, basis: 'reading', reading: 'The user rewrote the screen twice.',
+      do: 'Zebra quartz mango.', not: 'Plover lantern ember.', applies_to: ['src/new/**'],
+    });
+    assert.equal(r.code, 0, `${topic}: ${r.stderr}`);
+    assert.match(v.read('wiki/demo/rules/new-rule.md'), new RegExp(`^topic: '${topic}'$`, 'm'));
+  }
+});

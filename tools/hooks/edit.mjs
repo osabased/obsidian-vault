@@ -4,6 +4,7 @@ import {
   settledNotes, liveRules, livePages, ruleLine, pagePointers, tryRegex, cmp, clip, parseNote, QUOTED, agentNotesSpan, authoredByUser, AGENT_NOTES, TOP_HEADING,
 } from '../lib/rules.mjs';
 import { bestMatch, specificity, bySpecificity } from '../lib/glob.mjs';
+import { parse } from '../lib/frontmatter.mjs';
 import { marked, mark, markShown, markPages } from '../lib/sessions.mjs';
 
 function vaultGuard(file, cwd) {
@@ -25,16 +26,21 @@ function vaultGuard(file, cwd) {
 
 const foldQuotes = s => s.replace(/[‘’]/g, "'").replace(/[“”]/g, '"');
 
-// Edit matches as Claude Code does: line endings and curly quotes don't count, and an old_string found more than
-// once without replace_all fails, so that edit is left for the tool to refuse.
+function matchIn(text, from) {
+  if (text.includes(from)) return from;
+  const i = foldQuotes(text).indexOf(foldQuotes(from));
+  if (i >= 0) return text.slice(i, i + from.length);
+  const decoded = from.replace(/\\u([0-9a-f]{4})/gi, (_, h) => String.fromCharCode(parseInt(h, 16)));
+  return decoded !== from && text.includes(decoded) ? decoded : null;
+}
+
+// Edit matches as Claude Code does: line endings and curly quotes don't count, a character old_string spells as an
+// escape such as \u00e9 matches itself, and an empty old_string writes a file that is missing or blank. An old_string
+// found more than once without replace_all fails, so that edit is left for the tool to refuse.
 function replaced(text, e) {
-  let from = lf(e.old_string);
-  if (!from) return null;
-  if (!text.includes(from)) {
-    const i = foldQuotes(text).indexOf(foldQuotes(from));
-    if (i < 0) return null;
-    from = text.slice(i, i + from.length);
-  }
+  if (!e.old_string) return text.trim() ? null : lf(e.new_string);
+  const from = matchIn(text, lf(e.old_string));
+  if (from === null) return null;
   const parts = text.split(from);
   return parts.length > 2 && !e.replace_all ? null : parts.join(lf(e.new_string));
 }
@@ -58,7 +64,7 @@ const headingLine = l => TOP_HEADING.test(l);
 // Lines added without a heading in the way are the same text wherever the diff puts them, so any placement inside the
 // section is enough. Added lines can still move where the section ends, as an unclosed fence does, so the section must
 // end after the edit where it ended before.
-function onlyNotesAdded(before, after) {
+function bodyNotesAdded(before, after) {
   const [b, a] = [before, after].map(s => s.split('\n'));
   const span = agentNotesSpan(b);
   const now = agentNotesSpan(a);
@@ -66,7 +72,7 @@ function onlyNotesAdded(before, after) {
     if (!after.startsWith(before)) return false;
     const rest = after.slice(before.length);
     const gap = rest.match(/^\n*/)[0];
-    if (!gap && !before.endsWith('\n')) return false;
+    if (!gap && before && !before.endsWith('\n')) return false;
     const [first, ...added] = rest.slice(gap.length).split('\n');
     const at = a.length - added.length - 1;
     return AGENT_NOTES.test(first) && added.some(l => l.trim()) && !added.some(headingLine) && now?.at === at && now.end === a.length;
@@ -81,12 +87,22 @@ function onlyNotesAdded(before, after) {
   return at <= Math.min(span.end, head) && !a.slice(at, at + a.length - b.length).some(headingLine);
 }
 
+// A frontmatter line can read as a heading or a fence, so the section is found in the body, and the frontmatter must
+// stay as it was.
+const frontmatter = text => {
+  const { body, ok } = parse(text);
+  return ok ? text.slice(0, text.length - body.length).replace(/\n$/, '') : '';
+};
+const onlyNotesAdded = (before, after) => frontmatter(before) === frontmatter(after) && bodyNotesAdded(parse(before).body, parse(after).body);
+
+const usersOwn = rel => `${rel} is the user's own writing, so it stays as they wrote it. Add notes as new lines under ## Agent notes, and change nothing else in the file.`;
+
 function userNoteGuard(rel, before, after) {
   if (authoredByUser(after) && !authoredByUser(before)) {
     return `${rel} would be marked author: user. The user sets author: user themselves; the agent doesn't make a page theirs.`;
   }
   if (!authoredByUser(before) || after === before || onlyNotesAdded(before, after)) return null;
-  return `${rel} is the user's own writing, so it stays as they wrote it. Add notes as new lines under ## Agent notes, and change nothing else in the file.`;
+  return usersOwn(rel);
 }
 
 const PAGE_KEEPS = 0.7;
@@ -101,7 +117,8 @@ function noteGuard(input, file, cwd) {
     try { before = textOf(fs.readFileSync(toPosix(file, cwd), 'utf8')); } catch { return null; }
   }
   const after = textAfter(input.tool_name, input.tool_input ?? {}, before ?? '');
-  if (after === null) return null;
+  // Claude Code refuses an edit it can't apply before the hook runs, so one the guard can't follow still applies.
+  if (after === null) return authoredByUser(before ?? '') ? usersOwn(rel) : null;
   // A user's page gets no second try: a retry of an edit that changes their words would be the slip the guard is for.
   const owned = userNoteGuard(rel, before ?? '', after);
   if (owned) return owned;

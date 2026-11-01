@@ -59,13 +59,17 @@ export function inside(root, p, base) {
 }
 
 export const stripWorktree = rel => rel.replace(/^\.claude\/worktrees\/[^/]+(?:\/|$)/i, '');
-export const vaultRel = (p, base) => inside(ROOT, p, base);
+// The hooks run from the main vault's .live/, so a file in a worktree of the vault is taken as the same file in it.
+export const vaultRel = (p, base) => {
+  const rel = inside(ROOT, p, base);
+  return rel === null ? null : stripWorktree(rel);
+};
 
 const caseFolds = process.platform === 'win32' || process.platform === 'darwin';
 const fold = name => (caseFolds ? name.toLowerCase() : name);
 
-// A marker is a file name, so one with a folder in it never matches.
-export const isMarkerName = m => typeof m === 'string' && Boolean(m.trim()) && !/[\\/]/.test(m);
+// A marker is a file name, so one with a folder in it, or . or .., which name folders, never matches.
+export const isMarkerName = m => typeof m === 'string' && Boolean(m.trim()) && !/[\\/]/.test(m) && !/^\.+$/.test(m.trim());
 const markersOf = d => strings(config().domains[d]?.markers).filter(isMarkerName);
 
 // Each marker file name with the domains it puts a folder in.
@@ -77,15 +81,19 @@ function markerDomains() {
   return by;
 }
 
-const hasDir = dir => fs.statSync(dir, { throwIfNoEntry: false })?.isDirectory() ?? false;
+// A marker is a file, or a link to one.
+const isFileAt = p => { try { return fs.statSync(p, { throwIfNoEntry: false })?.isFile() ?? false; } catch { return false; } };
+
+// A worktree checks out the same project, so its project root is the main checkout.
+const mainCheckout = dir => dir.replace(/[\\/]\.claude[\\/]worktrees[\\/][^\\/]+(?=[\\/]|$)/i, '');
 
 // The nearest folder at or above p that holds a marker, with every domain whose marker it holds. p may be a file the
 // edit is about to create, and a file path never holds a marker, so the walk can start at p itself.
 function markedAbove(p, by) {
   if (!by.size) return [];
   for (let dir = p; ; dir = path.dirname(dir)) {
-    const doms = [...by].filter(([m]) => fs.existsSync(path.join(dir, m))).flatMap(([, ds]) => ds);
-    if (doms.length) return [...new Set(doms)].map(domain => ({ domain, root: dir }));
+    const doms = [...by].filter(([m]) => isFileAt(path.join(dir, m))).flatMap(([, ds]) => ds);
+    if (doms.length) return [...new Set(doms)].map(domain => ({ domain, root: mainCheckout(dir) }));
     if (path.dirname(dir) === dir) return [];
   }
 }
@@ -142,13 +150,15 @@ function markedBelow(cwd) {
       let entries = [];
       try { entries = fs.readdirSync(dir, { withFileTypes: true }); } catch {}
       if (level > 0) {
-        const doms = entries.filter(e => e.isFile()).flatMap(e => by.get(fold(e.name)) ?? []);
-        for (const domain of new Set(doms)) hits.push({ domain, root: dir });
+        const doms = entries.filter(e => e.isFile() || (e.isSymbolicLink() && isFileAt(`${dir}/${e.name}`))).flatMap(e => by.get(fold(e.name)) ?? []);
+        for (const domain of new Set(doms)) hits.push({ domain, root: mainCheckout(dir) });
       }
       if (level >= depth) continue;
       for (const e of entries) {
         const r = rel ? `${rel}/${e.name}` : e.name;
         if (!e.isDirectory() || e.name.startsWith('.') || ignored.names.has(fold(e.name)) || ignored.paths.has(fold(r))) continue;
+        // The vault holds copies of other projects, whose markers put a session above it in no domain.
+        if (inVaultFolder(`${dir}/${e.name}`)) continue;
         next.push({ dir: `${dir}/${e.name}`, rel: r, level: level + 1 });
       }
     }
@@ -172,13 +182,6 @@ export const inVaultFolder = cwd => Boolean(cwd) && vaultRel(cwd) !== null;
 export const isVaultOnly = d => d !== 'global' && config().domains[d]?.vaultOnly === true;
 export const everywhereDomains = () => Object.keys(config().domains).filter(d => config().domains[d].everywhere === true && !isVaultOnly(d));
 
-// /ingest runs in the vault folder and can feed any domain. A session takes the domains session start found for it,
-// with those of its folder.
-export function proposeDomains(entry) {
-  if (inVaultFolder(entry?.cwd)) return Object.keys(config().domains);
-  const found = Array.isArray(entry?.reach?.domains) ? entry.reach.domains : [];
-  return [...new Set([...found, ...domainsFor(entry?.cwd).map(d => d.domain)])].filter(d => Object.hasOwn(config().domains, d));
-}
 // The vault folder is where every domain's pages are read, a vault-only domain's among them; an everywhere domain's
 // pages reach every session.
 export const readableDomains = (doms, vaultFolder) => [...new Set([...(vaultFolder ? Object.keys(config().domains) : [...doms, ...everywhereDomains()]), 'global'])];
