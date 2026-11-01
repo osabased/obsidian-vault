@@ -344,8 +344,10 @@ function addEvidence(f, e, scope, rules, same, row, notes) {
   ].join('\n');
 }
 
-function propose(sid, p) {
+// The input is read after the session is checked, so a script run from the wrong place says that first.
+function propose(sid, input) {
   const session = sessionOf(sid);
+  const p = input();
   const unknown = Object.keys(p).find(k => !FIELDS.has(k));
   if (unknown) refuse(`${unknown} isn't a field propose.mjs takes. Fields like requires and tools are added to the note by hand. node tools/propose.mjs --help lists the fields.`);
   const domains = [...session.domains, 'global'];
@@ -425,7 +427,7 @@ const args = process.argv.slice(2);
 try {
   if (args[0] === '--help' && args.length === 1) console.log(help());
   else if (args.length > 1) throw new UsageError();
-  else console.log(propose(args[0] ?? currentSession()?.id, readInput()));
+  else console.log(propose(args[0] ?? currentSession()?.id, readInput));
 } catch (e) {
   const f = failure(e, 'propose', USAGE, 'Not proposed');
   console.error(f.message);

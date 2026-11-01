@@ -12,7 +12,7 @@ The repo is also a Claude Code plugin with two skills and the hooks:
 
 ```
 claude plugin marketplace add osabased/obsidian-vault
-claude plugin install obsidian-vault@obsidian-vault --config vault=<path to your vault checkout>
+claude plugin install obsidian-vault@obsidian-vault --config "vault=<path to your vault checkout>"
 ```
 
 The plugin has one option, `vault`, the folder of your vault checkout. To set or change it later, run `claude plugin configure obsidian-vault` to see the option, or save it with `echo '{"vault":"<path>"}' | claude plugin configure obsidian-vault --values-stdin`. An unset option, a relative path, a vault with no `.live/tools/` or a hook that cannot load prints `vault <hook> failed: <why>` as a hook error, and the call goes ahead.

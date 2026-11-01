@@ -4,7 +4,7 @@ import {
   config, vaultPath, statePath, stateDir, readJsonSafe, writeJson, appendJsonl, safeId, shortHash, logError, guarded, hookErrors, errorsLog, domainsFor, sessionReach, toPosix, inVaultFolder, isVaultOnly,
 } from './vault.mjs';
 import { noteTimes } from './cache.mjs';
-import { currentSession, shortName } from './agents.mjs';
+import { sessionIds, shortName } from './agents.mjs';
 
 const DAY = 86400e3;
 
@@ -12,8 +12,8 @@ export const registry = id => statePath('sessions', `${id}.json`);
 
 // Scripts take the session id as an argument, so one session can't write under another's.
 export function ownEntry(sid) {
-  const own = currentSession()?.id;
-  if (own && own !== sid) return { entry: null, notOwn: `${sid} isn't this session, which is ${own}.` };
+  const own = sessionIds();
+  if (own.length && !own.includes(String(sid))) return { entry: null, notOwn: `${sid} isn't this session, which is ${own.join(' or ')}.` };
   return { entry: readJsonSafe(registry(safeId(sid))), notOwn: null };
 }
 

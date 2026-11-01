@@ -103,6 +103,6 @@ export const registration = root => ({
   where: 'Run these in a shell to install the plugin with this vault.',
   text: [
     'claude plugin marketplace add osabased/obsidian-vault',
-    `claude plugin install obsidian-vault@obsidian-vault --config vault=${root}`,
+    `claude plugin install obsidian-vault@obsidian-vault --config "vault=${root}"`,
   ].join('\n'),
 });

@@ -42,7 +42,7 @@ export function config() {
     const mine = local();
     const domains = Object.fromEntries(Object.entries(c.domains ?? {}).map(([d, x]) => [d, { ...x, paths: strings(mine?.[d]?.paths) }]));
     const extractors = Array.isArray(c.extractors) ? c.extractors : [];
-    // The agents whose tool names lint checks and whose session variable scripts read, each a folder in tools/adapters/.
+    // The agents whose tool names lint checks, in the order a script looks for its own session, each a folder in tools/adapters/.
     const agents = Array.isArray(c.agents) ? c.agents : ['claude-code'];
     loaded = { domains, extractors, agents, ...Object.fromEntries(Object.entries(DEFAULTS).map(([k, d]) => [k, { ...d, ...c[k] }])) };
   }

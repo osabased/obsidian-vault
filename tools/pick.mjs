@@ -212,8 +212,10 @@ const KINDS = {
 };
 const ALL_FIELDS = new Set(Object.values(KINDS).flatMap(k => k.fields));
 
-function record(sid, p) {
+// The input is read after the session is checked, so a script run from the wrong place says that first.
+function record(sid, input) {
   const session = sessionOf(sid);
+  const p = input();
   const kinds = Object.keys(KINDS).filter(k => p[k] !== undefined);
   if (kinds.length !== 1) refuse('give one of: a pick with question and options, confirms, or comment.');
   const kind = KINDS[kinds[0]];
@@ -291,7 +293,7 @@ try {
   else if (args[0] === 'show' && args.length >= 3 && args.length <= 5) {
     refused = 'Not shown';
     console.log(show(args[1], args[2], args[3], args[4]));
-  } else if (args.length <= 1 && !['show', '--help'].includes(args[0])) console.log(record(args[0] ?? currentSession()?.id, readInput()));
+  } else if (args.length <= 1 && !['show', '--help'].includes(args[0])) console.log(record(args[0] ?? currentSession()?.id, readInput));
   else throw new UsageError();
 } catch (e) {
   const f = failure(e, 'pick', USAGE, refused);
