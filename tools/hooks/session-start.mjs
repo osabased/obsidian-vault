@@ -1,7 +1,7 @@
 import { runHook, sessionReach, inVaultFolder, readableDomains, vaultPath, toolsPath, toPosix, guarded, config, plural, clock } from '../lib/vault.mjs';
 import { alwaysContext, alwaysIn, fitContext, indexNote, scopeTopics, loadNotes, settledNotes, liveRules, clip, undelivered, knownDomain } from '../lib/rules.mjs';
 import { build } from '../lib/build.mjs';
-import { changedSinceBuild, markBuilt } from '../lib/cache.mjs';
+import { changedSinceBuild, noteTimes } from '../lib/cache.mjs';
 import { touchSession, clearMarkers, markAlways, markShown, tidy, errorsSinceLint, sinceLint } from '../lib/sessions.mjs';
 
 function proposeNote(sid) {
@@ -52,8 +52,9 @@ function undeliveredNote(scope, vaultFolder, notes) {
 }
 
 // A vault nobody changes has nothing new to lint, however long it sits.
-function lintNote(notes) {
-  const { days, changed } = sinceLint(notes);
+// The notes walked were stat'ed already, so only the other folders are.
+function lintNote(notes, walked) {
+  const { days, changed } = sinceLint([...notes.map(n => n.saved), ...(walked ? noteTimes(walked) : [])]);
   const { remindAfterDays, remindAfterNotes } = config().lint;
   if (!changed || (days !== null && days < remindAfterDays && changed < remindAfterNotes)) return '';
   const ran = days === null ? `hasn't run yet, and the vault has ${plural(changed, 'note')}`
@@ -74,11 +75,10 @@ runHook('session-start', input => {
   const walked = vaultFolder ? null : readable;
   const notes = loadNotes(walked);
   // Notes edited in Obsidian go live without a build, and the always rules that don't fit point to active.md.
+  // A build another tool is running already writes what changed, and one that waits longer would spend the hook's time.
   guarded('build', () => {
     if (!changedSinceBuild(notes, walked)) return;
-    const all = loadNotes();
-    build({ notes: all });
-    markBuilt(all);
+    try { build({ waitMs: 2000 }); } catch (e) { if (!/^build\.lock is held/.test(e?.message)) throw e; }
   });
   const ready = settledNotes(notes);
   const rules = liveRules(ready);
@@ -108,7 +108,7 @@ runHook('session-start', input => {
     propose,
     pick,
     { noun: 'topic', items: topics, render: indexNote },
-    again ? '' : guarded('lint reminder', () => lintNote(notes)),
+    again ? '' : guarded('lint reminder', () => lintNote(notes, walked)),
   ]);
   return context ? { hookSpecificOutput: { hookEventName: 'SessionStart', additionalContext: context } } : null;
 });

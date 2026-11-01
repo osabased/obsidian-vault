@@ -257,13 +257,17 @@ function checkNote(n) {
   return errs;
 }
 
-// The cache keeps what parse() read, so a change to frontmatter.mjs makes it read every note again.
-let parserStamp;
-const stamp = () => (parserStamp ??= shortHash(fs.readFileSync(path.join(import.meta.dirname, 'frontmatter.mjs'), 'utf8')));
 const parsed = (rel, text) => {
   const { data, body, ok } = parse(text);
   return { data, body, ok };
 };
+// The cache keeps what parsed() read, in cache.mjs's shape, so a change to either, or to frontmatter.mjs, makes it read
+// every note again.
+let parserStamp;
+const stamp = () => (parserStamp ??= shortHash([
+  ...['frontmatter.mjs', 'cache.mjs'].map(f => fs.readFileSync(path.join(import.meta.dirname, f), 'utf8')),
+  String(parsed),
+].join('\0')));
 
 // The notes under wiki/<domain>/ for each domain given, or every note in wiki/.
 export function loadNotes(domains) {
