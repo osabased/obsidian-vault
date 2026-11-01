@@ -56,23 +56,23 @@ basis: stated
 topic: code
 always: false
 applies_to:
-  - 'src/client/UI/**/*.luau'
-  - '!src/client/UI/**/*.spec.luau'
+  - 'src/client/UI/**/*.ts'
+  - '!src/client/UI/**/*.test.ts'
 triggers: []
 keywords:
-  - strict
+  - any
 created: 2026-10-19
 updated: 2026-10-19
 ---
 
-**Do:** Start every UI script with `--!strict`.
-**Not:** Leave scripts in nonstrict mode.
-**Because:** Type errors should show up while editing, not in play tests.
+**Do:** Type UI props and handlers with named types.
+**Not:** Annotate them as `any`.
+**Because:** An `any` hides type errors that would show up while editing.
 
 ## Examples
 
 ## Evidence
-- 2026-10-19 · stated · session 1a2b3c4d · "I want the agent to always write scripts in !strict" (a-1a2b3c4d)
+- 2026-10-19 · stated · session 1a2b3c4d · "never let any into the UI code" (a-1a2b3c4d)
 ```
 
 - `kind`: `taste` (the default) or `knowledge`, a fact about an API, version or tool that training gets wrong or doesn't know. Both kinds take the same scope fields: `always`, `applies_to`, `triggers`, `keywords` and `tools`.
@@ -152,10 +152,10 @@ What the source shows, by topic, in the agent's words.
 - Cite each claim a source backs with a footnote that names the source: a file under `raw/` or a URL, then its date when it has one. A source page's own source needs none. `index.md` counts the sources a page's footnotes name and the source pages it links. Lint warns on a footnote that names neither, a citation with no footnote, and a footnote nothing cites.
 
   ```markdown
-  The tab bar packs six tabs into the top strip.[^1] A UIListLayout spaces them with its Padding.[^2]
+  The tab bar packs six tabs into the top strip.[^1] A flex container spaces them with its `gap`.[^2]
 
   [^1]: raw/refs/shop-screens.png · dated 2026-09-30
-  [^2]: https://create.roblox.com/docs/reference/engine/classes/UIListLayout
+  [^2]: https://developer.mozilla.org/en-US/docs/Web/CSS/gap
   ```
 
 - A footnote may end in a locator: `#page=3` for a PDF, `#t=00:12:31` for audio or video, `#L10-L20` or `#L10` for lines of a text file. Lint warns on a line range past the file's end, and on a page or time the source's derived text has no anchor for.
