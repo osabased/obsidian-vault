@@ -1,6 +1,6 @@
 # All-rounder vault: design draft
 
-Status: draft, 2026-11-01. Phase 0 (checks), phase 1 (format) and phase 2 (delivery) are built and merged into main. Phase 3 (neutral fixtures) is built and reviewed on `phase-3-integration`, to land on `phase-3-delivery`.
+Status: draft, 2026-11-01. Phase 0 (checks), phase 1 (format) and phase 2 (delivery) are built and merged into main. Phase 3 (neutral fixtures) is built, reviewed and landed on `phase-3-delivery`, not yet merged into main.
 
 Scope: structure, design and architecture only. This design adds no knowledge to the vault. It names no domain, platform, package ecosystem or site as built in. Where it needs an example, it uses a placeholder.
 
