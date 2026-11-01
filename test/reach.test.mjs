@@ -21,12 +21,16 @@ function folder(t, files = []) {
 }
 
 const context = out => out?.hookSpecificOutput?.additionalContext ?? '';
-const writeLocal = (v, domains) => v.write('vault.local.json', `${JSON.stringify({ domains }, null, 2)}\n`);
+// Merges over what makeVault wrote, so a preset's paths stay.
+const writeLocal = (v, domains) => {
+  const local = JSON.parse(v.read('vault.local.json'));
+  v.write('vault.local.json', `${JSON.stringify({ ...local, domains: { ...local.domains, ...domains } }, null, 2)}\n`);
+};
 const reachFound = async v => (await v.import('lib/lint.mjs')).lint()
   .filter(f => /^vault\.(?:config|local)\.json$/.test(f.file)).map(f => [f.level, f.file, f.msg]);
 
 test('6.1a: a session in an unlisted folder holding a domain\'s marker gets its rules and can propose', t => {
-  const v = makeVault(t, { presets: ['glim'], domains: { glim: { topics: ['layout', 'code', 'naming'] } } });
+  const v = makeVault(t, { presets: ['glim'] });
   const dir = folder(t, ['glim.project', 'src/x.zq']);
   const sid = sessionId();
   const start = context(v.startSession(sid, { cwd: dir }));
@@ -44,13 +48,17 @@ test('6.1a: a session in an unlisted folder holding a domain\'s marker gets its 
 test('6.1a: in a monorepo each package\'s edits get its own domain, and a session at the root hears both', t => {
   const v = makeVault(t, { presets: ['glim', 'almanac'] });
   v.write('wiki/almanac/rules/always-a.md', ruleNote({ domain: 'almanac', topic: 'ledger', always: true, doLine: 'Almanac always.' }));
+  v.write('wiki/almanac/rules/shimmer-a.md', ruleNote({ domain: 'almanac', topic: 'ledger', keywords: ['shimmer'], doLine: 'Log each shimmer in the ledger.' }));
   const root = folder(t, ['packages/a/glim.project', 'packages/b/almanac.project']);
   const sid = sessionId();
   const start = context(v.startSession(sid, { cwd: root }));
   assert.match(start, /glim\/always-rule/);
   assert.match(start, /almanac\/always-a/);
-  const said = context(prompt(v, sid, 'make the shimmer call openLedger', { cwd: root }));
-  assert.match(said, /glim\/keyword-rule/);
+  // One word reaches both domains' rules on it.
+  const shimmer = context(prompt(v, sid, 'the shimmer', { cwd: root }));
+  assert.match(shimmer, /glim\/keyword-rule: Do: Fade a shimmer in over two frames\./);
+  assert.match(shimmer, /almanac\/shimmer-a: Do: Log each shimmer in the ledger\./);
+  const said = context(prompt(v, sid, 'make it call openLedger', { cwd: root }));
   assert.match(said, /almanac\/ledger-v2/);
   const a = denied(edit(v, sid, '', { abs: path.join(root, 'packages', 'a', 'src', 'x.zq'), cwd: root })) ?? '';
   assert.match(a, /glim\/zq-trigger/);
@@ -95,11 +103,10 @@ test('6.1a: an everywhere domain\'s pages and keyword rules reach any folder, an
   assert.doesNotMatch(denied(out), /commons\/gate/);
 });
 
-test('lint reports a missing path as an error and a domain that reaches no project as a warning', async t => {
-  const v = makeVault(t, { domains: { alpha: { title: 'Alpha', topics: [] }, beta: { title: 'Beta', topics: [] } } });
-  writeLocal(v, { glim: { paths: [v.project.replace(/\\/g, '/')] }, beta: { paths: ['C:/nowhere/beta'] } });
+test('6.1a: lint reports a missing path as an error and a domain that reaches no project as a warning', async t => {
+  const v = makeVault(t, { presets: ['glim'], domains: { alpha: { title: 'Alpha', topics: [] } }, local: { glim: { paths: ['C:/nowhere/glim'] } } });
   assert.deepEqual(await reachFound(v), [
-    ['error', 'vault.local.json', "beta's path C:/nowhere/beta doesn't exist on this machine. Fix it or remove it"],
+    ['error', 'vault.local.json', "glim's path C:/nowhere/glim doesn't exist on this machine. Fix it or remove it"],
     ['warn', 'vault.config.json', "alpha reaches no project on this machine. Add its folders to vault.local.json as paths, give it markers, or set vaultOnly: true if it holds only pages"],
   ]);
 });
@@ -137,6 +144,8 @@ test('lint checks the shape of markers, everywhere, vaultOnly and vault.local.js
 
 test('a missing vault.local.json gives a paths-only domain a warning, not an error', async t => {
   const v = makeVault(t, { domains: { glim: { markers: [] } } });
+  writeLocal(v, { glim: { paths: [v.project.replace(/\\/g, '/')] } });
+  assert.deepEqual(await reachFound(v), []);
   fs.rmSync(v.at('vault.local.json'));
   assert.deepEqual(await reachFound(v), [
     ['warn', 'vault.config.json', "glim reaches no project on this machine. Add its folders to vault.local.json as paths, give it markers, or set vaultOnly: true if it holds only pages"],
