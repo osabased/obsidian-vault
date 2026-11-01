@@ -10,13 +10,14 @@ import {
 } from './lib/rules.mjs';
 import { build } from './lib/build.mjs';
 import { entryKey } from './lib/glob.mjs';
-import { typedMessages, saidIn, normText, quoteTexts, userPageTexts } from './lib/quotes.mjs';
+import { saidIn, normText, quoteTexts, userPageTexts } from './lib/quotes.mjs';
 import { ownEntry, marked, markMany, wasShown, carryMarkers, proposeDomains } from './lib/sessions.mjs';
 import { setField, yamlQuote, yamlScalar } from './lib/frontmatter.mjs';
 import { subjectRows, laterRows, endedBy, otherLabels } from './lib/picks.mjs';
 import { UsageError, readInput, refuse, failure, line } from './lib/input.mjs';
+import { currentSession, typedFor } from './lib/agents.mjs';
 
-const RUN = 'usage: node tools/propose.mjs <session-id> < rule.json';
+const RUN = 'usage: node tools/propose.mjs [session-id] < rule.json';
 const USAGE = `${RUN}\n       node tools/propose.mjs --help lists the fields of rule.json`;
 
 const help = () => [
@@ -78,11 +79,14 @@ function list(p, name) {
   return v.map(x => x.trim());
 }
 
+const PASS = "Pass the session id from the taste vault's note at session start, or run this from the agent's own shell, which sets its session id.";
+
 function sessionOf(sid) {
+  if (!sid) refuse(`there's no session id to propose for. ${PASS}`);
   const { entry, notOwn } = ownEntry(sid);
   if (notOwn) refuse(notOwn);
   const domains = proposeDomains(entry);
-  if (!domains.length) refuse(`the taste vault has no session ${sid} from a domain's project folder or the vault folder. Pass the session id from the taste vault's note at session start, or $CLAUDE_CODE_SESSION_ID in the vault folder.`);
+  if (!domains.length) refuse(`the taste vault has no session ${sid} from a domain's project folder or the vault folder. ${PASS}`);
   return { ...entry, domains };
 }
 
@@ -148,7 +152,7 @@ function checkQuote(session, e) {
     return;
   }
   if (e.pick || !['stated', 'correction'].includes(e.kind)) return;
-  const typed = session.transcript ? typedMessages(session.transcript) : null;
+  const typed = typedFor(session);
   if (!typed) {
     refuse("the taste vault has no transcript for this session, so it can't check the quote is the user's words. Give your own reading with basis reading instead.");
   }
@@ -417,11 +421,11 @@ function propose(sid, p) {
   return out;
 }
 
-const [sid, ...rest] = process.argv.slice(2);
+const args = process.argv.slice(2);
 try {
-  if (sid === '--help' && !rest.length) console.log(help());
-  else if (!sid || rest.length) throw new UsageError();
-  else console.log(propose(sid, readInput()));
+  if (args[0] === '--help' && args.length === 1) console.log(help());
+  else if (args.length > 1) throw new UsageError();
+  else console.log(propose(args[0] ?? currentSession()?.id, readInput()));
 } catch (e) {
   const f = failure(e, 'propose', USAGE, 'Not proposed');
   console.error(f.message);

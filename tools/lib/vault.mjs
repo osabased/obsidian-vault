@@ -41,7 +41,9 @@ export function config() {
     const mine = local();
     const domains = Object.fromEntries(Object.entries(c.domains ?? {}).map(([d, x]) => [d, { ...x, paths: strings(mine?.[d]?.paths) }]));
     const extractors = Array.isArray(c.extractors) ? c.extractors : [];
-    loaded = { domains, extractors, ...Object.fromEntries(Object.entries(DEFAULTS).map(([k, d]) => [k, { ...d, ...c[k] }])) };
+    // The agents whose tool names lint checks and whose session variable scripts read, each a folder in tools/adapters/.
+    const agents = Array.isArray(c.agents) ? c.agents : ['claude-code'];
+    loaded = { domains, extractors, agents, ...Object.fromEntries(Object.entries(DEFAULTS).map(([k, d]) => [k, { ...d, ...c[k] }])) };
   }
   return loaded;
 }
@@ -412,20 +414,17 @@ export function hookErrors(file = errorsLog(), from = 0) {
 
 export const cwdOf = input => input.cwd || process.cwd();
 
-export const FILE_TOOLS = ['Edit', 'Write', 'MultiEdit', 'NotebookEdit'];
-// The PreToolUse matcher the edit hook ships with. It names no user's tools: a tool in editTools is an MCP tool. Claude
-// Code tests a matcher with characters other than letters, digits, _ and | as an unanchored regex, so it anchors itself.
-export const EDIT_HOOK_MATCHER = '^(?:Edit|Write|MultiEdit|NotebookEdit|AskUserQuestion|mcp__.*)$';
-const HOOKED = new RegExp(EDIT_HOOK_MATCHER);
-export const hookedTool = name => HOOKED.test(name);
-export const toolFile = (name, input) => (name === 'NotebookEdit' ? input.notebook_path : input.file_path);
-
-// A failed hook exits 1 with one line, so the user sees a hook error and the call goes ahead; exit 2 would block it.
-export async function runHook(name, fn) {
-  if (process.env.CLAUDE_CODE_SAFE_MODE === '1') return;
+// A failed hook exits 1 with one line, so the user sees a hook error and the call goes ahead; exit 2 would block it. The
+// adapter turns the agent's input into events, one per thing the call changes, and the handler's results into the
+// agent's output.
+export async function runHook(name, agent, handler) {
+  if (agent.disabled(process.env)) return;
   armDeadline();
   try {
-    const out = await fn(JSON.parse(fs.readFileSync(0, 'utf8').replace(/^\uFEFF/, '')));
+    const input = JSON.parse(fs.readFileSync(0, 'utf8').replace(/^\uFEFF/, ''));
+    const results = [];
+    for (const event of agent.events(name, input)) results.push(await handler(event, agent));
+    const out = agent.output(name, results);
     if (out) process.stdout.write(JSON.stringify(out));
   } catch (e) {
     logError(name, e);

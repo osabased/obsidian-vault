@@ -10,9 +10,10 @@ import { IMAGE, hashPath, derivedText } from './lib/sources.mjs';
 import { subjectRows, laterRows, liveRows, endedBy, newestFirst, entry, projectName, sameProject } from './lib/picks.mjs';
 import { UsageError, readInput, refuse, failure, line } from './lib/input.mjs';
 import { ownEntry, markShown, sessionRoots } from './lib/sessions.mjs';
-import { typedMessages, saidIn } from './lib/quotes.mjs';
+import { saidIn } from './lib/quotes.mjs';
+import { currentSession, typedFor } from './lib/agents.mjs';
 
-const RUN = 'usage: node tools/pick.mjs <session-id> < pick.json';
+const RUN = 'usage: node tools/pick.mjs [session-id] < pick.json';
 const SHOW = '       node tools/pick.mjs show <session-id> <subject> [domain [project]]';
 const USAGE = `${RUN}\n${SHOW}\n       node tools/pick.mjs --help lists the fields of pick.json`;
 
@@ -56,6 +57,7 @@ const help = () => [
 ].join('\n');
 
 function sessionOf(sid) {
+  if (!sid) refuse("there's no session id to record for. Pass the session id from the taste vault's note at session start, or run this from the agent's own shell, which sets its session id.");
   const { entry: entryRow, notOwn } = ownEntry(sid);
   if (notOwn) refuse(notOwn);
   const hits = [...sessionRoots(entryRow)].sort((a, b) => cmp(a.domain, b.domain) || cmp(a.root, b.root));
@@ -97,7 +99,7 @@ const NOT_TYPED = {
   comment: "the comment isn't in anything the user typed in this session. Record their exact words, with … where you leave some out.",
 };
 function checkSaid(s, text, what) {
-  const typed = s.transcript ? typedMessages(s.transcript) : null;
+  const typed = typedFor(s);
   if (!typed) refuse("the taste vault has no transcript for this session, so it can't check these are the user's words.");
   if (!saidIn(text, typed)) refuse(NOT_TYPED[what]);
 }
@@ -289,7 +291,7 @@ try {
   else if (args[0] === 'show' && args.length >= 3 && args.length <= 5) {
     refused = 'Not shown';
     console.log(show(args[1], args[2], args[3], args[4]));
-  } else if (args.length === 1 && !['show', '--help'].includes(args[0])) console.log(record(args[0], readInput()));
+  } else if (args.length <= 1 && !['show', '--help'].includes(args[0])) console.log(record(args[0] ?? currentSession()?.id, readInput()));
   else throw new UsageError();
 } catch (e) {
   const f = failure(e, 'pick', USAGE, refused);

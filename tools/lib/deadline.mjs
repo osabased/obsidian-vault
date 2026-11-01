@@ -1,4 +1,4 @@
-// Claude Code kills a hook at its timeout without a word, and hook input doesn't carry the timeout, so the hook command
+// The agent kills a hook at its timeout without a word, and hook input doesn't carry the timeout, so the hook command
 // passes it as VAULT_HOOK_TIMEOUT. The hook stops a margin before it, while it still has time to say why. A JS timer
 // can't fire inside a synchronous loop, so the loops that walk the notes call checkDeadline. Scripts and lint have no
 // timeout, so only runHook arms it.

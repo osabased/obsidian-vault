@@ -71,11 +71,11 @@ export function makeVault(t, { config = {}, domain = 'glim', topics = ['layout',
     },
     // A failed hook exits 1 with a line on stderr and the call goes ahead, so a hook that crashed would read as one that let
     // the call through.
-    hook(name, input, { timeout } = {}) {
+    hook(name, input, { agent = 'claude-code', timeout } = {}) {
       const log = at('.state', 'errors.log');
       const size = () => (fs.existsSync(log) ? fs.statSync(log).size : 0);
       const before = size();
-      const r = v.run(`hooks/${name}.mjs`, [], { input, cwd: input.cwd ?? project, timeout });
+      const r = v.run(`adapters/${agent}/hooks/${name}.mjs`, [], { input, cwd: input.cwd ?? project, timeout });
       if (r.error?.code === 'ETIMEDOUT') throw new Error(`the ${name} hook was still running at the ${timeout} ms deadline`);
       if (r.error) throw r.error;
       if (r.code !== 0) throw new Error(`the ${name} hook exited ${r.code}: ${r.stderr}`);

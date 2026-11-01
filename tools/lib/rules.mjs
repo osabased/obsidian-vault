@@ -3,7 +3,8 @@ import path from 'node:path';
 import v8 from 'node:v8';
 import { parse, yamlQuote } from './frontmatter.mjs';
 import { validGlob, overlapping, entryParts, globListProblems } from './glob.mjs';
-import { config, vaultPath, shortHash, toPosix, today, inside, plural, isVaultOnly, memo, readJson, statePath, logError, FILE_TOOLS, EDIT_HOOK_MATCHER, hookedTool } from './vault.mjs';
+import { config, vaultPath, shortHash, toPosix, today, inside, plural, isVaultOnly, memo, readJson, statePath, logError } from './vault.mjs';
+import { editsFile, sentToHook, hookMatchers } from './agents.mjs';
 import { cachedNotes, cleanFromGit, noteStats } from './cache.mjs';
 import { SEMVER, SCHEMES, fitOf, projectVersions } from './versions.mjs';
 import { checkDeadline } from './deadline.mjs';
@@ -202,8 +203,8 @@ function listErrors(n) {
   ];
 }
 
-const toolError = x => (FILE_TOOLS.includes(x) ? [`tools names ${x}, which edits a file; give the rule applies_to instead`]
-  : hookedTool(x) ? [] : [`tools names ${x}, which the edit hook's matcher, ${EDIT_HOOK_MATCHER}, never sends to the hook, so it would never bring the rule up`]);
+const toolError = x => (editsFile(x) ? [`tools names ${x}, which edits a file; give the rule applies_to instead`]
+  : sentToHook(x) ? [] : [`tools names ${x}, which the edit hook's matcher, ${hookMatchers()}, never sends to the hook, so it would never bring the rule up`]);
 
 export const hasChannel = n => n.always === true || ['applies_to', 'keywords', 'tools'].some(f => n[f]?.length);
 
@@ -493,8 +494,8 @@ export const ruleLine = (k, r) => `- ${k}: ${clip(r.text, maxChars(r.kind))}${la
 // For a rule a refusal has no room to show in full: enough to tell whether to open the note.
 export const rulePointer = (k, r) => `- ${k}: ${clip(r.text, 70)}${labelled(r)} ${toPosix(vaultPath(...r.rel.split('/')))}`;
 
-// Fits a hook's output to delivery.maxContextChars, since Claude Code replaces anything over 10,000 with a file path and
-// a preview. Sections come in rank order; a plain string is one item. A section is { noun, items, head?, render? }: its
+// Fits a hook's output to delivery.maxContextChars, since an agent may replace a longer one with a file path and a
+// preview. Sections come in rank order; a plain string is one item. A section is { noun, items, head?, render? }: its
 // text is `head` and the kept items on lines, or render(kept). Items are kept from the top while they fit; the first
 // section that loses one ends the fill, and one line says what was left out and that index.md lists the rest. `tail` is
 // kept whatever the budget. `gap` sets the sections apart, a blank line by default. Returns the text and, for each

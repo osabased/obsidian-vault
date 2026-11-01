@@ -291,6 +291,21 @@ test("lintConfig refuses an editTools entry the edit hook never sees or reads it
   ]);
 });
 
+test('lintConfig refuses an agents entry with no adapter', async t => {
+  const lintOf = async config => {
+    const v = makeVault(t, { config });
+    const found = [];
+    (await v.import('lib/lint.mjs')).lintConfig((level, file, msg) => found.push(`${level} ${file} ${msg}`));
+    return found;
+  };
+  assert.deepEqual(await lintOf({ agents: ['claude-code'] }), []);
+  assert.deepEqual(await lintOf({ agents: 'claude-code' }), ['error vault.config.json agents must be a list of adapter names']);
+  assert.deepEqual(await lintOf({ agents: ['nope', '../x'] }), [
+    "error vault.config.json agents names nope, and tools/adapters/nope/adapter.mjs doesn't exist",
+    "error vault.config.json agents names ../x, which isn't an adapter name: lowercase letters, digits, - or _",
+  ]);
+});
+
 test('setField writes a value that reads back exactly, replacing only the old value and keeping a trailing comment', () => {
   const cases = [
     ["source: 'raw\\refs\\Designer''s shop.png'", "raw/refs/Designer's shop.png", "source: 'raw/refs/Designer''s shop.png'"],

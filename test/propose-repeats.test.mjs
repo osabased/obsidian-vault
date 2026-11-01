@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import { makeVault, ruleNote, userTurn, sessionId, denied, editFile as edit, unrelatedRules, proposeAtOnce } from './fixture.mjs';
 import { setField, parse } from '../tools/lib/frontmatter.mjs';
+import { sessionVar } from '../tools/adapters/claude-code/adapter.mjs';
 
 function setup(t, { quote } = {}) {
   const v = makeVault(t);
@@ -258,6 +259,16 @@ test('a session that never started is refused', t => {
   const r = v.propose(sessionId(), proposal());
   assert.equal(r.code, 1);
   assert.match(r.stderr, /has no session/);
+});
+
+test("with no session id given, propose takes the agent's own session, and refuses when there is none", t => {
+  const { v, sid } = setup(t);
+  const none = v.run('propose.mjs', [], { input: proposal() });
+  assert.equal(none.code, 1);
+  assert.match(none.stderr, /there's no session id to propose for\. Pass the session id/);
+  const r = v.run('propose.mjs', [], { input: proposal(), env: { [sessionVar]: sid } });
+  assert.equal(r.code, 0, r.stderr);
+  assert.match(r.stdout, /^Wrote wiki\/glim\/rules\/new-rule\.md\./);
 });
 
 test('setField changes a field in text that starts with a byte-order mark', () => {
