@@ -1,6 +1,6 @@
 import fs from 'node:fs';
 import { readJsonl, vaultPath } from './vault.mjs';
-import { escapeRegExp } from './rules.mjs';
+import { escapeRegExp, isUserPage, parseNote, userWords } from './rules.mjs';
 
 // Claude Code logs tool output, skill text, compaction summaries, injected context and prompts the app or a script
 // sent as user entries too, so only the text the user typed counts as their words: their prompts, queued or not, and
@@ -95,4 +95,14 @@ export function sourceTexts(rel) {
   if (text.includes('\0')) return null;
   if (/\.html?$/i.test(rel)) return [htmlText(text)];
   return /\.(?:md|markdown)$/i.test(rel) ? [text, markdownText(text)] : [text];
+}
+
+// A page of the user's is quoted by paragraph, as a message is, in the words it holds or as they read. Null when the
+// file can't be read or isn't an author: user page.
+export function userPageTexts(rel) {
+  let text;
+  try { text = fs.readFileSync(vaultPath(...rel.split('/')), 'utf8'); } catch { return null; }
+  if (!isUserPage(parseNote(text, rel))) return null;
+  const words = userWords(text);
+  return [words, markdownText(words)].flatMap(t => t.split(/\n[ \t]*\n/));
 }

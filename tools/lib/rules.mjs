@@ -465,12 +465,42 @@ export const linksUnder = (n, title) => targets(sections(n).slice(1).find(s => h
 const sectionNamed = (n, title) => sections(n).slice(1).find(s => heading(s).toLowerCase() === title.toLowerCase()) ?? '';
 export const hasSection = (n, title) => sectionNamed(n, title) !== '';
 
+export const isUserPage = n => n.type === 'page' && n.author === 'user';
+
+// Where `## Agent notes` starts and ends in a note's lines: the heading's index, and the index of the next `## `
+// heading or the end. A heading inside a code fence doesn't count.
+export function agentNotesSpan(lines) {
+  let fence = null;
+  let at = -1;
+  for (let i = 0; i < lines.length; i++) {
+    const f = lines[i].match(/^ {0,3}(`{3,}|~{3,})/)?.[1];
+    if (fence) {
+      if (f && f[0] === fence[0] && f.length >= fence.length) fence = null;
+    } else if (f) {
+      fence = f;
+    } else if (at < 0) {
+      if (/^## agent notes\s*$/i.test(lines[i])) at = i;
+    } else if (lines[i].startsWith('## ')) {
+      return { at, end: i };
+    }
+  }
+  return at < 0 ? null : { at, end: lines.length };
+}
+
+// What the user wrote on a page of their own: the body without the agent's notes.
+export function userWords(text) {
+  const lines = parse(text).body.split('\n');
+  const span = agentNotesSpan(lines);
+  return (span ? [...lines.slice(0, span.at), ...lines.slice(span.end)] : lines).join('\n');
+}
+
 // An Evidence line is <day> · <kind> · session <id> · <what backs it>, the last part as propose.mjs's evidenceLine
-// writes it for the kind. A line in another form comes back without a kind.
+// writes it for the kind. A stated line quoting a page of the user's has that page's path where the session goes.
+// A line in another form comes back without a kind.
 const EVIDENCE_KINDS = ['stated', 'correction', 'source', 'failure', 'choice', "agent's reading"];
 const evidenceLines = n => [...sectionNamed(n, 'evidence').matchAll(/^- .*$/gm)].map(([line]) => {
-  const m = line.match(/^- [^·]*· ([^·]*)· session ([^\s·]+)(?: · (.*))?/);
-  return { line: line.trim(), day: line.match(/^- (\d{4}-\d\d-\d\d)\b/)?.[1], kind: m?.[1].trim(), session: m?.[2], cite: m?.[3] ?? '' };
+  const m = line.match(/^- [^·]*· ([^·]*)· (?:session ([^\s·]+)|(wiki\/.+?\.md)(?= · |\s*$))(?: · (.*))?/);
+  return { line: line.trim(), day: line.match(/^- (\d{4}-\d\d-\d\d)\b/)?.[1], kind: m?.[1].trim(), session: m?.[2], note: m?.[3], cite: m?.[4] ?? '' };
 });
 
 // The session prefixes the Evidence lines give, first seen first.
@@ -508,13 +538,13 @@ export function rankPair(a, b) {
 // The quotes of the user's words, of sources and of recorded rows, with what each is checked against. A line from a
 // row, whose id comes before the proposal's, quotes the row rather than the session. A line lint can't read comes back
 // as the line alone.
-export const evidenceQuotes = n => evidenceLines(n).flatMap(({ line, kind, session, cite }) => {
-  if (!EVIDENCE_KINDS.includes(kind)) return [{ line }];
+export const evidenceQuotes = n => evidenceLines(n).flatMap(({ line, kind, session, note, cite }) => {
+  if (!EVIDENCE_KINDS.includes(kind) || (note && kind !== 'stated')) return [{ line }];
   if (!['stated', 'correction', 'source'].includes(kind)) return [];
   const m = cite.match(/^(?:(.+?) · dated [^·]* · )?["“](.*)["”](?: \(([^()]*)\))?[ \t]*$/);
   if (!m || (kind === 'source') !== (m[1] !== undefined)) return [{ line }];
   const [, source, quote, ids = ''] = m;
-  if (!ids.includes(';')) return [{ session, source, quote }];
+  if (!ids.includes(';')) return [{ session, note, source, quote }];
   const pick = kind === 'stated' && ids.match(/^(\S+); proposed as \S+$/)?.[1];
   return pick ? [{ pick, quote }] : [{ line }];
 });

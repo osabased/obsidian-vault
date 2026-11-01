@@ -1,0 +1,199 @@
+import { test } from 'node:test';
+import assert from 'node:assert/strict';
+import { makeVault, pageNote, denied, lintFound } from './fixture.mjs';
+
+const SID = '9f8e7d6c-0000-4000-8000-000000000003';
+const REL = 'wiki/demo/concepts/journal.md';
+const AGENT_REL = 'wiki/demo/concepts/agent-journal.md';
+const SEEN = '- the shop screen packs six tabs into one strip';
+const BODY = ['Cards need room to breathe.', 'Tabs should never feel cramped.', '', '## Agent notes', SEEN];
+const mine = (body = BODY, extra = ['author: user']) => pageNote({ kind: 'concept', topic: "''", summary: "''", extra, body });
+
+function vault(t, { text = mine(), rel = REL } = {}) {
+  const v = makeVault(t);
+  v.write(rel, text);
+  return v;
+}
+
+const edit = (v, tool, toolInput, rel = REL) => v.edit(SID, tool, { file_path: v.at(...rel.split('/')), ...toolInput });
+const change = (old_string, new_string) => ({ old_string, new_string });
+
+test("an Edit that changes the body of a user's page is denied, with no retry", t => {
+  const v = vault(t);
+  const out = edit(v, 'Edit', change('Tabs should never feel cramped.', 'Tabs may feel cramped.'));
+  assert.match(denied(out) ?? '', /wiki\/demo\/concepts\/journal\.md is the user's own writing[\s\S]*new lines under ## Agent notes/);
+  assert.doesNotMatch(denied(out), /retry/);
+  assert.ok(denied(edit(v, 'Edit', change('Tabs should never feel cramped.', 'Tabs may feel cramped.'))));
+});
+
+test('an Edit that adds a line under ## Agent notes passes', t => {
+  const v = vault(t);
+  assert.equal(denied(edit(v, 'Edit', change(SEEN, `${SEEN}\n- the grid is 12px`))), null);
+  assert.equal(denied(edit(v, 'MultiEdit', { edits: [change(SEEN, `${SEEN}\n- first`), change('- first', '- first\n- second')] })), null);
+});
+
+test('a Write that keeps the page and adds lines under ## Agent notes passes', t => {
+  const v = vault(t);
+  assert.equal(denied(edit(v, 'Write', { content: `${mine().trimEnd()}\n- the grid is 12px\n` })), null);
+});
+
+test('a line added above ## Agent notes, or a new heading, is denied', t => {
+  const v = vault(t);
+  assert.ok(denied(edit(v, 'Edit', change('## Agent notes', '- slipped in\n## Agent notes'))));
+  assert.ok(denied(edit(v, 'Edit', change(SEEN, `${SEEN}\n## Another section\n- also slipped in`))));
+  assert.ok(denied(edit(v, 'Edit', change(SEEN, `${SEEN}\n# A title`))));
+});
+
+test('one Edit that adds a note and also changes the body is denied', t => {
+  const v = vault(t);
+  const both = mine().replace('Cards need', 'Cards want').replace(SEEN, `${SEEN}\n- the grid is 12px`);
+  assert.ok(denied(edit(v, 'Write', { content: both })));
+});
+
+test('appending ## Agent notes with lines at the end of a page without one passes', t => {
+  const v = vault(t, { text: mine(BODY.slice(0, 2)) });
+  assert.equal(denied(edit(v, 'Edit', change('feel cramped.', `feel cramped.\n\n## Agent notes\n${SEEN}`))), null);
+  assert.equal(denied(edit(v, 'Write', { content: `${mine(BODY.slice(0, 2))}\n## Agent notes\n${SEEN}\n` })), null);
+});
+
+test('adding the heading anywhere but the end, or with no lines, is denied', t => {
+  const v = vault(t, { text: mine(BODY.slice(0, 2)) });
+  assert.ok(denied(edit(v, 'Edit', change('Cards need', `## Agent notes\n${SEEN}\n\nCards need`))));
+  assert.ok(denied(edit(v, 'Edit', change('feel cramped.', 'feel cramped.\n\n## Agent notes'))));
+});
+
+test('changing, removing or reordering an existing agent-notes line is denied', t => {
+  const v = vault(t, { text: mine([...BODY, '- the tab bar is at the top']) });
+  assert.ok(denied(edit(v, 'Edit', change(SEEN, '- the shop screen has six tabs'))));
+  assert.ok(denied(edit(v, 'Edit', change(`${SEEN}\n`, ''))));
+  assert.ok(denied(edit(v, 'Edit', change(`${SEEN}\n- the tab bar is at the top`, `- the tab bar is at the top\n${SEEN}`))));
+});
+
+test("a Write that rewrites a user page's frontmatter is denied", t => {
+  const v = vault(t);
+  assert.match(denied(edit(v, 'Write', { content: mine().replace("summary: ''", 'summary: Notes on the shop.') })) ?? '', /the user's own writing/);
+  assert.ok(denied(edit(v, 'Write', { content: mine(BODY, ['author: agent']) })));
+  assert.ok(denied(edit(v, 'Edit', change('author: user', 'author: agent'))));
+});
+
+test('a Write that creates a page with author: user is denied, and so is an Edit that flips author: agent to user', t => {
+  const v = vault(t, { text: mine(BODY, []), rel: AGENT_REL });
+  const created = denied(edit(v, 'Write', { content: mine() }, 'wiki/demo/concepts/new.md'));
+  assert.match(created ?? '', /sets author: user themselves/);
+  const flipped = denied(edit(v, 'Edit', change('summary: \'\'', "summary: ''\nauthor: user"), AGENT_REL));
+  assert.match(flipped ?? '', /sets author: user themselves/);
+  assert.match(denied(edit(v, 'Write', { content: mine() }, AGENT_REL)) ?? '', /sets author: user themselves/);
+});
+
+test('a page without author: user is edited as before', t => {
+  const v = vault(t, { text: mine(BODY, []) });
+  assert.equal(denied(edit(v, 'Edit', change('Tabs should never feel cramped.', 'Tabs may feel cramped.'))), null);
+  assert.equal(denied(edit(v, 'Write', { content: mine(BODY, ['author: agent']) })), null);
+  assert.equal(denied(edit(v, 'Write', { content: mine(BODY, []) }, 'wiki/demo/concepts/new.md')), null);
+});
+
+const rule = (extra = {}) => ({
+  domain: 'demo', slug: 'roomy-cards', topic: 'layout', basis: 'stated', page: REL, quote: 'Cards need room to breathe',
+  do: 'Leave 12px around cards.', not: 'Pack cards edge to edge.', because: '', applies_to: ['src/**/*.luau'], ...extra,
+});
+
+function proposer(t, opts) {
+  const v = vault(t, opts);
+  v.startSession(SID);
+  return v;
+}
+
+test("propose writes a rule quoting a user's page, naming the page's path in the Evidence line", t => {
+  const v = proposer(t);
+  const r = v.propose(SID, rule());
+  assert.equal(r.code, 0, r.stderr);
+  assert.match(v.read('wiki/demo/rules/roomy-cards.md'), /^- \d{4}-\d\d-\d\d · stated · wiki\/demo\/concepts\/journal\.md · "Cards need room to breathe" \(a-[0-9a-f]{8}\)$/m);
+});
+
+test('the quote may leave words out with … and is matched by the transcript rules', t => {
+  const v = proposer(t);
+  assert.equal(v.propose(SID, rule({ quote: 'cards  NEED room … breathe' })).code, 0);
+  const r = v.propose(SID, rule({ slug: 'other-rule', quote: 'breathe … Cards need' }));
+  assert.equal(r.code, 1);
+});
+
+test('a knowledge rule may cite the page the same way', t => {
+  const v = proposer(t);
+  const r = v.propose(SID, rule({ kind: 'knowledge', slug: 'card-spacing', quote: 'Tabs should never feel cramped' }));
+  assert.equal(r.code, 0, r.stderr);
+  assert.match(v.read('wiki/demo/rules/card-spacing.md'), / · stated · wiki\/demo\/concepts\/journal\.md · "Tabs should never feel cramped"/);
+});
+
+test('a quote the page does not hold is refused', t => {
+  const v = proposer(t);
+  const r = v.propose(SID, rule({ quote: 'Cards want a drop shadow' }));
+  assert.equal(r.code, 1);
+  assert.match(r.stderr, /the quote isn't in wiki\/demo\/concepts\/journal\.md/);
+  assert.equal(v.exists('wiki/demo/rules/roomy-cards.md'), false);
+});
+
+test("a quote only in ## Agent notes, or only in the page's frontmatter, is refused", t => {
+  const v = proposer(t, { text: pageNote({ kind: 'concept', topic: 'layout', summary: 'Shop notes', extra: ['author: user'], body: BODY }) });
+  for (const [slug, quote] of [['from-notes', 'packs six tabs'], ['from-summary', 'Shop notes'], ['from-topic', 'layout']]) {
+    const r = v.propose(SID, rule({ slug, quote }));
+    assert.equal(r.code, 1, quote);
+    assert.match(r.stderr, /the quote isn't in wiki\/demo\/concepts\/journal\.md/);
+  }
+});
+
+test('a page that is not author: user, or is not there, is refused', t => {
+  const v = proposer(t, { text: mine(BODY, []) });
+  const agent = v.propose(SID, rule());
+  assert.equal(agent.code, 1);
+  assert.match(agent.stderr, /isn't an author: user page/);
+  v.write('wiki/demo/rules/some-rule.md', '---\ntype: rule\ndomain: demo\n---\n\nCards need room to breathe\n');
+  assert.match(v.propose(SID, rule({ page: 'wiki/demo/rules/some-rule.md' })).stderr, /isn't an author: user page/);
+  assert.match(v.propose(SID, rule({ page: 'wiki/demo/concepts/gone.md' })).stderr, /there's no file at wiki\/demo\/concepts\/gone\.md/);
+  assert.match(v.propose(SID, rule({ page: 'raw/refs/x.md' })).stderr, /page must be a page under wiki\//);
+});
+
+test('page is for basis stated only', t => {
+  const v = proposer(t);
+  const r = v.propose(SID, rule({ basis: 'reading', reading: 'The user likes cards.' }));
+  assert.equal(r.code, 1);
+  assert.match(r.stderr, /page is only for basis stated/);
+});
+
+test('a repeat adds the Evidence line with the path to the rule it repeats', t => {
+  const v = proposer(t);
+  assert.equal(v.propose(SID, rule()).code, 0);
+  const r = v.propose(SID, rule({ slug: 'again', quote: 'Tabs should never feel cramped', repeats: 'demo/roomy-cards' }));
+  assert.equal(r.code, 0, r.stderr);
+  const text = v.read('wiki/demo/rules/roomy-cards.md');
+  assert.match(text, /· stated · wiki\/demo\/concepts\/journal\.md · "Cards need room to breathe"/);
+  assert.match(text, /· stated · wiki\/demo\/concepts\/journal\.md · "Tabs should never feel cramped"/);
+});
+
+test('Evidence lines naming a page are read as lines without a session', async t => {
+  const v = proposer(t);
+  assert.equal(v.propose(SID, rule()).code, 0);
+  const rules = await v.import('lib/rules.mjs');
+  const n = rules.readNote('demo/roomy-cards');
+  assert.deepEqual(rules.evidenceSessions(n), []);
+  assert.deepEqual(rules.evidenceQuotes(n), [{ session: undefined, note: 'wiki/demo/concepts/journal.md', source: undefined, quote: 'Cards need room to breathe' }]);
+});
+
+test('lint checks the quote against the page and warns when the sentence is gone', async t => {
+  const v = proposer(t);
+  assert.equal(v.propose(SID, rule()).code, 0);
+  assert.deepEqual(await lintFound(v, /Evidence|isn't in/), []);
+  v.write(REL, mine(['Cards can be tight.', '', '## Agent notes', 'Cards need room to breathe, the user said.']));
+  const found = await lintFound(v, /isn't in/);
+  assert.equal(found.length, 1);
+  assert.equal(found[0].file, 'wiki/demo/rules/roomy-cards.md');
+  assert.match(found[0].msg, /"Cards need room to breathe" isn't in wiki\/demo\/concepts\/journal\.md/);
+});
+
+test('lint warns when the cited page is gone or is no longer the user\'s', async t => {
+  const v = proposer(t);
+  assert.equal(v.propose(SID, rule()).code, 0);
+  v.write(REL, mine(BODY, []));
+  assert.match((await lintFound(v, /Evidence/))[0]?.msg ?? '', /cites wiki\/demo\/concepts\/journal\.md, which isn't an author: user page/);
+  v.write(REL, 'nothing');
+  assert.equal((await lintFound(v, /Evidence/)).length, 1);
+});
