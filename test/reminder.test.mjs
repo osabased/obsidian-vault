@@ -46,3 +46,12 @@ test('the notes /lint changes before review.mjs done don\'t count toward the nex
   assert.equal(reminder(v), null);
   assert.equal(v.run('review.mjs', ['done', 'extra']).code, 2);
 });
+
+test("the reminder counts the whole vault's notes, not only the session's domains", t => {
+  const v = makeVault(t, { domains: { other: { title: 'Other', topics: ['x'] } } });
+  for (let i = 0; i < 12; i++) v.write(`wiki/other/rules/r${i}.md`, ruleNote({ domain: 'other', topic: 'x', doLine: `Do thing ${i}.` }), { saved: ago(2 * DAY) });
+  assert.equal(reminder(v), remind(v, "hasn't run yet, and the vault has 12 notes"));
+  stamp(v, ago(DAY));
+  for (let i = 0; i < 10; i++) v.write(`wiki/other/rules/r${i}.md`, ruleNote({ domain: 'other', topic: 'x', doLine: `Do thing ${i} again.` }));
+  assert.equal(reminder(v), remind(v, 'last ran 1 day ago, and 10 notes changed since'));
+});
