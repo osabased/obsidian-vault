@@ -106,7 +106,7 @@ test('a doc set of 2,000 links and 50 cited pages starts a session in under 500 
   assert.match(listed[0], /^raw\/refs\/ledger-docs\b/);
 });
 
-test('the first AskUserQuestion in a session is denied with the rule on it, and the second goes through', { todo: '6.3c, phase 5: tool triggers' }, t => {
+test('the first AskUserQuestion in a session is denied with the rule on it, and the second goes through', t => {
   const v = makeVault(t, { presets: ['glim'] });
   const sid = sessionId();
   v.startSession(sid);

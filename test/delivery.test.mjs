@@ -450,11 +450,10 @@ test('6.3b: through the fixture alias a mapped call is also refused by a rule on
   assert.equal(setProperty(v, sid, 'A.B.D', 'set x to 1'), null, 'the retry goes through');
 });
 
-test('an unmapped MCP call returns at once without reading notes, and a mapped call without its path fails loudly', t => {
+test('an unmapped MCP call with no rule on its name passes, and a mapped call without its path fails loudly', t => {
   const v = makeVault(t, { presets: ['glim'] });
   const sid = sessionId();
   v.write('wiki/glim/tree-rule.md', ruleNote({ applies_to: ['glim-tree:**', '**'] }));
   assert.equal(v.edit(sid, 'mcp__other__set_property', { path: 'A.B', value: 'x' }), null);
-  assert.equal(v.exists('.state/cache'), false, 'no note was read');
   assert.throws(() => v.edit(sid, 'mcp__fixture__set_property', { value: 'x' }), /editTools\.mcp__fixture__set_property\.path is tool_input\.path, which this call's input doesn't hold as text/);
 });
