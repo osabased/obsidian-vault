@@ -158,7 +158,7 @@ test('settleSeconds in the config changes the window', async t => {
   assert.deepEqual(zero.rules.settledNotes().map(n => n.key), ['demo/fresh']);
 });
 
-test('a folded summary reads as its text, or lint refuses it', { todo: '6.6h' }, async t => {
+test('a folded summary reads as its text, or lint refuses it', async t => {
   const { rules } = await vault(t);
   const n = rules.parseNote(pageNote({ summary: '>-\n  Shop screens the user liked\n  and why.' }), 'wiki/demo/shop.md');
   assert.ok(n.summary === 'Shop screens the user liked and why.' || rules.noteErrors(n).some(e => /summary/.test(e)),
@@ -195,4 +195,13 @@ test('slugs and domains take modifier letters, as in サーバー, 人々 and ʻ
     assert.ok(rules.KEY_RE.test(`demo/${slug}`), slug);
     assert.ok(rules.KEBAB.test(slug), slug);
   }
+});
+
+test('the linear regex engine works on the installed Node after the flag is set', async t => {
+  const { rules } = await vault(t);
+  assert.ok(rules.tryRegex('a.*b')?.test('a--b'));
+  assert.equal(rules.tryRegex('a(?=b)'), null);
+  assert.equal(rules.tryRegex('(?<=a)b')?.test('ab'), true);
+  assert.match(rules.regexError('a{1000}'), /linear time/);
+  assert.match(rules.regexError('('), /^bad regex in triggers: \($/);
 });

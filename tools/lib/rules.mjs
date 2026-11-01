@@ -1,5 +1,6 @@
 import fs from 'node:fs';
 import path from 'node:path';
+import v8 from 'node:v8';
 import { parse, yamlQuote } from './frontmatter.mjs';
 import { validGlob, overlapping, entryParts, globListProblems } from './glob.mjs';
 import { config, vaultPath, shortHash, toPosix, today, inside, plural, isVaultOnly, memo } from './vault.mjs';
@@ -69,8 +70,22 @@ export const rawFile = ref => {
   return rel?.startsWith('raw/') ? rel : null;
 };
 
+// V8's linear engine runs a trigger in time proportional to the text, where backtracking took 17 s on one long line. The
+// flag is refused in NODE_OPTIONS, so it is set here.
+v8.setFlagsFromString('--enable-experimental-regexp-engine');
+
+// The trigger as a linear-time RegExp, or null when it doesn't compile or the engine refuses it (see regexError).
 export function tryRegex(source) {
-  try { return new RegExp(source); } catch { return null; }
+  try { return new RegExp(source, 'l'); } catch { return null; }
+}
+
+// Why a trigger can't be used, or null when it can.
+export function regexError(source) {
+  try { new RegExp(source, 'l'); return null; } catch (e) {
+    return /linear time/.test(e.message)
+      ? `trigger ${source} can't run in linear time. The linear regex engine refuses backreferences, lookaheads, counted repeats like {1000}, and the i and u flags`
+      : `bad regex in triggers: ${source}`;
+  }
 }
 
 export const escapeRegExp = s => String(s).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
@@ -169,7 +184,7 @@ function listErrors(n) {
     ...globs.filter(g => !validGlob(g, namespaces)).map(g => targetError(g, namespaces)),
     ...globListProblems(globs, namespaces),
     ...(n.tools ?? []).filter(x => !/^\S+$/.test(x)).map(x => `tools must name each tool exactly, with no spaces: ${x === '' ? '(empty)' : x}`),
-    ...(n.triggers ?? []).filter(t => !tryRegex(t)).map(t => `bad regex in triggers: ${t}`),
+    ...(n.triggers ?? []).map(t => regexError(t)).filter(Boolean),
   ];
 }
 

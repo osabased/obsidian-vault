@@ -130,3 +130,13 @@ test('log takes a page by its path in its folder', t => {
   assert.equal(r.code, 0, r.stderr);
   assert.match(v.read('log.md'), /wrote page demo\/luau-types/);
 });
+
+test('propose refuses a trigger with a lookahead and names the linear-engine reason', t => {
+  const v = makeVault(t);
+  const sid = sessionId();
+  v.startSession(sid);
+  const r = v.propose(sid, proposal({ triggers: ['foo(?=bar)'] }));
+  assert.equal(r.code, 1);
+  assert.match(r.stderr, /trigger foo\(\?=bar\) can't run in linear time/);
+  assert.equal(v.exists('wiki/demo/rules/new-rule.md'), false);
+});
