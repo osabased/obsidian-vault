@@ -102,3 +102,52 @@ test('a source rule propose.mjs writes is not one its own source may override', 
     '- demo/new-solver, as of 2026-10-01: demo/source-blog (dated 2026-10-05)',
   ]);
 });
+
+test('review sources never lists derived text, which is not a source to ingest', t => {
+  const v = makeVault(t);
+  v.write(`derived/${'a'.repeat(64)}.md`, '---\nkind: pdf\n---\nx\n');
+  assert.equal(v.run('review.mjs', ['sources']).stdout, 'Every file in raw/refs/ has a source page.\n');
+});
+
+test('a folder with a source.md is one source however many files it holds, named by its folder or any path in it', t => {
+  const v = makeVault(t);
+  for (const f of ['raw/refs/lib/src/a.c', 'raw/refs/lib/src/b.c', 'raw/refs/lib/README', 'raw/refs/other/x.c', 'raw/refs/other/y.c']) v.write(f, 'x');
+  v.write('raw/refs/lib/source.md', '---\nurl: https://example.com/demo/lib\ncommit: a1b2c3d4e5f6\n---\n');
+  v.write('raw/refs/other/source.md', '---\nurl: https://example.com/demo/other\ncommit: a1b2c3d4e5f6\n---\n');
+  v.write('raw/refs/docs/guide.md', 'x');
+  assert.equal(v.run('review.mjs', ['sources']).stdout, 'raw/refs/docs/guide.md\nraw/refs/lib\nraw/refs/other\n');
+  v.write('wiki/demo/source-lib.md', sourcePage({ source: 'raw/refs/lib' }));
+  v.write('wiki/demo/source-other.md', sourcePage({ source: 'raw/refs/other/x.c' }));
+  assert.equal(v.run('review.mjs', ['sources']).stdout, 'raw/refs/docs/guide.md\n');
+  assert.deepEqual(sectionOf(v.run('review.mjs', ['status']).stdout, 'Sources in raw/refs/ no source page names'), ['- raw/refs/docs/guide.md']);
+});
+
+test('a bundle at a new commit of the same URL is a new version, not a source already named', t => {
+  const v = makeVault(t);
+  const bundle = (name, commit) => {
+    v.write(`raw/refs/${name}/a.c`, 'x');
+    v.write(`raw/refs/${name}/source.md`, `---\nurl: https://example.com/demo/lib\ncommit: ${commit}\n---\n`);
+  };
+  bundle('lib-1', 'a1b2c3d');
+  bundle('lib-1-again', 'a1b2c3d');
+  bundle('lib-2', 'b2c3d4e');
+  v.write('wiki/demo/source-lib.md', sourcePage({ source: 'raw/refs/lib-1' }));
+  assert.equal(v.run('review.mjs', ['sources']).stdout, 'raw/refs/lib-2\n');
+});
+
+test('a file re-fetched from the same URL with a new sha256 is a new version, and one with the same sha256 is not', t => {
+  const v = makeVault(t);
+  const hex = c => c.repeat(64);
+  const saved = (url, sha256) => `---\nurl: ${url}\nfetched: 2026-10-01\n${sha256 ? `sha256: ${sha256}\n` : ''}---\nThe page.\n`;
+  v.write('raw/refs/page-v1.md', saved('https://example.com/page', hex('a')));
+  v.write('raw/refs/page-v1-again.md', saved('https://example.com/page', hex('a')));
+  v.write('raw/refs/page-v2.md', saved('https://example.com/page', hex('b')));
+  v.write('raw/refs/old-v1.md', saved('https://example.com/old', hex('c')));
+  v.write('raw/refs/old-v2.md', saved('https://example.com/old', hex('d')));
+  v.write('raw/refs/plain-1.md', saved('https://example.com/plain'));
+  v.write('raw/refs/plain-2.md', saved('https://example.com/plain'));
+  v.write('wiki/demo/source-page.md', sourcePage({ source: 'raw/refs/page-v1.md' }));
+  v.write('wiki/demo/source-old.md', sourcePage({ source: 'https://example.com/old' }));
+  v.write('wiki/demo/source-plain.md', sourcePage({ source: 'raw/refs/plain-1.md' }));
+  assert.equal(v.run('review.mjs', ['sources']).stdout, 'raw/refs/page-v2.md\n', 'a source page on the URL itself names every version; a page on a file names its own');
+});
