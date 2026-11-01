@@ -190,7 +190,9 @@ test('Evidence lines naming a page are read as lines without a session', async t
   const rules = await v.import('lib/rules.mjs');
   const n = rules.readNote('glim/roomy-cards');
   assert.deepEqual(rules.evidenceSessions(n), []);
-  assert.deepEqual(rules.evidenceQuotes(n), [{ session: undefined, note: 'wiki/glim/concepts/journal.md', source: undefined, quote: 'Cards need room to breathe' }]);
+  const [{ id, ...quote }, ...more] = rules.evidenceQuotes(n);
+  assert.deepEqual([quote, ...more], [{ session: undefined, note: 'wiki/glim/concepts/journal.md', source: undefined, quote: 'Cards need room to breathe' }]);
+  assert.match(id, /^a-[0-9a-f]{8}$/);
 });
 
 test('lint checks the quote against the page and warns when the sentence is gone', async t => {

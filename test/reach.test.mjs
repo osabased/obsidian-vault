@@ -3,7 +3,7 @@ import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { makeVault, ruleNote, pageNote, sessionId, denied, editFile as edit, prompt } from './fixture.mjs';
+import { makeVault, ruleNote, pageNote, sessionId, denied, editFile as edit, prompt, userTurn } from './fixture.mjs';
 
 const ALPHA = { title: 'Alpha', markers: ['alpha.project'], topics: ['code', 'naming'] };
 const BETA = { title: 'Beta', markers: ['beta.project'], topics: ['code'] };
@@ -193,9 +193,15 @@ const widgetRule = domain => ({
   do: 'Name widgets after their screen.', not: 'Leave widget names bare.', keywords: ['widgetz'],
 });
 const pickFor = (v, sid, domain) => v.run('pick.mjs', [sid], { input: { subject: 'shop', comment: 'cards breathe', domain } });
+// pick.mjs checks a comment against what the user typed, so each session starts with it typed.
+function typing(v) {
+  const start = v.startSession;
+  v.startSession = (sid, o = {}) => start(sid, { transcript: v.transcript(sid, [userTurn('cards breathe')]), ...o });
+  return v;
+}
 
 test('pick and propose reach the domains of the latest session start and of the folder the session began in', t => {
-  const v = makeVault(t, { domains: { alpha: ALPHA, beta: BETA } });
+  const v = typing(makeVault(t, { domains: { alpha: ALPHA, beta: BETA } }));
   const mono = folder(t, ['a/alpha.project', 'b/beta.project']);
   const compacted = sessionId();
   v.startSession(compacted, { cwd: mono });

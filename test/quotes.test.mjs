@@ -1,7 +1,7 @@
 import fs from 'node:fs';
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { makeVault, userTurn, assistantTurn, toolResult } from './fixture.mjs';
+import { makeVault, userTurn, assistantTurn, toolResult, ruleNote, sourcePage, sectionOf } from './fixture.mjs';
 
 const SID = '9f8e7d6c-0000-4000-8000-000000000001';
 
@@ -187,4 +187,52 @@ test('a binary source is not checked', t => {
 test('a URL source is not checked', t => {
   const v = session(t, [userTurn('hi')]);
   assert.equal(v.propose(SID, knowledge('https://example.com/notes', 'what the page says')).code, 0);
+});
+
+// The quote warnings on one file, or the tally on wiki.
+const wikiFound = async (v, file) => (await v.import('lib/lint.mjs')).lint().filter(f => f.file === file && (file === 'wiki' || /isn't in|can't be checked/.test(f.msg)));
+
+test('a quote from a session whose transcript is gone is checked against the row that recorded it', async t => {
+  const v = session(t, [userTurn('please, I want scripts in strict mode always')]);
+  assert.equal(v.propose(SID, rule({ quote: 'I want scripts in strict mode always' })).code, 0);
+  fs.rmSync(v.at('.transcripts', `${SID}.jsonl`));
+  const rel = 'wiki/glim/rules/strict-scripts.md';
+  assert.deepEqual(await wikiFound(v, rel), []);
+  assert.deepEqual(await wikiFound(v, 'wiki'), []);
+  const text = v.read(rel);
+  const id = text.match(/\((a-[0-9a-f]{8})\)/)[1];
+  v.write(rel, text.replace('"I want scripts in strict mode always"', '"I want scripts in loose mode"'));
+  assert.deepEqual((await wikiFound(v, rel)).map(f => f.msg), [`"I want scripts in loose mode" isn't in what row ${id} recorded`]);
+  assert.deepEqual(await wikiFound(v, 'wiki'), []);
+});
+
+const goneSession = (v, extra = '') => {
+  v.write('wiki/glim/rules/no-row.md', ruleNote({ keywords: ['x'], evidence: ['- 2026-10-01 · stated · session 0badc0de · "do the thing" (a-0badc0de)', '- 2026-10-01 · stated · session 0badc0de · "and no id at all"'] }));
+  v.write('wiki/glim/rules/from-url.md', ruleNote({ keywords: ['y'], kind: 'knowledge', basis: 'source', extra: ['as_of: 2026-10-01'], evidence: [`- 2026-10-01 · source · session 0badc0de · https://example.com/notes · dated 2026-10-01 · "what the page says${extra}" (a-0badc0df)`] }));
+  v.write('wiki/glim/sources/source-shop.md', sourcePage({ source: 'https://example.com/shop', body: ['## You said', '- 2026-10-01 · session 0badc0de · "the tabs feel cramped"', '', "## Agent's reading", '', '## Rules'] }));
+};
+
+test('lint tallies the quotes it can\'t check in one warning: URLs, and sessions whose transcript is gone with no row', async t => {
+  const v = makeVault(t);
+  goneSession(v);
+  const found = await wikiFound(v, 'wiki');
+  assert.deepEqual(found.map(f => [f.level, f.msg]), [['warn', "4 quotes can't be checked: 1 cites a URL, 3 a session whose transcript is gone. node tools/review.mjs status lists them."]]);
+  assert.deepEqual((await (await v.import('lib/lint.mjs')).lint()).filter(f => /can't be checked|isn't in/.test(f.msg) && f.file !== 'wiki'), []);
+  const one = makeVault(t);
+  one.write('wiki/glim/rules/from-url.md', ruleNote({ keywords: ['y'], kind: 'knowledge', basis: 'source', extra: ['as_of: 2026-10-01'], evidence: ['- 2026-10-01 · source · session 0badc0de · https://example.com/notes · dated 2026-10-01 · "what the page says" (a-0badc0df)'] }));
+  assert.deepEqual((await wikiFound(one, 'wiki')).map(f => f.msg), ["1 quote can't be checked: 1 cites a URL. node tools/review.mjs status lists them."]);
+});
+
+test("review.mjs status lists the quotes lint can't check, each clipped to 80 characters", t => {
+  const v = makeVault(t);
+  const long = ', and it goes on long past where the status line would cut it short';
+  goneSession(v, long);
+  const out = v.run('review.mjs', ['status']);
+  assert.equal(out.code, 0, out.stderr);
+  assert.deepEqual(sectionOf(out.stdout, "Quotes lint can't check"), [
+    '- wiki/glim/rules/from-url.md · https://example.com/notes · "what the page says, and it goes on long past where the status line would cut it…"',
+    '- wiki/glim/rules/no-row.md · session 0badc0de · "do the thing"',
+    '- wiki/glim/rules/no-row.md · session 0badc0de · "and no id at all"',
+    '- wiki/glim/sources/source-shop.md · session 0badc0de · "the tabs feel cramped"',
+  ]);
 });
