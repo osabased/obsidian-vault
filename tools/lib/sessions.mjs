@@ -104,8 +104,8 @@ export function markFirst(kind, sid, items, max, keyOf) {
 
 // Both hooks mark a page under one kind, so an agent hears of each page once, whichever hook brings it up.
 // A subagent's context is its own, so it hears of a page apart from the agent that started it.
-export const markPages = (input, ranked) => markFirst(
-  'pages', input.session_id, ranked, config().delivery.maxPages, h => (input.agent_id ? `${input.agent_id}|${h.key}` : h.key),
+export const markPages = (input, ranked, max = config().delivery.maxPages) => markFirst(
+  'pages', input.session_id, ranked, max, h => (input.agent_id ? `${input.agent_id}|${h.key}` : h.key),
 );
 
 // Two markers, both keyed by the rule alone, so a rule reworded since still counts as shown. The delivered one is

@@ -1,7 +1,7 @@
 import fs from 'node:fs';
 import { runHook, config, domainsFor, everywhereDomains, inside, vaultRel, toPosix, cwdOf, FILE_TOOLS, toolFile, shortHash, lf } from '../lib/vault.mjs';
 import {
-  loadNotes, settledNotes, liveRules, livePages, ruleLine, pagePointers, tryRegex, cmp, clip, parseNote, QUOTED, agentNotesSpan, authoredByUser, AGENT_NOTES, TOP_HEADING,
+  loadNotes, settledNotes, liveRules, livePages, ruleLine, rulePointer, pageLine, fitContext, tryRegex, cmp, clip, parseNote, QUOTED, agentNotesSpan, authoredByUser, AGENT_NOTES, TOP_HEADING,
 } from '../lib/rules.mjs';
 import { bestMatch, specificity, bySpecificity } from '../lib/glob.mjs';
 import { parse } from '../lib/frontmatter.mjs';
@@ -165,33 +165,42 @@ function matcher(file, cwd) {
 // A note with triggers comes up only on an edit whose new text matches one.
 const fires = (note, text) => !note.triggers?.length || note.triggers.some(t => tryRegex(t)?.test(text));
 
-function gate(input, matched) {
-  const { maxRulesPerEdit, maxBlockChars } = config().delivery;
-  const sid = input.session_id;
-  const text = newText(input.tool_name, input.tool_input ?? {});
+// The rules due on this edit, most specific first: the ones this session was not yet refused with on this file.
+function dueRules(input, matched, text) {
   const hits = [];
   for (const { key, note, rel, spec } of matched) {
     const triggered = note.triggers?.length > 0;
     if (!fires(note, text)) continue;
     // The hash is in the id, so a reworded rule is refused once more on files it already gated.
     const id = `${key}|${note.hash}|${rel.toLowerCase()}`;
-    if (!marked('gate', sid, id)) hits.push({ key, note, rel, id, triggered, spec });
+    if (!marked('gate', input.session_id, id)) hits.push({ key, note, rel, id, triggered, spec });
   }
-  if (!hits.length) return null;
-  hits.sort((a, b) => Number(b.triggered) - Number(a.triggered) || bySpecificity(a.spec, b.spec) || cmp(a.key, b.key));
-  const head = `Taste rules apply to ${hits[0].rel}:`;
-  const foot = 'Revise this edit to follow them, then retry. The retry is allowed.';
-  const shown = [];
+  return hits.sort((a, b) => Number(b.triggered) - Number(a.triggered) || bySpecificity(a.spec, b.spec) || cmp(a.key, b.key));
+}
+
+// One refusal carries everything due on the file, so the retry goes through. The top rules come in full, up to
+// maxRulesPerEdit and maxBlockChars; the other rules and the pages past maxPages come as one line each, and whatever
+// the output budget has no room for is named in its overflow line. Everything due counts as shown either way.
+function refusal(input, hits, pages) {
+  const { maxRulesPerEdit, maxBlockChars, maxPages } = config().delivery;
+  const sid = input.session_id;
+  const rel = (hits[0] ?? pages[0]).rel;
+  const head = `Taste rules apply to ${rel}:`;
+  const foot = `Revise this edit to follow ${!pages.length ? 'them' : hits.length ? 'them and the pages' : 'the pages'}, then retry. The retry is allowed.`;
+  const full = [];
   for (const hit of hits.slice(0, maxRulesPerEdit)) {
     const line = ruleLine(hit.key, hit.note);
-    if (shown.length && [head, ...shown.map(s => s.line), line, foot].join('\n').length > maxBlockChars) break;
-    shown.push({ ...hit, line });
+    if (full.length && [head, ...full.map(s => s.line), line, foot].join('\n').length > maxBlockChars) break;
+    full.push({ ...hit, line });
   }
-  for (const s of shown) {
-    mark('gate', sid, s.id);
-    markShown(sid, s.key);
-  }
-  return [head, ...shown.map(s => s.line), foot].join('\n');
+  const { text, kept } = fitContext([
+    { noun: 'rule', head, items: full.map(s => s.line) },
+    { noun: 'rule pointer', head: 'Also due, in brief. Open the ones that bear on this edit:', items: hits.slice(full.length).map(h => rulePointer(h.key, h.note)) },
+    { noun: 'page', head: `Vault pages on ${rel}. Read the ones that bear on this work:`, items: pages.map((h, i) => pageLine(h.key, h.note, i >= maxPages)) },
+  ], { tail: foot, gap: '\n' });
+  for (const hit of hits) mark('gate', sid, hit.id);
+  for (const s of full.slice(0, kept[0])) markShown(sid, s.key);
+  return text;
 }
 
 const deny = why => ({ hookSpecificOutput: { hookEventName: 'PreToolUse', permissionDecision: 'deny', permissionDecisionReason: why } });
@@ -207,12 +216,9 @@ runHook('edit', input => {
   if (/^(?:wiki|raw)\//i.test(vaultRel(file, cwd) ?? '')) return null;
   const notes = settledNotes(loadNotes([...domainsFor(file, cwd).map(d => d.domain), 'global', ...everywhereDomains()]));
   const matching = matcher(file, cwd);
-  const refused = gate(input, matching(liveRules(notes)));
-  if (refused) return deny(refused);
-  // A page comes up only on an edit that goes through, so the agent reads it beside the work rather than as a refusal.
   const text = newText(input.tool_name, input.tool_input ?? {});
-  const due = markPages(input, matching(livePages(notes), true).filter(m => fires(m.note, text)).sort((a, b) => bySpecificity(a.spec, b.spec) || cmp(a.key, b.key)));
-  if (!due.length) return null;
-  const context = pagePointers(`Vault pages on ${due[0].rel}. Read the ones that bear on this work:`, due);
-  return { hookSpecificOutput: { hookEventName: 'PreToolUse', additionalContext: context } };
+  const hits = dueRules(input, matching(liveRules(notes)), text);
+  // A page is told of once per session, so the refusal marks every page due, not only the first maxPages.
+  const pages = markPages(input, matching(livePages(notes), true).filter(m => fires(m.note, text)).sort((a, b) => bySpecificity(a.spec, b.spec) || cmp(a.key, b.key)), Infinity);
+  return hits.length || pages.length ? deny(refusal(input, hits, pages)) : null;
 });

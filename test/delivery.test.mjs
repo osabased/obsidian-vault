@@ -231,7 +231,7 @@ test('the gate still refuses after a checkout touches every note', t => {
   assert.ok(denied(edit(v, sessionId(), 'src/a.txt')));
 });
 
-test('20 rules and 2 pages on one glob refuse the first edit of a file once, and the retry passes', { todo: '6.5' }, t => {
+test('20 rules and 2 pages on one glob refuse the first edit of a file once, and the retry passes', t => {
   const v = makeVault(t);
   const sid = sessionId();
   const keys = [];
@@ -274,4 +274,49 @@ test('a negated glob in applies_to excludes the files it names from the gate', t
   v.write('wiki/demo/rules/no-tests.md', ruleNote({ applies_to: ['src/**/*.ts', '!src/**/*.test.ts'] }));
   assert.ok(denied(edit(v, sid, 'src/a.ts')), 'a source file is gated');
   assert.equal(edit(v, sid, 'src/a.test.ts'), null, 'a test file is not');
+});
+
+const LIMIT = 8000;
+
+test('session start in the vault folder with 10 domains stays under the output budget and names what it left out', t => {
+  const domains = Object.fromEntries(Array.from({ length: 10 }, (_, d) => [`area-${d}`, {
+    title: `Area ${d}`, vaultOnly: true, topics: Array.from({ length: 60 }, (_, i) => `topic-${d}-${i}-padding`),
+  }]));
+  const v = makeVault(t, { domains });
+  const ctx = v.startSession(sessionId(), { cwd: v.root }).hookSpecificOutput.additionalContext;
+  assert.ok(ctx.length <= LIMIT, `${ctx.length} characters`);
+  assert.match(ctx, /^Taste vault: when the task touches layout, code, topic-0-0-padding, /);
+  assert.match(ctx, /\(Left out to stay within 8000 characters: \d+ topics\. `[^`]*index\.md` lists the rest\.\)$/);
+});
+
+test('the output budget is delivery.maxContextChars, and the topics are the first to go', t => {
+  const v = makeVault(t, { config: { delivery: { maxContextChars: 3000 } }, topics: Array.from({ length: 200 }, (_, i) => `topic-${i}-padding`) });
+  v.write('wiki/demo/rules/brief.md', ruleNote({ always: true, doLine: 'Be brief.' }));
+  const ctx = v.startSession(sessionId()).hookSpecificOutput.additionalContext;
+  assert.ok(ctx.length <= 3000, `${ctx.length} characters`);
+  assert.match(ctx, /demo\/brief: Do: Be brief\./, 'the always rule ranks above the topics');
+  assert.match(ctx, /Taste vault: propose a rule/, 'the instructions rank above the topics');
+  assert.match(ctx, /Left out to stay within 3000 characters: \d+ topics\b/);
+});
+
+test('the prompt hook fits the output budget, the always rules written since session start included', t => {
+  const v = makeVault(t);
+  const sid = sessionId();
+  v.startSession(sid);
+  for (let i = 0; i < 40; i++) v.write(`wiki/demo/rules/late-${i}.md`, ruleNote({ always: true, doLine: `Late rule ${i}. ${'Mind the detail. '.repeat(12)}` }));
+  v.write('wiki/demo/rules/kw.md', ruleNote({ keywords: ['strict'], doLine: 'Use strict.' }));
+  const ctx = prompt(v, sid, 'strict').hookSpecificOutput.additionalContext;
+  assert.ok(ctx.length <= LIMIT, `${ctx.length} characters`);
+  assert.match(ctx, /^Taste rules that apply for the rest of this session:\n- demo\/late-0:/);
+  assert.match(ctx, /\(Left out to stay within 8000 characters: \d+ rules/);
+  assert.equal(prompt(v, sid, 'hello'), null, 'what was cut is not offered again');
+});
+
+test('an edit that goes through carries no page pointer', t => {
+  const v = makeVault(t);
+  const sid = sessionId();
+  v.write('wiki/demo/concepts/grid.md', pageNote({ kind: 'concept', applies_to: ['**/*.txt'] }));
+  assert.match(denied(edit(v, sid, 'src/a.txt')), /demo\/grid/);
+  assert.equal(edit(v, sid, 'src/a.txt'), null);
+  assert.equal(edit(v, sid, 'src/b.txt'), null);
 });

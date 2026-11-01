@@ -326,7 +326,7 @@ export function liveRules(notes = loadNotes()) {
   for (const n of notes.filter(isLive)) {
     const text = ruleText(n);
     rules[n.key] = {
-      domain: n.domain, topic: n.topic, text,
+      domain: n.domain, topic: n.topic, rel: n.rel, text,
       // Only the delivered wording counts, so an edit to a rule's evidence or globs doesn't deliver it again.
       hash: shortHash(text),
       kind: n.kind, always: n.always, applies_to: n.applies_to, triggers: n.triggers, keywords: n.keywords,
@@ -361,9 +361,8 @@ export function livePages(notes = loadNotes()) {
 
 export const kindLabel = kind => (PAGE_KINDS.includes(kind) ? `${kind} page` : 'page');
 
-const pageLine = (k, p) => `- ${k} (${kindLabel(p.kind)}): ${p.summary ? `${clip(sentence(p.summary), 150)} ` : ''}${toPosix(vaultPath(...p.rel.split('/')))}`;
-
-export const pagePointers = (head, due) => (due.length ? [head, ...due.map(h => pageLine(h.key, h.note))].join('\n') : '');
+// A bare line leaves out the summary, for the pages past what a refusal describes.
+export const pageLine = (k, p, bare = false) => `- ${k} (${kindLabel(p.kind)}): ${p.summary && !bare ? `${clip(sentence(p.summary), 150)} ` : ''}${toPosix(vaultPath(...p.rel.split('/')))}`;
 
 // For each pair of two domains' paths where one holds the other, the folder each domain's globs sit under when both
 // are read from the outer one, since the gate matches a domain's globs from its own folder. Two domains with markers
@@ -397,6 +396,41 @@ export function sharedFiles(a, b) {
 export const maxChars = kind => (kind === 'knowledge' ? config().delivery.maxKnowledgeRuleChars : config().delivery.maxRuleChars);
 
 export const ruleLine = (k, r) => `- ${k}: ${clip(r.text, maxChars(r.kind))}`;
+
+// For a rule a refusal has no room to show in full: enough to tell whether to open the note.
+export const rulePointer = (k, r) => `- ${k}: ${clip(r.text, 70)} ${toPosix(vaultPath(...r.rel.split('/')))}`;
+
+// Fits a hook's output to delivery.maxContextChars, since Claude Code replaces anything over 10,000 with a file path and
+// a preview. Sections come in rank order; a plain string is one item. A section is { noun, items, head?, render? }: its
+// text is `head` and the kept items on lines, or render(kept). Items are kept from the top while they fit; the first
+// section that loses one ends the fill, and one line says what was left out and that index.md lists the rest. `tail` is
+// kept whatever the budget. `gap` sets the sections apart, a blank line by default. Returns the text and, for each
+// section passed, how many of its items the text holds.
+export function fitContext(sections, { max = config().delivery.maxContextChars, tail = '', gap = '\n\n' } = {}) {
+  const all = sections.map(s => (typeof s === 'string' || !s ? { noun: 'note', items: s ? [s] : [] } : s));
+  const join = parts => parts.filter(Boolean).join(gap);
+  const body = (s, n) => (n ? (s.render ? s.render(s.items.slice(0, n)) : [s.head, ...s.items.slice(0, n)].filter(Boolean).join('\n')) : '');
+  const overflow = kept => {
+    const left = all.flatMap((s, i) => (s.items.length > kept[i] ? [plural(s.items.length - kept[i], s.noun)] : []));
+    return left.length ? `(Left out to stay within ${max} characters: ${joinList(left, 'and')}. \`${toPosix(vaultPath('index.md'))}\` lists the rest.)` : '';
+  };
+  const render = kept => join([...all.map((s, i) => body(s, kept[i])), overflow(kept), tail]);
+  const full = all.map(s => s.items.length);
+  if (render(full).length <= max) return { text: render(full), kept: full };
+  // The line's worst case, with every item left out, is reserved so it always fits.
+  const reserve = join([overflow(all.map(() => 0)), tail]).length + gap.length;
+  const kept = all.map(() => 0);
+  let used = 0;
+  for (let i = 0; i < all.length; i++) {
+    const cost = n => (n ? body(all[i], n).length + (used ? gap.length : 0) : 0);
+    let n = 0;
+    while (n < all[i].items.length && used + cost(n + 1) + reserve <= max) n++;
+    kept[i] = n;
+    if (n < all[i].items.length) break;
+    used += cost(n);
+  }
+  return { text: render(kept), kept };
+}
 
 export function domainOrder(domains) {
   const known = Object.keys(config().domains);
@@ -435,8 +469,8 @@ export function alwaysSize(rules, domains) {
 export function alwaysContext(domains, rules = liveRules()) {
   const { lines, keys } = alwaysLines(rules, domains);
   if (!lines.length) return { text: '', keys: [] };
-  const { activeMaxLines, activeMaxBytes } = config().delivery;
-  const fits = xs => xs.length <= activeMaxLines && Buffer.byteLength(xs.join('\n')) <= activeMaxBytes;
+  const { activeMaxLines, activeMaxBytes, maxContextChars } = config().delivery;
+  const fits = xs => xs.length <= activeMaxLines && Buffer.byteLength(xs.join('\n')) <= Math.min(activeMaxBytes, maxContextChars);
   if (fits([...HEAD, ...lines])) return { text: [...HEAD, ...lines].join('\n'), keys };
   const tail = shown => ['', `(${keys.length - shown} more didn't fit. See ${toPosix(vaultPath('active.md'))}.)`];
   const out = [...HEAD];
