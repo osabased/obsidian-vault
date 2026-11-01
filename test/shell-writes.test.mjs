@@ -29,7 +29,7 @@ const context = out => out?.hookSpecificOutput?.additionalContext ?? null;
 test('a rule-covered file a shell command wrote this turn gets that rule once as Stop additionalContext', t => {
   const v = makeVault(t);
   gitProject(v);
-  v.write('wiki/demo/rules/ui-rule.md', ruleNote({ applies_to: ['src/**/*.txt'], doLine: 'Start with strict.', notLine: 'Leave nonstrict.' }));
+  v.write('wiki/glim/rules/ui-rule.md', ruleNote({ applies_to: ['src/**/*.txt'], doLine: 'Start with strict.', notLine: 'Leave nonstrict.' }));
   const sid = sessionId();
   v.startSession(sid);
   prompt(v, sid, 'write the file with a script');
@@ -41,7 +41,7 @@ test('a rule-covered file a shell command wrote this turn gets that rule once as
   assert.equal(context(out), [
     'Taste rules apply to a file this turn wrote. Re-read the change against them before you stop.',
     'src/a.txt:',
-    '- demo/ui-rule: Do: Start with strict. Not: Leave nonstrict.',
+    '- glim/ui-rule: Do: Start with strict. Not: Leave nonstrict.',
   ].join('\n'));
   assert.equal(stop(v, sid, true), null, 'the next stop passes');
   assert.equal(editFile(v, sid, 'src/a.txt'), null, 'a later edit of the file is not refused with the rule again');
@@ -50,7 +50,7 @@ test('a rule-covered file a shell command wrote this turn gets that rule once as
 test('files changed before the turn started are left to the user', t => {
   const v = makeVault(t);
   gitProject(v);
-  v.write('wiki/demo/rules/ui-rule.md', ruleNote({ applies_to: ['src/**/*.txt'] }));
+  v.write('wiki/glim/rules/ui-rule.md', ruleNote({ applies_to: ['src/**/*.txt'] }));
   const sid = sessionId();
   v.startSession(sid);
   write(v, 'src/a.txt', 'saved earlier', new Date(Date.now() - 60e3));
@@ -61,9 +61,9 @@ test('files changed before the turn started are left to the user', t => {
 test('a file written through the gated Edit path is not taken for a shell write', t => {
   const v = makeVault(t);
   gitProject(v);
-  v.write('wiki/demo/rules/ui-rule.md', ruleNote({ applies_to: ['src/**/*.txt'] }));
+  v.write('wiki/glim/rules/ui-rule.md', ruleNote({ applies_to: ['src/**/*.txt'] }));
   // Its trigger misses the edit's new text but matches the file, so only the record of the edit keeps it out.
-  v.write('wiki/demo/rules/todo-rule.md', withTriggers(ruleNote({ applies_to: ['src/**/*.txt'], doLine: 'Track work in issues.' }), 'TODO'));
+  v.write('wiki/glim/rules/todo-rule.md', withTriggers(ruleNote({ applies_to: ['src/**/*.txt'], doLine: 'Track work in issues.' }), 'TODO'));
   const sid = sessionId();
   v.startSession(sid);
   prompt(v, sid, 'edit the file');
@@ -75,7 +75,7 @@ test('a file written through the gated Edit path is not taken for a shell write'
 
 test('a project that is not a git repository gets no Stop output', t => {
   const v = makeVault(t);
-  v.write('wiki/demo/rules/ui-rule.md', ruleNote({ applies_to: ['src/**/*.txt'] }));
+  v.write('wiki/glim/rules/ui-rule.md', ruleNote({ applies_to: ['src/**/*.txt'] }));
   const sid = sessionId();
   v.startSession(sid);
   prompt(v, sid, 'write the file with a script');
@@ -86,21 +86,21 @@ test('a project that is not a git repository gets no Stop output', t => {
 test('a shell-written file fires a rule by its triggers against the file as it is now', t => {
   const v = makeVault(t);
   gitProject(v);
-  v.write('wiki/demo/rules/todo-rule.md', withTriggers(ruleNote({ applies_to: ['src/**/*.txt'], doLine: 'Track work in issues.' }), 'TODO'));
+  v.write('wiki/glim/rules/todo-rule.md', withTriggers(ruleNote({ applies_to: ['src/**/*.txt'], doLine: 'Track work in issues.' }), 'TODO'));
   const sid = sessionId();
   v.startSession(sid);
   prompt(v, sid, 'write files with a script');
   write(v, 'src/clean.txt', 'nothing to see');
   write(v, 'src/todo.txt', '-- TODO later');
   const ctx = context(stop(v, sid)) ?? '';
-  assert.match(ctx, /^src\/todo\.txt:\n- demo\/todo-rule: Do: Track work in issues\./m);
+  assert.match(ctx, /^src\/todo\.txt:\n- glim\/todo-rule: Do: Track work in issues\./m);
   assert.doesNotMatch(ctx, /clean\.txt/);
 });
 
 test('a file a subagent wrote through the gated Edit path is not taken for a shell write at the parent\'s stop', t => {
   const v = makeVault(t);
   gitProject(v);
-  v.write('wiki/demo/rules/ui-rule.md', ruleNote({ applies_to: ['src/**/*.txt'] }));
+  v.write('wiki/glim/rules/ui-rule.md', ruleNote({ applies_to: ['src/**/*.txt'] }));
   const sid = sessionId();
   v.startSession(sid);
   prompt(v, sid, 'have a subagent edit the file');
@@ -113,7 +113,7 @@ test('a file a subagent wrote through the gated Edit path is not taken for a she
 test('a file the gate let through on a trigger miss is checked again when a shell command writes it in a later turn', t => {
   const v = makeVault(t);
   gitProject(v);
-  v.write('wiki/demo/rules/todo-rule.md', withTriggers(ruleNote({ applies_to: ['src/**/*.txt'], doLine: 'Track work in issues.' }), 'TODO'));
+  v.write('wiki/glim/rules/todo-rule.md', withTriggers(ruleNote({ applies_to: ['src/**/*.txt'], doLine: 'Track work in issues.' }), 'TODO'));
   const sid = sessionId();
   v.startSession(sid);
   prompt(v, sid, 'edit the file');
@@ -122,21 +122,21 @@ test('a file the gate let through on a trigger miss is checked again when a shel
   assert.equal(stop(v, sid), null);
   prompt(v, sid, 'now add a note with a script');
   write(v, 'src/a.txt', 'local x = 1\n-- TODO later\n');
-  assert.match(context(stop(v, sid)) ?? '', /^src\/a\.txt:\n- demo\/todo-rule: Do: Track work in issues\./m);
+  assert.match(context(stop(v, sid)) ?? '', /^src\/a\.txt:\n- glim\/todo-rule: Do: Track work in issues\./m);
 });
 
 test('a shell-written file with a BOM and CRLF line ends fires triggers as the edit hook reads text', t => {
   const v = makeVault(t);
   gitProject(v);
-  v.write('wiki/demo/rules/head-rule.md', withTriggers(ruleNote({ applies_to: ['src/**/*.txt'], doLine: 'Head the file.' }), '^-- head'));
-  v.write('wiki/demo/rules/pair-rule.md', withTriggers(ruleNote({ applies_to: ['src/**/*.txt'], doLine: 'Pair the lines.' }), 'one[^a-z]two'));
+  v.write('wiki/glim/rules/head-rule.md', withTriggers(ruleNote({ applies_to: ['src/**/*.txt'], doLine: 'Head the file.' }), '^-- head'));
+  v.write('wiki/glim/rules/pair-rule.md', withTriggers(ruleNote({ applies_to: ['src/**/*.txt'], doLine: 'Pair the lines.' }), 'one[^a-z]two'));
   const sid = sessionId();
   v.startSession(sid);
   prompt(v, sid, 'write the file with a script');
   write(v, 'src/a.txt', '\uFEFF-- head\r\none\r\ntwo\r\n');
   const ctx = context(stop(v, sid)) ?? '';
-  assert.match(ctx, /demo\/head-rule/);
-  assert.match(ctx, /demo\/pair-rule/);
+  assert.match(ctx, /glim\/head-rule/);
+  assert.match(ctx, /glim\/pair-rule/);
 });
 
 test("the vault's own files a shell command writes get no rule at Stop, vault.local.json among them", t => {

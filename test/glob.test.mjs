@@ -126,9 +126,9 @@ test('a list with no positive entry matches nothing', () => {
 });
 
 test('bestMatch skips namespaced entries for a file', () => {
-  assert.equal(bestMatch(['demo:**', '**'], 'a/b.md'), '**');
-  assert.equal(bestMatch(['demo:**', '!**'], 'a/b.md'), null);
-  assert.equal(bestMatch(['demo:**'], 'demo:a'), null);
+  assert.equal(bestMatch(['glim:**', '**'], 'a/b.md'), '**');
+  assert.equal(bestMatch(['glim:**', '!**'], 'a/b.md'), null);
+  assert.equal(bestMatch(['glim:**'], 'glim:a'), null);
 });
 
 test('validGlob accepts a leading ! and checks the rest', () => {
@@ -280,11 +280,11 @@ test('matchTarget: an undeclared or broken namespace matches nothing', () => {
 });
 
 test('matchTarget: an escape outside the BMP is one character, as lint counts it', () => {
-  const ns = { 'demo-tree': { separator: '.', escape: '𝄞' } };
-  assert.equal(validGlob('demo-tree:Shop𝄞.a.{x,y}', ns), true);
-  assert.equal(matchTarget(['demo-tree:Shop𝄞.a.**'], { namespace: 'demo-tree', path: 'Shop𝄞.a.Buy' }, ns), 'demo-tree:Shop𝄞.a.**');
-  assert.equal(matchTarget(['demo-tree:Shop.a.**'], { namespace: 'demo-tree', path: 'Shop𝄞.a.Buy' }, ns), null);
-  assert.equal(matchTarget(['demo-tree:{Shop𝄞,a,b}.*'], { namespace: 'demo-tree', path: 'Shop𝄞,a.Buy' }, ns), 'demo-tree:{Shop𝄞,a,b}.*');
+  const ns = { 'glim-tree': { separator: '.', escape: '𝄞' } };
+  assert.equal(validGlob('glim-tree:Shop𝄞.a.{x,y}', ns), true);
+  assert.equal(matchTarget(['glim-tree:Shop𝄞.a.**'], { namespace: 'glim-tree', path: 'Shop𝄞.a.Buy' }, ns), 'glim-tree:Shop𝄞.a.**');
+  assert.equal(matchTarget(['glim-tree:Shop.a.**'], { namespace: 'glim-tree', path: 'Shop𝄞.a.Buy' }, ns), null);
+  assert.equal(matchTarget(['glim-tree:{Shop𝄞,a,b}.*'], { namespace: 'glim-tree', path: 'Shop𝄞,a.Buy' }, ns), 'glim-tree:{Shop𝄞,a,b}.*');
 });
 
 test('matchTarget: a file target keeps the file rules', () => {

@@ -5,7 +5,7 @@ import { makeVault, ruleNote, pageNote as page, sourcePage, userTurn, lintFound 
 
 const SID = '9f8e7d6c-0000-4000-8000-000000000003';
 
-const parsed = (rules, opts) => rules.parseNote(page(opts), 'wiki/demo/code.md');
+const parsed = (rules, opts) => rules.parseNote(page(opts), 'wiki/glim/code.md');
 
 // A vault-only domain reaches no project; the vault folder is where its pages are read.
 const researchVault = t => makeVault(t, { domains: { reading: { title: 'Reading', vaultOnly: true, topics: ['solvers'] } } });
@@ -18,15 +18,15 @@ test('a page needs a kind from the list, and only a topic page is a topic page',
     assert.deepEqual(rules.noteErrors(n), [], kind);
     assert.equal(rules.isTopicPage(n), kind === 'topic', kind);
   }
-  v.write('wiki/demo/no-kind.md', page({ kind: null, topic: 'drafts' }));
-  v.write('wiki/demo/rule-kind.md', page({ kind: 'taste' }));
-  v.write('wiki/demo/listed-kind.md', page({ kind: null, extra: ['kind:', '  - concept'] }));
+  v.write('wiki/glim/no-kind.md', page({ kind: null, topic: 'drafts' }));
+  v.write('wiki/glim/rule-kind.md', page({ kind: 'taste' }));
+  v.write('wiki/glim/listed-kind.md', page({ kind: null, extra: ['kind:', '  - concept'] }));
   const unkinded = 'a page needs kind: topic, concept, entity, synthesis or source';
   assert.deepEqual((await lintFound(v, /kind/)).map(f => [f.level, f.file, f.msg]), [
-    ['warn', 'wiki/demo/no-kind.md', unkinded],
-    ['warn', 'wiki/demo/rule-kind.md', unkinded],
+    ['warn', 'wiki/glim/no-kind.md', unkinded],
+    ['warn', 'wiki/glim/rule-kind.md', unkinded],
   ]);
-  assert.ok(rules.domainTopics().get('demo').includes('drafts'));
+  assert.ok(rules.domainTopics().get('glim').includes('drafts'));
 });
 
 test('a global entry in vault.config.json is not a vault-only domain', async t => {
@@ -38,51 +38,51 @@ test('a global entry in vault.config.json is not a vault-only domain', async t =
 
 test('the index labels each page by its kind', async t => {
   const v = makeVault(t);
-  v.write('wiki/demo/code.md', page({ kind: 'topic' }));
-  v.write('wiki/demo/luau-types.md', page({ kind: 'concept' }));
-  v.write('wiki/demo/source-changelog.md', sourcePage({ source: 'https://example.com/changelog' }));
-  v.write('wiki/demo/rule-kind.md', page({ kind: 'taste' }));
-  v.write('wiki/demo/elsewhere.md', page({ kind: 'concept', domain: 'other' }));
+  v.write('wiki/glim/code.md', page({ kind: 'topic' }));
+  v.write('wiki/glim/luau-types.md', page({ kind: 'concept' }));
+  v.write('wiki/glim/source-changelog.md', sourcePage({ source: 'https://example.com/changelog' }));
+  v.write('wiki/glim/rule-kind.md', page({ kind: 'taste' }));
+  v.write('wiki/glim/elsewhere.md', page({ kind: 'concept', domain: 'other' }));
   const rules = await v.import('lib/rules.mjs');
   const index = rules.renderIndex(rules.loadNotes());
   assert.match(index, /\|code\]\] · topic page · /);
   assert.match(index, /\|luau-types\]\] · concept page · /);
   assert.match(index, /\|source-changelog\]\] · source page · /);
   assert.match(index, /\|rule-kind\]\] · page · /);
-  assert.match(index, /\|elsewhere\]\] · concept page · no sources · not valid: domain is other but the note is in wiki\/demo\/ · /);
+  assert.match(index, /\|elsewhere\]\] · concept page · no sources · not valid: domain is other but the note is in wiki\/glim\/ · /);
 });
 
 test('lint warns when a rule a page links changes after it, except on a source page', async t => {
   const v = makeVault(t);
-  v.write('wiki/demo/some-rule.md', ruleNote({ keywords: ['x'] }));
+  v.write('wiki/glim/some-rule.md', ruleNote({ keywords: ['x'] }));
   // Saved before the fixture's updated date, so each page's day stays 2026-10-01 whenever the test runs.
   const saved = new Date(2026, 8, 1);
   for (const [slug, kind] of [['code', 'topic'], ['luau-types', 'concept'], ['shop-answer', 'synthesis'], ['source-shop', 'source']]) {
     const extra = kind === 'source' ? ['source: https://example.com/shop'] : [];
-    fs.utimesSync(v.write(`wiki/demo/${slug}.md`, page({ kind, extra, body: ['## Rules', '- [[wiki/demo/some-rule|some-rule]]'] })), saved, saved);
+    fs.utimesSync(v.write(`wiki/glim/${slug}.md`, page({ kind, extra, body: ['## Rules', '- [[wiki/glim/some-rule|some-rule]]'] })), saved, saved);
   }
   const stale = await lintFound(v, /after this page/);
-  assert.deepEqual(stale.map(f => [f.level, f.file]), [['warn', 'wiki/demo/code.md'], ['warn', 'wiki/demo/luau-types.md'], ['warn', 'wiki/demo/shop-answer.md']]);
-  assert.match(stale[0].msg, /^demo\/some-rule changed on \d{4}-\d\d-\d\d, after this page \(2026-10-01\)\. Check the page still matches it, then set updated$/);
+  assert.deepEqual(stale.map(f => [f.level, f.file]), [['warn', 'wiki/glim/code.md'], ['warn', 'wiki/glim/luau-types.md'], ['warn', 'wiki/glim/shop-answer.md']]);
+  assert.match(stale[0].msg, /^glim\/some-rule changed on \d{4}-\d\d-\d\d, after this page \(2026-10-01\)\. Check the page still matches it, then set updated$/);
 });
 
 test('lint warns on two topic pages on one topic, not on other pages sharing it', async t => {
   const v = makeVault(t);
-  v.write('wiki/demo/code.md', page({ kind: 'topic' }));
-  v.write('wiki/demo/luau-types.md', page({ kind: 'concept' }));
-  v.write('wiki/demo/strict-mode.md', page({ kind: 'concept' }));
+  v.write('wiki/glim/code.md', page({ kind: 'topic' }));
+  v.write('wiki/glim/luau-types.md', page({ kind: 'concept' }));
+  v.write('wiki/glim/strict-mode.md', page({ kind: 'concept' }));
   assert.deepEqual(await lintFound(v, /another topic page/), []);
-  v.write('wiki/demo/code-notes.md', page({ kind: 'topic' }));
+  v.write('wiki/glim/code-notes.md', page({ kind: 'topic' }));
   const twice = (await lintFound(v, /another topic page/)).map(f => f.file).sort();
-  assert.deepEqual(twice, ['wiki/demo/code-notes.md', 'wiki/demo/code.md']);
+  assert.deepEqual(twice, ['wiki/glim/code-notes.md', 'wiki/glim/code.md']);
 });
 
 test('lint warns on a source page with no source, and on no other page for it', async t => {
   const v = makeVault(t);
-  v.write('wiki/demo/source-shop.md', page({ kind: 'source' }));
-  v.write('wiki/demo/code.md', page({ kind: 'topic' }));
+  v.write('wiki/glim/source-shop.md', page({ kind: 'source' }));
+  v.write('wiki/glim/code.md', page({ kind: 'topic' }));
   const found = await lintFound(v, /^no source\./);
-  assert.deepEqual(found.map(f => [f.level, f.file]), [['warn', 'wiki/demo/source-shop.md']]);
+  assert.deepEqual(found.map(f => [f.level, f.file]), [['warn', 'wiki/glim/source-shop.md']]);
   assert.equal(found[0].msg, 'no source. A source page names the file under raw/ or the URL it is about');
 });
 
@@ -120,6 +120,6 @@ test('a session in the vault folder hears every domain\'s topics, and a project 
 test('review status does not list a vault-only domain\'s topics as missing rules', t => {
   const v = researchVault(t);
   const out = v.run('review.mjs', ['status']).stdout;
-  assert.match(out, /demo: layout, code/);
+  assert.match(out, /glim: layout, code/);
   assert.doesNotMatch(out, /reading: solvers/);
 });
