@@ -45,6 +45,20 @@ test('a gated edit takes under 300 ms at 3,000 notes', perf, t => {
   assert.ok(ms < 300, `${Math.round(ms)} ms`);
 });
 
+test('an AskUserQuestion call takes under 300 ms at 3,000 notes', perf, t => {
+  const v = shared(3000);
+  const times = [];
+  for (let i = 0; i < 3; i++) {
+    const start = performance.now();
+    const out = v.edit(sessionId(), 'AskUserQuestion', { questions: [{ question: 'Which layout?', header: 'Layout', multiSelect: false, options: [{ label: 'Grid' }, { label: 'Shelf' }] }] });
+    times.push(performance.now() - start);
+    assert.ok(denied(out), 'the call is gated');
+  }
+  times.sort((a, b) => a - b);
+  t.diagnostic(`AskUserQuestion call, 3,000 notes: fastest ${Math.round(times[0])} ms, median ${Math.round(times[1])} ms of 3`);
+  assert.ok(times[0] < 300, `${Math.round(times[0])} ms`);
+});
+
 test('three parallel proposes at 3,000 notes all succeed', perf, async t => {
   const v = shared(3000);
   const start = performance.now();

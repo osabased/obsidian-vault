@@ -27,16 +27,17 @@ export function fileScope(file, cwd) {
 export const fires = (note, text) => !note.triggers?.length || note.triggers.some(t => tryRegex(t)?.test(text));
 
 // The rules due on this edit, most specific first: the ones this session was not yet refused with on this file. The text
-// may be given as a function, so a file is read only when a due rule has triggers.
+// may be given as a function, so a file is read only when a due rule has triggers. An item that carries its own text,
+// as a rule a tool's name reaches does, tests its triggers against that.
 export function dueRules(input, matched, text) {
   let cached;
   const read = typeof text === 'function' ? () => (cached ??= text()) : () => text;
   const hits = [];
-  for (const { key, note, rel, place, spec } of matched) {
+  for (const { key, note, rel, place, spec, text: own } of matched) {
     const triggered = note.triggers?.length > 0;
     // The hash is in the id, so a reworded rule is refused once more on files it already gated.
     const id = agentKey(input, `${key}|${note.hash}|${place}`);
-    if (marked('gate', input.session_id, id) || (triggered && !fires(note, read()))) continue;
+    if (marked('gate', input.session_id, id) || (triggered && !fires(note, own ?? read()))) continue;
     hits.push({ key, note, rel, id, triggered, spec });
   }
   return hits.sort((a, b) => Number(b.triggered) - Number(a.triggered) || bySpecificity(a.spec, b.spec) || byFit(a.note, b.note) || cmp(a.key, b.key));

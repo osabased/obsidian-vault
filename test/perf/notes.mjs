@@ -9,7 +9,8 @@ const DOMAINS = ['ui', ...OTHERS, 'global'];
 
 const globOf = i => `src/${WORDS[i % WORDS.length]}/**/*.${EXTS[i % EXTS.length]}`;
 
-// Note 0 is a ui rule on this glob, so an edit of this file is gated in any vault that has it.
+// Note 0 is a ui rule on this glob, so an edit of this file is gated in any vault that has it. Note 4, a global rule, is
+// the one with tools, so an AskUserQuestion call is gated in every session.
 export const GATED = globOf(0).replace('**', 'a').replace('*.', 'b.');
 
 // Notes from to - 1, all settled. Each run of 25 holds 15 rules, then 10 pages of every kind with footnotes and links
@@ -26,7 +27,7 @@ export function addNotes(v, from, to) {
       v.write(`wiki/${domain}/rules/rule-${i}.md`, ruleNote({
         domain, topic, always, applies_to: [glob, `**/*.${EXTS[(i + 1) % EXTS.length]}`], keywords: always ? [] : kw,
         doLine: `Rule ${i}: use the ${kw[0]} helper for every ${kw[1]} call in this module.`, notLine: `Inline the ${kw[1]} logic by hand.`,
-        because: `Consistency across ${domain}.`,
+        because: `Consistency across ${domain}.`, extra: i === 4 ? ['tools: [AskUserQuestion]'] : [],
         evidence: [`- 2026-10-01 · stated · session 1a2b3c4d · "use the ${kw[0]} helper" (a-${String(i).padStart(8, '0')})`],
       }));
     } else {
