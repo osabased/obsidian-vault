@@ -267,6 +267,23 @@ test('20 rules and 2 pages on one glob refuse the first edit of a file once, and
   assert.equal(edit(v, sid, 'src/x.txt'), null, 'the retry passes');
 });
 
+test('a refusal writes its markers in one file per kind however many rules are due, and markers older tools wrote still count', async t => {
+  const v = makeVault(t);
+  const sid = sessionId();
+  for (let i = 0; i < 30; i++) v.write(`wiki/demo/rules/rule-${i}.md`, ruleNote({ applies_to: ['**/*.txt'], doLine: `Rule ${i}.` }));
+  assert.ok(denied(edit(v, sid, 'src/x.txt')));
+  for (const kind of ['gate', 'delivered', 'excerpts']) assert.deepEqual(fs.readdirSync(v.at('.state', kind, sid)), ['keys.jsonl'], kind);
+
+  const old = sessionId();
+  const { shortHash } = await v.import('lib/vault.mjs');
+  const { liveRules, loadNotes } = await v.import('lib/rules.mjs');
+  for (const [key, { hash }] of Object.entries(liveRules(loadNotes()))) {
+    const id = `${key}|${hash}|src/x.txt`;
+    v.write(`.state/gate/${old}/${shortHash(id)}`, id);
+  }
+  assert.equal(edit(v, old, 'src/x.txt'), null, 'one-file markers from before still mark the file gated');
+});
+
 test('a trigger with nested wildcards does not hold the edit hook up on a long line', async t => {
   const v = makeVault(t);
   const trigger = 'make\\(.*,.*,.*,.*\\)';
