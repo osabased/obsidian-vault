@@ -2,11 +2,10 @@ import fs from 'node:fs';
 import path from 'node:path';
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { makeVault, sessionId, editFile, denied, serve, gitRepo, ruleNote, withFields, sectionOf, LEDGER_GUIDE, LEDGER_REPO } from './fixture.mjs';
+import { makeVault, sessionId, ledgerEdit, serve, gitRepo, ruleNote, withFields, sectionOf, LEDGER_GUIDE, LEDGER_REPO } from './fixture.mjs';
 
 // What .state/derived.json holds as raw/refs/ and the notes change, and what the hooks and review make of it.
 
-const ledgerEdit = (v, sid) => denied(editFile(v, sid, 'src/ledger.txt', { abs: path.join(v.projects.almanac, 'src', 'ledger.txt'), cwd: v.projects.almanac })) ?? '';
 const unverified = v => Object.keys(JSON.parse(v.read('.state/derived.json')).unverified).sort();
 const daysAgo = n => new Date(Date.now() - n * 864e5).toISOString().slice(0, 10);
 const LEDGER_URL = 'https://pkg.invalid/ledger';

@@ -3,13 +3,12 @@ import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { makeVault, sessionId, editFile, denied, prompt, ruleNote, withFields, LEDGER_GUIDE, sha256 } from './fixture.mjs';
+import { makeVault, sessionId, denied, ledgerEdit, prompt, ruleNote, withFields, LEDGER_GUIDE, sha256 } from './fixture.mjs';
 import { compareSemver, inRange, fitOf } from '../tools/lib/versions.mjs';
 
 const V2 = /almanac\/ledger-v2: Do: Call openLedger with the path\./;
 const V3 = /almanac\/ledger-v3: Do: Call openLedger with \{ path \}\./;
 const context = out => out?.hookSpecificOutput?.additionalContext ?? '';
-const ledgerEdit = (v, sid, dir = v.projects.almanac) => denied(editFile(v, sid, 'src/ledger.txt', { abs: path.join(dir, 'src', 'ledger.txt'), cwd: dir })) ?? '';
 const lockfile = v => path.join(v.projects.almanac, 'almanac.lock');
 // The line a rule is delivered on, so a label is read off the rule it belongs to.
 const lineOf = (text, key) => text.split('\n').find(l => l.includes(`${key}: `)) ?? '';

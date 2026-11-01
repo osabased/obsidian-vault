@@ -262,6 +262,11 @@ export function ruleNote({ domain = 'glim', topic = 'code', basis = 'stated', ki
 }
 
 export const sha256 = data => createHash('sha256').update(data).digest('hex');
+// Each file under a vault folder, by its path from the vault root, with the hash of its bytes, to compare before and after a run.
+export const filesUnder = (v, dir) => Object.fromEntries(fs.readdirSync(v.at(...dir.split('/')), { recursive: true, withFileTypes: true })
+  .filter(e => e.isFile()).map(e => [path.relative(v.root, path.join(e.parentPath, e.name)).replace(/\\/g, '/'), sha256(fs.readFileSync(path.join(e.parentPath, e.name)))]));
+// The refusal an edit to src/ledger.txt in the almanac preset's project, or in dir, gets, or '' when it goes through.
+export const ledgerEdit = (v, sid, dir = v.projects.almanac) => denied(editFile(v, sid, 'src/ledger.txt', { abs: path.join(dir, 'src', 'ledger.txt'), cwd: dir })) ?? '';
 // The tools date notes by the local day, so a fixture's dates are local too.
 const localDay = d => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 // The lines under a section's title in review.mjs output, or undefined when it has no such section.
