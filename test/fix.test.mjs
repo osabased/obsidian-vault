@@ -12,6 +12,7 @@ function brokenVault(t) {
   v.write('raw/refs/guide.md', 'The guide says to do the thing.\n');
   v.write('wiki/demo/rules/said.md', ruleNote({
     because: 'It reads better.',
+    keywords: ['thing'],
     evidence: ['- 2026-10-01 · stated · session 1a2b3c4d · "see [[demo/code]]" (a-00000001)'],
   }).replace('## Examples\n', '## Examples\n\n- [[demo/code]]\n'), { saved: OLD });
   v.write('wiki/demo/topics/code.md', pageNote({ body: [

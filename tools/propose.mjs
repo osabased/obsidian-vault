@@ -1,12 +1,12 @@
 import fs from 'node:fs';
 import crypto from 'node:crypto';
 import {
-  config, vaultPath, proposeDomains, writeSettled, appendJsonl, appendLog, inboxFile, proposalRows, pickRows, statePath, withLock, today, localDay, toPosix, guarded,
+  vaultPath, proposeDomains, writeSettled, appendJsonl, appendLog, inboxFile, proposalRows, pickRows, statePath, withLock, today, localDay, toPosix, guarded,
   shortHash,
 } from './lib/vault.mjs';
 import {
   KEY_RE, BASES, wrongBasis, parseNote, noteErrors, ruleText, ruleTextParts, loadNotes, readNote, liveRules, mentions, isUrl, validDay, byKey, normTopic, domainTopics, vaultFile, joinList,
-  sharedFiles, rankPair,
+  sharedFiles, rankPair, maxChars,
 } from './lib/rules.mjs';
 import { build } from './lib/build.mjs';
 import { normGlob } from './lib/glob.mjs';
@@ -50,7 +50,7 @@ const help = () => [
   '  keywords     words a request about it would use',
   '  applies_to   globs from the project root; give them to a rule about code or files',
   '  triggers     regexes tested against the new text of an edit; when given, the rule applies only if one matches',
-  '               A taste rule needs keywords or applies_to. A knowledge rule needs applies_to and takes no keywords.',
+  '               A rule needs keywords or applies_to.',
   "               always: true is the user's to set in Obsidian, so propose.mjs refuses it.",
   '  repeats      optional, the key of the rule in the vault this one repeats, like roblox-ui/flat-buttons:',
   "               propose.mjs adds this rule's Evidence line to that note and writes no new one",
@@ -313,7 +313,8 @@ function addEvidence(f, e, scope, rules, same, row, notes) {
 function propose(sid, p) {
   const session = sessionOf(sid);
   const domains = [...session.domains, 'global'];
-  const f = { sid, domain: line(p, 'domain'), slug: line(p, 'slug') };
+  // Slugs compare in NFC, so a slug typed with combining accents names the same note as its composed spelling.
+  const f = { sid, domain: line(p, 'domain').normalize('NFC'), slug: line(p, 'slug').normalize('NFC') };
   if (!domains.includes(f.domain)) refuse(`domain must be ${joinList(domains, 'or')}.`);
   const key = `${f.domain}/${f.slug}`;
   if (!KEY_RE.test(key)) refuse('slug must be lowercase-kebab-case.');
@@ -328,9 +329,9 @@ function propose(sid, p) {
   if (typeof always !== 'boolean') refuse('always must be true or false.');
   // The user chose to set always: true by hand; the note carries always: false for them to flip.
   if (always) refuse("always is the user's to set in Obsidian. Give the rule keywords or applies_to instead.");
-  if (f.kind === 'taste' && !f.applies_to.length && !f.keywords.length) refuse('give it keywords or applies_to, or nothing will deliver it.');
+  if (!f.applies_to.length && !f.keywords.length) refuse('give it keywords or applies_to, or nothing will deliver it.');
   const scope = f.domain === 'global' ? domains : [f.domain, 'global'];
-  f.repeats = line(p, 'repeats', false);
+  f.repeats = line(p, 'repeats', false).normalize('NFC');
   if (f.repeats && !KEY_RE.test(f.repeats)) refuse('repeats must be a rule key like roblox-ui/flat-buttons.');
   const e = evidence(f, p);
   checkQuote(session, e);
@@ -344,8 +345,8 @@ function propose(sid, p) {
   checkReadBack(n, f);
   const [err] = noteErrors(n);
   if (err) refuse(`${err}.`);
-  const { maxRuleChars } = config().delivery;
-  if (ruleText(n).length > maxRuleChars) refuse(`${ruleTextParts(n)} come to ${ruleText(n).length} characters; keep them under ${maxRuleChars} together.`);
+  const cap = maxChars(n.kind);
+  if (ruleText(n).length > cap) refuse(`${ruleTextParts(n)} come to ${ruleText(n).length} characters; keep them under ${cap} together.`);
 
   return withLock(statePath('propose.lock'), () => {
     const rows = proposalRows();
