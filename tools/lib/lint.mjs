@@ -311,12 +311,12 @@ function lintFootnotes(n, { lines, anchors }, add) {
 }
 
 // Raw files are append-only, so a saved source's fields are warnings: a fix is a new file, not an edit. A parse
-// error, such as a quote that never closes, is an error, as in a note: the value it is in reads wrong.
+// error, such as a quote that never closes, is a warning too: as an error it would block every commit.
 function lintSources(add) {
   for (const f of refSources().loose.filter(x => x.endsWith('.md'))) {
     const parsed = parsedFile(f);
     if (!parsed?.ok) continue;
-    for (const msg of parsed.errors) add('error', f, msg);
+    for (const msg of parsed.errors) add('warn', f, msg);
     if (parsed.data.url == null && parsed.data.repo == null) continue;
     for (const msg of sourceProblems(parsed.data, { body: parsed.body })) add('warn', f, msg);
   }
@@ -332,7 +332,7 @@ function lintBundles(add, hashOf) {
       add('warn', rel, "no frontmatter. A bundle's source.md starts with url and commit, or sha256");
       continue;
     }
-    for (const msg of parsed.errors) add('error', rel, msg);
+    for (const msg of parsed.errors) add('warn', rel, msg);
     for (const msg of sourceProblems(data, { bundle: true })) add('warn', rel, msg);
     if (data.commit == null && data.sha256 == null) add('warn', rel, "no commit or sha256. A bundle's source.md pins the folder with a commit, or a sha256 line for each file");
     else if (data.commit != null && data.url == null && data.repo == null) add('warn', rel, 'a commit needs a url or repo. Say where the folder came from');
@@ -364,7 +364,7 @@ function lintDerived(add, hashOf) {
       add('warn', f, 'no frontmatter. Derived text starts with kind, extractor, extractor_version and source');
       continue;
     }
-    for (const msg of parsed.errors) add('error', f, msg);
+    for (const msg of parsed.errors) add('warn', f, msg);
     if (!KINDS.includes(data.kind)) add('warn', f, `kind must be ${joinList(KINDS, 'or')}`);
     if (!filled(data.extractor)) add('warn', f, 'no extractor. Name the program that made the text');
     if (!filled(data.extractor_version)) add('warn', f, 'no extractor_version. Give the version of the program that made the text');

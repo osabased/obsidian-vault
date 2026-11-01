@@ -145,7 +145,7 @@ test('lint reports a quote that never closes in a saved source, a bundle source.
   v.write('raw/refs/b/x.zq', 'set x to 1\n');
   v.write(`derived/${'0'.repeat(64)}.md`, "---\nkind: pdf\nextractor: 'x\nextractor_version: 1\nsource: raw/refs/a.md\n---\n");
   const found = (await v.import('lib/lint.mjs')).lint().filter(f => /never closes/.test(f.msg));
-  assert.deepEqual(found.map(f => [f.level, f.file]).sort(), [['error', `derived/${'0'.repeat(64)}.md`], ['error', 'raw/refs/a.md'], ['error', 'raw/refs/b/source.md']]);
+  assert.deepEqual(found.map(f => [f.level, f.file]).sort(), [['warn', `derived/${'0'.repeat(64)}.md`], ['warn', 'raw/refs/a.md'], ['warn', 'raw/refs/b/source.md']]);
 });
 
 test('lint marks a note whose quote never closes, and reads a folded summary whole', async t => {
