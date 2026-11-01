@@ -11,7 +11,7 @@ import { changedFiles } from './git.mjs';
 const CACHE = ['.state', 'cache'];
 // A file saved within this long of being read may change again within the same mtime on a coarse file system, so it
 // is read once more on a later call.
-const RACY_MS = 2000;
+export const RACY_MS = 2000;
 
 // The config names domains in NFC and a folder may be stored NFD, so a folder goes by its NFC name.
 const nfc = s => s.normalize('NFC');

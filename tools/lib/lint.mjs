@@ -11,7 +11,8 @@ import {
 } from './rules.mjs';
 import { setField } from './frontmatter.mjs';
 import { NAMESPACE_NAME } from './glob.mjs';
-import { EXTENSION_NAME, hasExtension, extensionRel } from './ext.mjs';
+import { EXTENSION_NAME, hasExtension, extensionRel, extension } from './ext.mjs';
+import { SCHEMES } from './versions.mjs';
 import { build } from './build.mjs';
 import { transcriptFor } from './sessions.mjs';
 import { typedMessages, saidIn, sourceTexts, userPageTexts } from './quotes.mjs';
@@ -101,6 +102,7 @@ export function lint(notes = loadNotes()) {
   }
 
   lintConfig(add);
+  lintReaders(notes, add);
   lintTopics(notes, domains, add);
   lintTopicPages(notes, add);
   lintOrphans(notes, resolve, add);
@@ -619,12 +621,64 @@ function fsWrites(scanned) {
   return calls;
 }
 
+// Each domain's readers, loaded as a hook loads them, so a reader that would fail a hook fails lint first. A note's
+// requires names an ecosystem one of its domain's readers answers to, or no project can say whether it fits.
+function lintReaders(notes, add) {
+  const c = readJson(vaultPath('vault.config.json'), {}) ?? {};
+  const bad = msg => add('error', 'vault.config.json', msg);
+  const answers = new Map();
+  for (const [d, x] of Object.entries(isMap(c.domains) ? c.domains : {})) {
+    if (x?.readers === undefined) continue;
+    const at = `${d}.readers`;
+    if (!Array.isArray(x.readers)) {
+      bad(`${at} must be a list of reader extension names`);
+      continue;
+    }
+    const ecosystems = new Map();
+    for (const name of x.readers) {
+      if (typeof name !== 'string' || !EXTENSION_NAME.test(name)) {
+        bad(`${at}: ${JSON.stringify(name)} must name an extension in lowercase letters, digits, - or _`);
+        continue;
+      }
+      if (!hasExtension('readers', name)) {
+        bad(`${at} names ${name}, and ${extensionRel('readers', name)} doesn't exist`);
+        continue;
+      }
+      let r;
+      try {
+        r = extension('readers', name, ['read']);
+      } catch (e) {
+        bad(`${at}: ${name}: ${e.message}`);
+        continue;
+      }
+      const rel = extensionRel('readers', name);
+      if (typeof r.ecosystem !== 'string' || !r.ecosystem) bad(`${at}: ${rel} must export ecosystem, a non-empty string`);
+      if (!Array.isArray(r.lockfiles) || !r.lockfiles.length || !r.lockfiles.every(f => typeof f === 'string' && f && !/[\\/]/.test(f))) {
+        bad(`${at}: ${rel} must export lockfiles, a list of file names`);
+      }
+      if (!SCHEMES.includes(r.scheme)) bad(`${at}: ${rel} exports scheme ${JSON.stringify(r.scheme)}; it must be ${joinList(SCHEMES.map(x => `'${x}'`), 'or')}`);
+      else if (r.scheme === 'ECOSYSTEM' && typeof r.compare !== 'function') bad(`${at}: ${rel} has scheme 'ECOSYSTEM' and exports no compare function`);
+      if (typeof r.ecosystem !== 'string' || !r.ecosystem) continue;
+      if (ecosystems.has(r.ecosystem)) bad(`${at}: ${ecosystems.get(r.ecosystem)} and ${name} both read ecosystem ${r.ecosystem}`);
+      else ecosystems.set(r.ecosystem, name);
+    }
+    answers.set(d, ecosystems);
+  }
+  for (const n of notes) {
+    if (!Array.isArray(n.requires)) continue;
+    const named = [...new Set(n.requires.map(e => e?.package?.ecosystem).filter(e => typeof e === 'string'))];
+    for (const e of named.filter(e => !answers.get(n.domain)?.has(e))) {
+      add('warn', n.rel, `requires names ecosystem ${e}, and no reader in ${n.domain}.readers reads it, so the note is always delivered as version unknown`);
+    }
+  }
+}
+
 function codeErrors(rel, src) {
   const scanned = scan(src);
   const { code, comments, strings } = scanned;
   const errors = [];
   const inHooks = rel.startsWith('hooks/');
-  const quiet = inHooks || rel.startsWith('lib/');
+  const quiet = inHooks || rel.startsWith('lib/') || rel.startsWith('ext/');
 
   const specs = [...code.matchAll(/(?<![\w$.])(?:from|import|require)\s*\(?\s*(?=['"`])/g)]
     .map(m => strings.get(m.index + m[0].length))

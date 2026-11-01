@@ -1,7 +1,7 @@
 import fs from 'node:fs';
 import { runHook, config, domainsFor, everywhereDomains, vaultRel, vaultOwn, toPosix, cwdOf, FILE_TOOLS, toolFile, shortHash, lf, plainText } from '../lib/vault.mjs';
 import {
-  loadNotes, settledNotes, liveRules, livePages, ruleLine, rulePointer, pageLine, fitContext, cmp, clip, parseNote, QUOTED, agentNotesSpan, authoredByUser, AGENT_NOTES, TOP_HEADING, isMap,
+  loadNotes, settledNotes, liveRules, livePages, deliverable, deliveryFor, byFit, ruleLine, rulePointer, pageLine, fitContext, cmp, clip, parseNote, QUOTED, agentNotesSpan, authoredByUser, AGENT_NOTES, TOP_HEADING, isMap,
 } from '../lib/rules.mjs';
 import { matchTarget, targetNames, specificity, bySpecificity } from '../lib/glob.mjs';
 import { matcher, fileScope, fires, dueRules, gatedFile } from '../lib/scope.mjs';
@@ -208,6 +208,7 @@ function nameScope(input, t, cwd) {
   const viaFiles = files.map(f => matcher(f, cwd));
   return {
     domains: [...doms, ...files.flatMap(f => domainsFor(f, cwd).map(d => d.domain)), 'global', ...everywhere],
+    hits: [...hits, ...files.flatMap(f => domainsFor(f, cwd))],
     matching: (notes, pages = false) => [...own(notes, pages), ...viaFiles.flatMap(m => m(notes, pages))]
       .filter((m, i, all) => all.findIndex(x => x.key === m.key) === i),
   };
@@ -251,15 +252,17 @@ runHook('edit', input => {
     if (why) return deny(why);
     if (vaultOwn(vaultRel(t.path, cwd))) return null;
   }
-  const { domains, matching } = t.namespace === 'file' ? fileScope(t.path, cwd) : nameScope(input, t, cwd);
+  const { domains, hits: reach, matching } = t.namespace === 'file' ? fileScope(t.path, cwd) : nameScope(input, t, cwd);
   const notes = settledNotes(loadNotes(domains));
   const text = plainText(newText(input.tool_name, input.tool_input ?? {}));
-  const matched = matching(liveRules(notes));
+  const ctx = deliveryFor(reach);
+  const matched = deliverable(matching(liveRules(notes)), ctx);
   const hits = dueRules(input, matched, text);
   // A page is told of once per session wherever it comes up, and is gated on each file as a rule is, so a page the
   // budget left out of a refusal doesn't refuse the retry.
-  const pages = duePages(input, matching(livePages(notes), true).filter(m => fires(m.note, text)).sort((a, b) => bySpecificity(a.spec, b.spec) || cmp(a.key, b.key)), Infinity)
-    .map(m => ({ ...m, id: agentKey(input, `page|${m.key}|${m.place}`) }))
+  const pages = duePages(input, deliverable(matching(livePages(notes), true), ctx).filter(m => fires(m.note, text))
+    .sort((a, b) => bySpecificity(a.spec, b.spec) || byFit(a.note, b.note) || cmp(a.key, b.key)), Infinity)
+    .map(m => ({ ...m, id: agentKey(input, `page|${m.key}${m.note.hash ? `|${m.note.hash}` : ''}|${m.place}`) }))
     .filter(m => !marked('gate', input.session_id, m.id));
   // Only a file some rule covers can matter to the Stop hook, which checks a turn only once the prompt hook has stamped
   // it, so the others cost no write.

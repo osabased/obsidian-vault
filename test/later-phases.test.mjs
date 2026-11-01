@@ -8,7 +8,7 @@ import { today } from '../tools/lib/vault.mjs';
 
 const ledgerEdit = (v, sid) => denied(editFile(v, sid, 'src/ledger.txt', { abs: path.join(v.projects.almanac, 'src', 'ledger.txt'), cwd: v.projects.almanac })) ?? '';
 
-test('a project whose lockfile pins pkg 2 delivers only the v2 rule, and review status ranks it first', { todo: '6.1c, phase 4: version readers' }, t => {
+test('a project whose lockfile pins pkg 2 delivers only the v2 rule, and review status ranks it first', t => {
   const v = makeVault(t, { presets: ['almanac'] });
   // A later as_of would rank v3 first, so only the version match can put v2 ahead.
   v.write('wiki/almanac/rules/ledger-v3.md', v.read('wiki/almanac/rules/ledger-v3.md').replace(/^as_of: .*$/m, `as_of: ${today()}`));
