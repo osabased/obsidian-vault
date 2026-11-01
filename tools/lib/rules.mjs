@@ -57,15 +57,22 @@ export function parsedFile(rel) {
   try { return parse(fs.readFileSync(vaultPath(...rel.split('/')), 'utf8')); } catch { return null; }
 }
 
-// A file's path from the vault root as the disk spells it, so each file has one spelling; null when there's no such file.
-export function vaultFile(rel) {
+// A file's or folder's path from the vault root as the disk spells it, so each has one spelling, with its stat; null
+// when there's nothing at the path.
+export function diskRel(ref) {
   try {
-    const real = fs.realpathSync.native(vaultPath(rel));
-    return fs.statSync(real).isFile() ? path.relative(rootOnDisk(), real).split(path.sep).join('/') : null;
+    const real = fs.realpathSync.native(vaultPath(ref));
+    return { rel: path.relative(rootOnDisk(), real).split(path.sep).join('/'), stat: fs.statSync(real) };
   } catch {
     return null;
   }
 }
+
+// A file's path from the vault root as the disk spells it; null when there's no such file.
+export const vaultFile = ref => {
+  const at = diskRel(ref);
+  return at?.stat.isFile() ? at.rel : null;
+};
 
 // Spelled as the disk spells it, so two pages that name one file name it the same way.
 export const rawFile = ref => {
@@ -817,11 +824,10 @@ export const isDocSet = (folder, names = folderNames()) => !isFileAt(...folder.s
 // folder comes back as the disk spells it, or null when the path is in no bundle or doc set.
 export function bundleOf(ref, names = folderNames()) {
   if (typeof ref !== 'string' || !ref) return null;
-  let real;
-  try { real = fs.realpathSync.native(vaultPath(ref)); } catch { return null; }
-  const parts = path.relative(rootOnDisk(), real).split(path.sep);
-  if (parts[0] !== 'raw' || parts[1] !== 'refs') return null;
-  const dirs = fs.statSync(real).isDirectory() ? parts : parts.slice(0, -1);
+  const at = diskRel(ref);
+  const parts = at?.rel.split('/');
+  if (parts?.[0] !== 'raw' || parts[1] !== 'refs') return null;
+  const dirs = at.stat.isDirectory() ? parts : parts.slice(0, -1);
   return bundleAbove(dirs.join('/'), names);
 }
 

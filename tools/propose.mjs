@@ -12,7 +12,7 @@ import { build } from './lib/build.mjs';
 import { entryKey } from './lib/glob.mjs';
 import { typedMessages, saidIn, normText, quoteTexts, userPageTexts } from './lib/quotes.mjs';
 import { ownEntry, marked, markMany, wasShown, carryMarkers, proposeDomains } from './lib/sessions.mjs';
-import { setField, yamlQuote, plainSafe } from './lib/frontmatter.mjs';
+import { setField, yamlQuote, yamlScalar } from './lib/frontmatter.mjs';
 import { subjectRows, laterRows, endedBy, otherLabels } from './lib/picks.mjs';
 import { UsageError, readInput, refuse, failure, line } from './lib/input.mjs';
 
@@ -283,7 +283,6 @@ function checkReadBack(n, f) {
   if (bad) refuse(`${bad[0]} doesn't survive as YAML. Rephrase it.`);
 }
 
-const yaml = s => (plainSafe(s) ? s : yamlQuote(s));
 const yamlList = (name, xs) => (xs.length ? [`${name}:`, ...xs.map(x => `  - ${yamlQuote(x)}`)] : [`${name}: []`]);
 
 // A pick is cited from the day and session it was recorded in, and a page of the user's by its path.
@@ -292,7 +291,7 @@ const evidenceLine = (f, e) => `${citation(f, e)} (${e.pick ? `${e.pick}; propos
 
 const noteText = (f, e) => [
   '---', 'type: rule', `domain: ${f.domain}`, `kind: ${f.kind}`, `basis: ${f.basis}`, ...(f.as_of ? [`as_of: ${f.as_of}`] : []),
-  `topic: ${yaml(f.topic)}`, 'always: false',
+  `topic: ${yamlScalar(f.topic)}`, 'always: false',
   ...yamlList('applies_to', f.applies_to), ...yamlList('triggers', f.triggers), ...yamlList('keywords', f.keywords),
   `created: ${f.day}`, `updated: ${f.day}`, '---', '',
   `**Do:** ${f.do}`, `**Not:** ${f.not}`, `**Because:**${f.because ? ` ${f.because}` : ''}`, '',
