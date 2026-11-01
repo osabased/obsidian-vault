@@ -11,7 +11,7 @@ import {
 import { build } from './lib/build.mjs';
 import { entryKey } from './lib/glob.mjs';
 import { typedMessages, saidIn, normText, sourceTexts, userPageTexts } from './lib/quotes.mjs';
-import { ownEntry, marked, mark, wasShown, carryMarkers, proposeDomains } from './lib/sessions.mjs';
+import { ownEntry, marked, markMany, wasShown, carryMarkers, proposeDomains } from './lib/sessions.mjs';
 import { setField, yamlQuote, plainSafe } from './lib/frontmatter.mjs';
 import { subjectRows, laterRows, endedBy, otherLabels } from './lib/picks.mjs';
 import { UsageError, readInput, refuse, failure, line } from './lib/input.mjs';
@@ -221,7 +221,7 @@ function checkRepeats(f, text, scope, rules, same, notes) {
   const listedRules = [...topic, ...alike];
   const ids = [...listedRules.map(([k, r]) => `${f.slug}|${k}|${r.hash}`), ...(same ? [`${f.slug}|words|${same.id}`] : [])];
   if (ids.every(id => marked('repeats', f.sid, id))) return [...all.filter(([k]) => inTopic.has(k)), ...alike].sort(byKey).map(([k]) => k);
-  for (const id of ids) mark('repeats', f.sid, id);
+  markMany('repeats', f.sid, ids);
   const more = others.length - alike.length;
   const item = ([k, r]) => `- ${k}: ${r.text} [${wasShown(f.sid, k) ? 'shown' : 'not shown'} in this session]`;
   const it = same ? 'It' : 'it';

@@ -91,8 +91,8 @@ runHook('session-start', input => {
     touchSession(input, hits);
     // Only the rules that fit count as shown, but those cut for size are marked too, so the next prompt doesn't
     // deliver what didn't fit here.
-    for (const k of always.keys) markShown(input.session_id, k);
-    for (const [k, r] of alwaysIn(rules, scope)) markAlways(input.session_id, k, r);
+    markShown(input.session_id, always.keys);
+    markAlways(input.session_id, alwaysIn(rules, scope));
     if (doms.length) {
       propose = proposeNote(input.session_id);
       pick = pickNote(input.session_id);
