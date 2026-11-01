@@ -31,6 +31,14 @@ test('hooks.json gives only the edit hook a matcher, the one it ships with', () 
   const edit = commands.filter(c => c.args[1] === 'edit');
   assert.deepEqual(edit.map(c => [c.event, c.matcher]), [['PreToolUse', EDIT_HOOK_MATCHER]]);
   assert.deepEqual(commands.filter(c => c.matcher !== undefined).map(c => c.event), ['PreToolUse']);
+  assert.equal(EDIT_HOOK_MATCHER, '^(?:Edit|Write|MultiEdit|NotebookEdit|AskUserQuestion|mcp__.*)$');
+});
+
+// Claude Code tests a matcher that isn't a plain list of names as an unanchored regex, so the matcher anchors itself.
+test('the edit hook\'s matcher, read as Claude Code reads it, sends the file tools, AskUserQuestion and MCP tools, and nothing else', () => {
+  const sends = new RegExp(EDIT_HOOK_MATCHER);
+  const sent = ['Edit', 'Write', 'MultiEdit', 'NotebookEdit', 'AskUserQuestion', 'mcp__fixture__set_property', 'TodoWrite', 'Bash', 'NotebookEditor', 'xmcp__fixture__x'].filter(n => sends.test(n));
+  assert.deepEqual(sent, ['Edit', 'Write', 'MultiEdit', 'NotebookEdit', 'AskUserQuestion', 'mcp__fixture__set_property']);
 });
 
 test('plugin.json asks for the vault folder', () => {
