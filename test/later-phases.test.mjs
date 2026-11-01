@@ -18,7 +18,7 @@ test('a project whose lockfile pins pkg 2 delivers only the v2 rule, and review 
   assert.match(refusal, /almanac\/ledger-v2: Do: Call openLedger with the path\./);
   assert.doesNotMatch(refusal, /almanac\/ledger-v3/, 'the v3 rule is delivered in a project whose lockfile pins pkg 2.4.0');
   assert.doesNotMatch(refusal, /version unknown/);
-  const pairs = sectionOf(v.run('review.mjs', ['status']).stdout, 'Rules on one topic whose globs overlap') ?? [];
+  const pairs = sectionOf(v.run('review.mjs', ['status'], { cwd: v.projects.almanac }).stdout, 'Rules on one topic whose globs overlap') ?? [];
   assert.match(pairs.join('\n'), /almanac\/ledger-v2 and almanac\/ledger-v3, .* · almanac\/ledger-v2 ranks first: /);
 });
 
