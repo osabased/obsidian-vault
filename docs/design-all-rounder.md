@@ -787,7 +787,7 @@ The phases build mechanism only. Adding real knowledge and taste is the user's c
        ```
 
      - `raw/refs/talk.mp4` keeps no derived text, and no extractor reads `.mp4`, so it stays the binary with none.
-     - `glim`'s `ask-rule` already has `tools: [AskUserQuestion]` (`fixture.mjs:236`). The `commons` preset gains a rule with `tools: [AskUserQuestion]` only, for the everywhere test.
+     - `glim`'s `ask-rule` already has `tools: [AskUserQuestion]` (`fixture.mjs:236`). The everywhere test writes its own `tools` rule into `commons`, so the preset, which 6.1a, 6.6e and `reach.test.mjs:90-103` use, doesn't change.
    - **Extractors (6.4a).**
      - **Interface.** `tools/ext/extractors/<name>.mjs` exports:
        - `kinds`, the `KINDS` it can return;
@@ -864,7 +864,7 @@ The phases build mechanism only. Adding real knowledge and taste is the user's c
        The patterns are bounded, so they use the default engine. A 1.86 MB line scans in about 25 ms (§11).
      - **Output.** `masked` is the value's first 2 and last 2 characters around `…`, and a private key shows as its kind alone. `allow` is the first 16 hex digits of the value's SHA-256, which identifies it without repeating it.
      - **Override.** `privacy.allow` in `vault.config.json`, a list of `allow` ids, which the user sets. `DEFAULTS` gains `privacy: { allow: [] }`. A listed value is never reported. Lint checks each id is 16 lowercase hex digits.
-     - **`tools/scan.mjs`.** `node tools/scan.mjs <file>...`, or `--stdin` for a NUL-separated list, as `git diff -z` writes it. A file that isn't UTF-8 is scanned through its derived text, under the binary's name, and skipped when it has none. Output, then exit 1 when anything was found, 0 when nothing was, 2 on no file, a bad flag or a file that can't be read:
+     - **`tools/scan.mjs`.** `node tools/scan.mjs <file>...`, or `--stdin` for a NUL-separated list, as `git diff -z` writes it. A file that isn't UTF-8 is scanned through its derived text, under the binary's name, and skipped when it has none. Output, then exit 1 when anything was found, 0 when nothing was, 2 on no file given, a bad flag or a file that can't be read. `--stdin` with an empty list prints nothing and exits 0, so a commit that adds no source passes the pre-commit line:
 
        ```
        raw/refs/notes.md:12 assignment api_key=ab…9f · allow 3f9c01ab77e0d2c1
@@ -874,13 +874,13 @@ The phases build mechanism only. Adding real knowledge and taste is the user's c
 
      - **Where it runs.**
        - `/ingest` step 2 runs `node tools/scan.mjs <file>` after saving or copying a source, and on exit 1 shows the user the lines and stops until they remove the values or allow them. This is 6.4e's refusal.
-       - The edit hook denies a `Write`, `Edit`, `MultiEdit` or `NotebookEdit` under `raw/` whose new text holds a value, after `vaultGuard` (`edit.mjs:245-271`). It marks no gate, so a retry with the same text is denied again. Copy (open question): "raw/refs/notes.md would hold what looks like a key or token, so the taste vault won't save it:", the scan's lines, then "Leave it out. If the user says it isn't a secret, they can add its allow id to privacy.allow in vault.config.json." The scan runs only on writes under `raw/`, which are rare.
+       - The edit hook denies a `Write`, `Edit`, `MultiEdit` or `NotebookEdit` under `raw/` whose new text holds a value. The check sits between the guard's deny and the `vaultOwn` return (`edit.mjs:250-252`), since `raw/` is in `VAULT_OWN` (`vault.mjs:74`) and returns before any scope step. It marks no gate, so a retry with the same text is denied again. Copy (open question): "raw/refs/notes.md would hold what looks like a key or token, so the taste vault won't save it:", the scan's lines, then "Leave it out. If the user says it isn't a secret, they can add its allow id to privacy.allow in vault.config.json." The scan runs only on writes under `raw/`, which are rare.
        - `extract.mjs` scans the text before writing it (above).
        - `.githooks/pre-commit` gains, after the append-only check: `git diff --cached --name-only -z --diff-filter=AM -- raw/refs/ derived/ | node tools/scan.mjs --stdin || exit 1`. It catches a source copied in with a shell command. It scans the working tree's copy, which the append-only rule keeps equal to the staged one under `raw/refs/`.
      - Rows in `raw/inbox/` and `raw/picks/` are the user's words, written by the tools, and aren't scanned.
    - **Tool triggers (6.3c).**
      - **Hook and matcher.** The edit hook on PreToolUse, through the matcher it already has (`hooks.json:11`). No registration changes.
-     - **The match.** `liveRules` gains `tools: n.tools`. For a call whose `tool_name` isn't in `FILE_TOOLS` (`vault.mjs:404`), the hook takes the rules whose `tools` holds the name exactly, in the domains a prompt's keywords reach: `readableDomains` (`vault.mjs:196`) of the session's domains (`sessionHits`), so global and every everywhere domain's rules count, and in the vault folder every domain's. Each becomes `{ key, note, rel: <tool>, place: 'tool:<tool>', spec: null }` and goes through `dueRules` (`scope.mjs:31-43`) unchanged.
+     - **The match.** `liveRules` gains `tools: n.tools`. For a call whose `tool_name` isn't in `FILE_TOOLS` (`vault.mjs:404`), the hook takes the rules whose `tools` holds the name exactly, in the domains a prompt's keywords reach: `readableDomains` (`vault.mjs:196`) of the session's domains (`sessionHits`), so global and every everywhere domain's rules count, and in the vault folder every domain's. Each becomes `{ key, note, rel: <tool>, place: 'tool:<tool>', spec: [0, 0] }`, no more specific than `**`, since `bySpecificity` (`glob.mjs:214`) reads both numbers, and goes through `dueRules` (`scope.mjs:31-43`) unchanged.
      - **Triggers.** A rule with `tools` and `triggers` fires only when a trigger matches `plainText(asText(tool_input))` (`edit.mjs:151`), the call's input as JSON text. A rule with both `tools` and `applies_to` is reached by either.
      - **The marker.** The gate id is `agentKey(input, '<key>|<hash>|tool:<tool>')`, which `dueRules` already builds from `place`. So a rule is refused once per session per agent per tool, again after a reword, and again when phase 4 changes its label (item 4, Delivery: the labelled hash). Hits go through phase 4's `deliverable()` like the edit hook's other hits.
      - **A mapped MCP tool.** A call `editTools` maps gets its name's rules from `nameScope` and its tool's rules here. They join in one list, keeping the first per key, so a rule both reach refuses once.
@@ -904,7 +904,7 @@ The phases build mechanism only. Adding real knowledge and taste is the user's c
        - lint on an unknown extractor, a missing `extract`, a module with top-level `await`, bad `kinds`, `extensions` and `version`.
      - `test/privacy.test.mjs`:
        - `secretsIn` catches the cases under Patterns and passes the cases listed as passing, plus a PEM public key, data URIs, integrity hashes, sha256 hex, commit ids, UUIDs, slugs and long camelCase words;
-       - `scan.mjs`'s output, exit codes, `--stdin` with NUL-separated paths, a binary scanned through its derived text, and `privacy.allow`;
+       - `scan.mjs`'s output, exit codes, `--stdin` with NUL-separated paths and with none, a binary scanned through its derived text, and `privacy.allow`;
        - the edit hook denies a Write under `raw/refs/` holding a token, denies the retry, and passes it once its id is allowed. A Write elsewhere is not scanned.
      - `test/tool-triggers.test.mjs`:
        - an everywhere domain's `tools` rule reaches a session outside its projects, and a session in the vault folder gets every domain's;
