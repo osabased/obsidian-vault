@@ -11,7 +11,7 @@ function proposeNote(sid, agent) {
   return [
     'Taste vault: propose a rule when the user corrects you or says how they want things, in a way that should hold in later sessions too (a taste rule),',
     "or when something only worked after a failure caused by an API, version or tool your training gets wrong or doesn't know, or a dated source shows it (a knowledge rule).",
-    "Leave out what the project's CLAUDE.md or `.claude/rules/` already say.",
+    "Leave out what the project's own agent instructions already say; a compiled taste-vault section in them is the vault's copy.",
     'If the user corrects you on something a rule already covers, propose it anyway; propose.mjs lists the rules it may repeat.',
     'Propose only from what happened in this session, never from a brief, a skill or the task itself.',
     'A rule applies as soon as propose.mjs writes it; the user edits or deletes its note to change it.',

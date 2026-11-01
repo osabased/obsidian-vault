@@ -4,8 +4,7 @@
 import { runHook } from '../../lib/vault.mjs';
 import * as agent from './adapter.mjs';
 
-const HOOKS = ['session-start', 'prompt', 'edit', 'subagent-start', 'stop'];
 const [hook, seconds] = process.argv.slice(2);
 if (seconds) process.env.VAULT_HOOK_TIMEOUT = seconds;
-if (HOOKS.includes(hook)) await import(`./hooks/${hook}.mjs`);
-else runHook(String(hook), agent, () => { throw new Error(`no hook ${hook}; the hooks are ${HOOKS.join(', ')}`); });
+if (agent.hookNames.includes(hook)) await import(`./hooks/${hook}.mjs`);
+else runHook(String(hook), agent, () => { throw new Error(`no hook ${hook}; the hooks are ${agent.hookNames.join(', ')}`); });

@@ -1074,7 +1074,7 @@ The phases build mechanism only. Adding real knowledge and taste is the user's c
      - `identifiers`: the names only this agent uses, for the neutral-core test;
      - `registration(vaultRoot)`: `{ where, text }`, which `tools/agents.mjs` prints.
    - **Registry** (`tools/lib/agents.mjs`).
-     - `agent(name)` loads `tools/adapters/<name>/adapter.mjs` through `createRequire`, as `extension()` loads extensions (`ext.mjs:15-20`). It throws on an unknown name.
+     - `agent(name)` loads `tools/adapters/<name>/adapter.mjs` through `byName` in `ext.mjs`, the one name check and `createRequire` loader that extensions and compile formats share too. Each caller keeps its own error text. It throws on an unknown name.
      - `config().agents` lists the adapters that lint checks tool names against, and orders `currentSession()`. Neither delivery nor session ownership reads it. `config()` sets `agents` to `['claude-code']` when it is not a list; `DEFAULTS` doesn't hold it, since `DEFAULTS` merges objects. Lint errors on a name with no adapter folder.
      - `currentSession(env)` returns `{ agent, id }` for the first adapter, in the order of `agents`, whose `sessionVar` is set, or null.
      - `touchSession(event, hits, agentName)` writes `agent` into the registry entry. An entry with no `agent`, which is every entry today, reads as `claude-code`.
@@ -1220,7 +1220,7 @@ The phases build mechanism only. Adding real knowledge and taste is the user's c
      - **With Codex hooks.** A project whose domain opts in to `codex` gets its rules twice in a session whose Codex hooks are trusted. The README says to opt in only for a project where the hooks don't run, such as a machine without the vault's hooks, or a repo other people's agents read.
      - **What is lost** (6.7f): deny-then-retry, `triggers`, once-per-session delivery, proposing, pages and namespace globs. The copy is stale until compiled again.
    - **Neutral core.**
-     - `test/neutral-core.test.mjs` gains a second test. It loads every adapter's `identifiers` and fails on each one found in a file under `tools/` outside `tools/adapters/`, naming the file and line. It reads the names from the adapters, so the test itself names no agent.
+     - `test/neutral-core.test.mjs` gains a second test. It loads every adapter's `identifiers`, folder name and `sessionVar`, and fails on each one found in a file under `tools/` outside `tools/adapters/`, naming the file and line. Only three kinds of line are accepted: `FIRST_AGENT` in `tools/lib/agents.mjs`, the `agents` default in `config()` in `tools/lib/vault.mjs`, and the one-line `tools/hooks/<hook>.mjs` shims that import an adapter's hook. It reads the names from the adapters, so the test itself names no agent.
        - It scans `tools/` only. `test/` keeps Claude Code payloads, which the existing tests pin, and the skills and AGENTS.md are copy for every agent, which review checks.
        - The domain-key test keeps its four roots, and `tools/adapters/` falls inside them.
      - The inventory grep, run from the vault folder, prints what the identifier test would find:
@@ -1371,7 +1371,7 @@ The phase 6 check, run from the vault folder:
 out=$(node --test --test-reporter=tap test/*.test.mjs); echo "$out" | grep -E '^# (pass|fail|todo) |^not ok '; echo "$out" | grep -qx '# fail 0' && echo "$out" | grep -qx '# todo 0' && node tools/lint.mjs && ! git grep -nIiE 'luau|\.lua\b|roblox|--!strict|UIListLayout|task\.wait|local x = 1|\bdemo\b' -- test tools .claude/skills AGENTS.md && VAULT_PERF=1 node --test test/perf/*.perf.mjs && ! git grep -nE 'CLAUDE_|CODEX_|hookSpecificOutput|permissionDecision|additionalContext|AskUserQuestion|MultiEdit|NotebookEdit|apply_patch|content_item_kinds|toolUseResult|isCompactSummary|system-reminder|\b(session_id|agent_id|tool_name|transcript_path)\b|Claude Code|Codex' -- tools ':!tools/adapters'
 ```
 
-It prints what the phase 5 check prints, then every line outside `tools/adapters/` that names an agent. It exits 0 only when the phase 5 check passes and that grep prints nothing. The identifier test in the suite checks the same from the names each adapter exports; the grep also catches a name no adapter lists yet.
+It prints what the phase 5 check prints, then every line outside `tools/adapters/` that names an agent. It exits 0 only when the phase 5 check passes and that grep prints nothing. The identifier test in the suite checks the same from the names each adapter exports, its folder name and its `sessionVar`; the grep also catches a name no adapter lists yet. In both, three kinds of line are accepted: `FIRST_AGENT` in `tools/lib/agents.mjs`, the `agents` default in `config()` in `tools/lib/vault.mjs`, and the one-line `tools/hooks/<hook>.mjs` shims that import an adapter's hook.
 
 ## 10. AGENTS.md changes
 

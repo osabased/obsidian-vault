@@ -45,6 +45,12 @@ for (const d of [claudeCode, codex]) {
     assert.match(d.deny(d.editFile(v, sid, 'src/a.zq')) ?? '', ZQ);
   });
 
+  test(`${d.name}: the session start's propose note names the project's own agent instructions, no one agent's files`, t => {
+    const text = d.context(d.start(vault(t), sessionId())) ?? '';
+    assert.match(text, /Leave out what the project's own agent instructions already say; a compiled taste-vault section in them is the vault's copy\./);
+    assert.doesNotMatch(text, /CLAUDE\.md|\.claude\/rules/);
+  });
+
   test(`${d.name}: a prompt with a keyword gets the excerpt once`, t => {
     const { v, sid } = started(t);
     assert.match(d.context(d.prompt(v, sid, 'make the shimmer softer')) ?? '', KEYWORD);
