@@ -104,6 +104,16 @@ test('a git source whose fields could reach git as options runs nothing and fail
   assert.deepEqual(filesUnder(v, 'raw'), before);
 });
 
+test("a git source can't run a command through the ext transport, even where the user's git config allows it", async t => {
+  const v = makeVault(t);
+  const mark = v.at('PWNED').replace(/\\/g, '/');
+  const gitconfig = v.write('gitconfig', '[protocol "ext"]\n\tallow = always\n');
+  saved(v, 'raw/refs/ext.md', { repo: `'ext::sh -c touch% ${mark}'`, path: 'README.md', commit: 'a1b2c3d4', fetched: '2026-10-01' }, 'Read me.\n');
+  const r = await refresh(v, { env: { GIT_CONFIG_GLOBAL: gitconfig } });
+  assert.ok(!fs.existsSync(mark), 'git ran the command an ext:: repo named');
+  assert.match(lines(r)[0], /^failed ext::sh -c touch% .* README\.md: git clone exited \d+/, r.stdout);
+});
+
 const git = (cwd, ...args) => execFileSync('git', ['-C', cwd, ...args], { env: cleanEnv({ GIT_CONFIG_NOSYSTEM: '1', GIT_CONFIG_GLOBAL: '/dev/null' }), stdio: 'pipe' }).toString('utf8').trim();
 const cloneOf = (v, repo) => v.at('.sources', `${repo.dir.split('/').at(-1)}-${sha256(repo.dir).slice(0, 8)}`);
 

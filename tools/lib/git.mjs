@@ -50,9 +50,10 @@ export function changedFiles(cwd, pathspec = [], { ignored = false, timeout = 20
 // printed to stderr. A repo that asks for a password fails at once rather than waiting out the timeout on a prompt no
 // one sees. The operands come from files in raw/refs/, so they go after --end-of-options (-- for clone), where git
 // never reads one as an option. GIT_DIR keeps git in the clone's own repository: a broken .git would otherwise send it
-// up to the vault's.
+// up to the vault's, and the ext:: transport, which runs a command a repo string names, stays off whatever the user's
+// git config allows.
 function run(args, operands, { dir, timeout, quietFail = false, maxBuffer = 256 << 20 }) {
-  const argv = [...args, args[0] === 'clone' ? '--' : '--end-of-options', ...operands];
+  const argv = ['-c', 'protocol.ext.allow=never', ...args, args[0] === 'clone' ? '--' : '--end-of-options', ...operands];
   const env = { ...gitEnv(), GIT_TERMINAL_PROMPT: '0', ...(dir ? { GIT_DIR: path.join(dir, '.git') } : {}) };
   try {
     return execFileSync('git', argv, { cwd: dir, env, timeout, stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true, maxBuffer });
