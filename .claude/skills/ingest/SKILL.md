@@ -9,7 +9,7 @@ argument-hint: "[file | URL | batch]"
 
 Work in the vault root. AGENTS.md has the page and rule formats. With `batch`, follow Batch at the end. Otherwise take one source through these steps with the user.
 
-1. **Source.** Take the source the user named. If they named none, run `node tools/review.mjs sources`, which lists the files in `raw/refs/` no source page names, and ask which. If a source page already covers it, update that page in step 4 rather than start another: one whose `source` is the file, or for a URL, the URL or a file in `raw/refs/` whose frontmatter gives that `url`.
+1. **Source.** Take the source the user named. If they named none, run `node tools/review.mjs sources`, which lists the files in `raw/refs/` no source page names, and ask which. If a source page already covers it, update that page in step 4 rather than start another: one whose `source` is the file, or for a URL, the URL or a file in `raw/refs/` whose frontmatter gives that `url`. A copy with a `sha256` is covered only by a page naming that file, or a copy with the same `url` and `sha256`: a re-fetch with a new hash is a new source, with a source page of its own.
 2. **Save it** in `raw/refs/`, so pages and rules cite a copy whose words propose.mjs can check:
    - A file under `raw/refs/` is there already. Copy a file from elsewhere in under a new name.
    - For a URL, save the page's own words, as the browser's `get_page_text` gives them (raise `max_chars` for a long page), to a new `raw/refs/<slug>.md` that starts with frontmatter giving its `url` and the day you `fetched` it, and no `sha256`, `etag` or `last_modified`: a later tool computes those. WebFetch gives a summary rather than the page's words, so if no browser can open the page, ask the user to save it into `raw/refs/`.
@@ -18,7 +18,7 @@ Work in the vault root. AGENTS.md has the page and rule formats. With `batch`, f
 3. **Discuss** the main points with the user, a line or two per topic of the domain (`node tools/propose.mjs --help` lists the ones its rules and pages have and the ones it lists), labelled as your reading.
    - Name each **new fact** in it, a dated fact your training gets wrong or doesn't know, with its date, and ask which to keep as rules.
    - Ask what they like and dislike in it and why, and wait for the answer.
-   - How-tos (steps, setup, API usage) belong in the project's skills, for Roblox the osaskills `roblox-*` skills: tell the user so.
+   - How-tos (steps, setup, API usage) belong in the project's skills, such as an `example-ui-*` skill for `example-ui`: tell the user so.
 4. **Write the source page** `wiki/<domain>/sources/source-<slug>.md`, `kind: source`, with `source` the file in `raw/refs/`, `source_date` the day it was published or last updated, the topic it's mostly about and a one-line summary. Put their words verbatim under `## You said`, and your reading under `## Agent's reading`, quoting each new fact in the source's words. `## You said` stays an empty heading if they said nothing about it, and `## Rules` until step 7.
 5. **Propose rules**, the clearest first, with `tools/propose.mjs` (`--help` lists the fields). Pipe the JSON from the Bash tool with a quoted heredoc to `node tools/propose.mjs "$CLAUDE_CODE_SESSION_ID"`.
    - Taste rules come from the user's words: basis `stated` or `inferred`, quoting what they typed, or `reading` for something you saw in the source that they asked you to make a rule of.

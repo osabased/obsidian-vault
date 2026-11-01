@@ -1,6 +1,6 @@
 # Agent taste vault
 
-The user's taste and knowledge, kept as a small wiki so Claude Code can apply and look them up. The agent writes rules in session when the user corrects it or a failure or dated source shows what works, and the hooks in `tools/hooks/` deliver them back to the agent from then on. Pages hold knowledge in the agent's words, and sessions read them through `index.md` or when a hook points to one. The user reads, edits and deletes the notes in Obsidian.
+The user's taste and knowledge, kept as a small wiki so Claude Code can apply and look them up. The agent writes rules in session when the user corrects it or a failure or dated source shows what works, and the hooks in `tools/hooks/` deliver them back to the agent from then on. Pages hold knowledge in the agent's words, or in the user's on pages they write (`author: user`), and sessions read them through `index.md` or when a hook points to one. The user reads, edits and deletes the notes in Obsidian.
 
 ## Layout
 
@@ -80,14 +80,15 @@ updated: 2026-10-19
 - `always`: only for short rules that matter in nearly every session. The user sets it in Obsidian; `tools/propose.mjs` refuses it. Lint warns on a knowledge rule with `always` longer than the 300 characters a taste rule may have.
 - `applies_to`: globs relative to the domain's project root; global's are read from the file's project root, or from the session's folder when no domain has the file. `**` crosses folders, `*` doesn't, `{a,b}` picks one. Matching ignores case and worktree folders.
   - An entry starting with `!` excludes the files it matches. Entries apply in order, as in a `.gitignore`: the last one that matches a file decides. A list with no plain entry matches nothing, and lint reports a `!` entry with nothing before it to exclude from as an error.
-  - `'<namespace>:<glob>'` matches names in a namespace other than files, such as objects in a running app. `namespaces` in `vault.config.json` declares each, with its `separator` and `escape` character, and lint reports an undeclared one as an error. `file:` is the same as no prefix. Names in a namespace match with case; file globs ignore it.
+  - `'<namespace>:<glob>'` matches names in a namespace other than files, such as objects in a running app. `namespaces` in `vault.config.json` declares each, with its `separator` and `escape` character, and lint reports an undeclared one as an error. The `escape` is one character, not a glob character (`* ? [ ] { } , !`) and not in the `separator`. `file:` is the same as no prefix. Names in a namespace match with case; file globs ignore it.
 - `triggers`: optional regexes tested against the new text of an edit. When present, the rule applies only if one matches.
 - `keywords`: optional words or phrases that bring the rule up from a prompt.
 - `tools`: optional, exact tool names, such as `AskUserQuestion` or an MCP tool's full name.
 - Every rule needs `always`, `applies_to`, `keywords` or `tools`; lint reports one with none as an error. Nothing delivers on `tools` or namespaced globs yet: a rule reached only through them is valid and reaches no session until a later phase builds that.
 - `superseded_by`: optional, the note that replaces this one, as a link or a key like `example-ui/new-slug`. The old note stays in the vault and the index, and the hooks stop delivering it. Deleting a note retires its rule too.
 - Single-quote globs and regexes so Obsidian reads them as text and keeps a namespace's backslash escapes.
-- `tools/propose.mjs` takes no `tools` or `requires`; add them to the note it writes.
+- Single-quote any list item that holds `: ` or would read as a number or `true`. YAML reads the first as a key and value and the second as no text, and lint reports either as the note's error, so the note isn't delivered.
+- `tools/propose.mjs` refuses a field it doesn't take, such as `tools` or `requires`; add those to the note it writes.
 - `**Do:**` and `**Not:**` are required, one line each. Pair every "never X" with an "instead Y". `**Because:**` gives the user's reason; leave it empty rather than invent one. Keep the three lines together under 300 characters for a taste rule and 600 for a knowledge rule, counting the "As of" date a knowledge rule is delivered with (`delivery.maxRuleChars` and `delivery.maxKnowledgeRuleChars`). The hooks cut a rule at its cap.
 - `## Evidence` has one line per source: date, kind (`stated` or `correction`; `choice` for a pick), the first 8 characters of the session id, the user's exact words, and the proposal id. A `choice` line also names the options the user passed over and the question, and ends with the pick's id and the proposal id. A `failure` line gives the file, the error as a tool printed it and `fixed by:` the fix; a `source` line gives the URL or `raw/refs/` file, `dated` its date, and its exact words. An `agent's reading` line gives your reading in your own words, unquoted. A `stated` line quoting a page with `author: user` gives the page's path where the session goes: `- 2026-10-19 · stated · wiki/example-ui/concepts/grid.md · "the grid is 8px" (a-1a2b3c4d)`.
 - Link notes by their path from the vault root, `[[wiki/<domain>/<folder>/<slug>|<slug>]]`.
@@ -128,12 +129,13 @@ What the source shows, by topic, in the agent's words.
 ```
 
 - `kind`: required, one of the five above. `index.md` labels each page with it, as `source page`, `topic page` and so on. Lint warns on a page without one.
-- `author`: `agent`, the default, or `user` for the user's own writing, in any kind. On a page with `author: user` you may only add lines under `## Agent notes`, appending that heading at the end when the page has none, and the lines you add hold no `#` or `##` heading. The edit hook denies any other change to the file, with no retry, and denies adding or removing `author: user`, which only the user sets. Lint asks it for no `topic` or `summary`, and `lint --fix` leaves it as it is. Its text, without the frontmatter and `## Agent notes`, is the user's words: a rule may quote it as `basis: stated`, with `page:` its path and `quote:` the words.
+- `author`: `agent`, the default, or `user` for the user's own writing, in any kind. On a page with `author: user` you may only add lines under `## Agent notes`, appending that heading at the end when the page has none. The section runs to the next `#` or `##` heading. The lines you add may hold `###` headings but no `#` or `##` one, and may not move where the section ends, as an unclosed code fence would. The edit hook denies any other change to the file, with no retry, and denies adding or removing `author: user`, which only the user sets. Lint asks it for no `topic` or `summary`, and `lint --fix` leaves it as it is. Its text, without the frontmatter and `## Agent notes`, is the user's words: a rule may quote it as `basis: stated`, with `page:` its path and `quote:` the words.
 - `topic`: the topic the page belongs under in `index.md`, like a rule's. Lint warns on a page with none.
 - `summary`: one line on what the page holds, shown in `index.md` and when a hook points to the page. Lint warns on a page with none. Single-quote it if it holds ` #`, which YAML reads as a comment.
 - `keywords`: optional, the words or phrases a request on the page's subject would use. A prompt that mentions one brings the page up.
-- `applies_to`: optional globs, written as a rule's. An edit to a matching file brings the page up. A vault-only domain's pages reach no edit, so lint warns on one with `applies_to`. Lint also warns on a page with `always` or `triggers`, which only rules take.
-- `tools` and `requires`: optional, as a rule's.
+- `applies_to`: optional globs, written as a rule's. An edit to a matching file brings the page up. A vault-only domain's pages reach no edit, so lint warns on one with `applies_to`.
+- `triggers`: optional, as a rule's: an edit to a matching file brings the page up only when its new text matches one.
+- `always`, `tools` and `requires`: optional, as a rule's. Nothing delivers `always` on a page yet.
 - `source`: source pages, a URL, a file under `raw/` that exists, or a bundle's folder, written without a trailing slash. Lint warns on a source page with none.
 - `source_date`: optional, when the source was published or last updated, as YYYY-MM-DD. Only source pages take `source` and `source_date`; lint warns on another page with either.
 - `updated`: the day the page last changed. Set it whenever you change a page. Lint warns on a page other than a source page when a rule it links under `## Rules` or a source page it cites changed after it, and on a topic page when any source page on its topic did, going by `updated` or, since Obsidian doesn't change `updated`, the day the file was last saved.
@@ -172,12 +174,13 @@ A pick is the user's choice between options the agent showed them for one piece 
  "pick":"B, Featured shelf","notes":"the featured rod reads first on phone","reason":null,"status":"user","sheet":"raw/picks/2026-10-21-shop.png"}
 ```
 
-- `domain`: the domain the pick is for. A session in one domain gets it by default; one in several, such as a session at a monorepo root, must give it, and it must be one of the session's. A confirmation or replacement stays in its pick's domain.
-- `project`: that domain's project root, its marker folder or path. `subject`: the piece of work, lowercase-kebab-case.
+- `domain`: the domain the pick is for. A session in one domain gets it by default; one in several, such as a session at a monorepo root, must give it, and it must be one of the session's.
+- `project`: that domain's project root, its marker folder or path, by default. When the domain has several roots in the session, as at a monorepo root, give it: the full path, or a folder name that names one root alone. A confirmation takes its pick's domain and project; a replacement must give the same ones.
+- `subject`: the piece of work, lowercase-kebab-case.
 - `status`: `user` when the user picked, `provisional` when the agent picked alone while they were away. `notes` is the user's words verbatim, so a provisional pick has none; `reason` is the agent's own.
 - `replaces`: the id of the pick this one reverses. A provisional pick can replace only another provisional pick. `confirms`: the id of the provisional pick the user agreed with; the row repeats its question, options, pick and sheet, and its reason unless it gives one. Either one ends the earlier row's turn: a row is live until a later row names it, and only a live row can be named.
 - A comment row has `subject` and `text`, the user's words about the piece, and no options.
-- `node tools/pick.mjs show <session-id> <subject> [domain]` prints the subject's live picks and comments, newest first, then the domain's delivered taste rules, leaving out the topics in the domain's `showSkipTopics` in `vault.config.json`. The rules it prints count as shown to the session. The builder runs it before building or reviewing the piece and pastes its output into the reviewer's prompt.
+- `node tools/pick.mjs show <session-id> <subject> [domain [project]]` prints the live picks and comments on the subject in that project, newest first, then the domain's delivered taste rules, leaving out the topics in the domain's `showSkipTopics` in `vault.config.json`. The rules it prints count as shown to the session. The builder runs it before building or reviewing the piece and pastes its output into the reviewer's prompt.
 - A sheet is copied into `raw/picks/`, refused over `picks.maxSheetBytes` (3 MB by default, in `vault.config.json`).
 - A provisional, replaced or confirmed pick backs no rule; propose from the live row instead.
 - `review.mjs status` lists provisional picks not yet confirmed. Lint warns on a `replaces` or `confirms` that names no row, and on a sheet that doesn't exist.
