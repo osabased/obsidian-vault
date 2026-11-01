@@ -4,7 +4,7 @@ import path from 'node:path';
 import { execFileSync } from 'node:child_process';
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { makeVault, cleanEnv, ruleNote, pageNote as page, sourcePage, userTurn, sessionId, sectionOf } from './fixture.mjs';
+import { makeVault, cleanEnv, ruleNote, pageNote as page, sourcePage, userTurn, sessionId, sectionOf, withFields } from './fixture.mjs';
 
 
 test('review sources lists the files in raw/refs/ no source page names, and status lists them too', t => {
@@ -181,4 +181,39 @@ test("a rule citing a file in a bundle isn't told the bundle's source page is ne
   }));
   v.write('wiki/glim/source-lib.md', sourcePage({ source: 'raw/refs/lib', dated: '2026-10-10' }));
   assert.deepEqual(sectionOf(v.run('review.mjs', ['status']).stdout, 'Knowledge rules a newer source on their topic may override'), ['None.']);
+});
+
+test('a later copy of a page in a doc set, or of a loose file, is a newer source for a rule citing the older copy', t => {
+  for (const dir of ['raw/refs', 'raw/refs/docs']) {
+    const v = makeVault(t);
+    if (dir !== 'raw/refs') v.write(`${dir}/llms.txt`, withFields({ url: 'https://pkg.invalid/llms.txt', fetched: '2026-10-01' }, '- [a](https://pkg.invalid/a.md)\n'));
+    v.write(`${dir}/a.md`, withFields({ url: 'https://pkg.invalid/a.md', fetched: '2026-10-01' }, 'old text\n'));
+    v.write(`${dir}/a.1234abcd.md`, withFields({ url: 'https://pkg.invalid/a.md', fetched: '2026-10-20', replaces: `${dir}/a.md` }, 'new text\n'));
+    v.write('wiki/glim/rules/fact.md', ruleNote({
+      kind: 'knowledge', basis: 'source', applies_to: ['src/**'], extra: ['as_of: 2026-10-01'],
+      evidence: [`- 2026-10-01 · source · session 1a2b3c4d · ${dir}/a.md · dated 2026-10-01 · "old text" (a-00000001)`],
+    }));
+    v.write('wiki/glim/sources/source-a2.md', sourcePage({ topic: 'layout', source: `${dir}/a.1234abcd.md` }));
+    v.run('build.mjs');
+    const status = v.run('review.mjs', ['status']).stdout;
+    assert.deepEqual(sectionOf(status, 'Knowledge rules a newer source on their topic may override'), ['- glim/fact, as of 2026-10-01: glim/source-a2 (a later copy)'], dir);
+    assert.deepEqual(sectionOf(status, 'Notes a changed source has left unverified'), ['- glim/fact: since 2026-10-20 · https://pkg.invalid/a.md, newer copy ' + `${dir}/a.1234abcd.md`], dir);
+  }
+});
+
+test('a manifest goes by its exact name, so LLMS.txt makes no doc set on any machine, and lint warns on it', async t => {
+  for (const name of ['llms.txt', 'LLMS.txt']) {
+    const v = makeVault(t);
+    v.write(`raw/refs/docs/${name}`, withFields({ url: 'https://pkg.invalid/llms.txt', fetched: '2026-10-01' }, '- [a](https://pkg.invalid/a.md)\n'));
+    v.write('raw/refs/docs/a.md', withFields({ url: 'https://pkg.invalid/a.md', fetched: '2026-10-01' }, 'hello\n'));
+    const { sourceChains } = await v.import('lib/sources.mjs');
+    const { bundleOf, isDocSet } = await v.import('lib/rules.mjs');
+    const set = name === 'llms.txt';
+    assert.equal(sourceChains().chains.has('raw/refs/docs'), set, name);
+    assert.equal(bundleOf('raw/refs/docs/a.md'), set ? 'raw/refs/docs' : null, name);
+    assert.equal(isDocSet('raw/refs/docs'), set, name);
+    assert.deepEqual(v.run('review.mjs', ['sources']).stdout.trimEnd().split('\n'), set ? ['raw/refs/docs'] : ['raw/refs/docs/LLMS.txt', 'raw/refs/docs/a.md'], name);
+    const warned = v.run('lint.mjs').stdout.split('\n').filter(l => l.startsWith(`warn raw/refs/docs/${name}: `));
+    assert.deepEqual(warned, set ? [] : [`warn raw/refs/docs/${name}: is named like the manifest llms.txt in another case, so its folder is not a doc set. docSets.manifests names it exactly`], name);
+  }
 });

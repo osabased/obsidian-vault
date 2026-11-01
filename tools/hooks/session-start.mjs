@@ -1,8 +1,8 @@
-import { runHook, sessionReach, inVaultFolder, readableDomains, vaultPath, toolsPath, toPosix, guarded, config, plural, clock, readJson, statePath, today } from '../lib/vault.mjs';
-import { alwaysContext, alwaysIn, fitContext, indexNote, scopeTopics, loadNotes, settledNotes, liveRules, deliverable, deliveryFor, clip, undelivered, knownDomain, joinList } from '../lib/rules.mjs';
+import { runHook, sessionReach, inVaultFolder, readableDomains, vaultPath, toolsPath, toPosix, guarded, config, plural, clock, today } from '../lib/vault.mjs';
+import { alwaysContext, alwaysIn, fitContext, indexNote, scopeTopics, loadNotes, settledNotes, liveRules, deliverable, deliveryFor, clip, undelivered, knownDomain, joinList, readDerived } from '../lib/rules.mjs';
 import { build } from '../lib/build.mjs';
 import { remaining } from '../lib/deadline.mjs';
-import { changedSinceBuild, noteTimes } from '../lib/cache.mjs';
+import { changedSinceBuild, noteTimes, refStats } from '../lib/cache.mjs';
 import { knowledgeDays } from '../lib/sources.mjs';
 import { touchSession, clearMarkers, markAlways, markShown, tidy, errorsSinceLint, sinceLint } from '../lib/sessions.mjs';
 
@@ -66,7 +66,7 @@ function lintNote(notes, walked) {
 
 // A failed check doesn't move checked, so a source that only fails stays counted until a check goes through.
 function sourcesNote(scope) {
-  const { sources = {}, domains = {} } = readJson(statePath('derived.json'), {});
+  const { sources = {}, domains = {} } = readDerived() ?? {};
   const now = Date.parse(today());
   const stale = new Set();
   const named = [];
@@ -102,8 +102,9 @@ runHook('session-start', input => {
   // Notes edited in Obsidian go live without a build, and the always rules that don't fit point to active.md.
   // A build another tool is running already writes what changed, and one that waits longer would spend the hook's time.
   guarded('build', () => {
-    if (!changedSinceBuild(notes, walked)) return;
-    try { build({ waitMs: Math.min(2000, remaining()) }); } catch (e) { if (e?.code !== 'ELOCKED') throw e; }
+    const refs = refStats();
+    if (!changedSinceBuild(notes, walked, refs)) return;
+    try { build({ waitMs: Math.min(2000, remaining()), refs }); } catch (e) { if (e?.code !== 'ELOCKED') throw e; }
   });
   const ready = settledNotes(notes);
   const rules = deliverable(liveRules(ready), deliveryFor(hits));

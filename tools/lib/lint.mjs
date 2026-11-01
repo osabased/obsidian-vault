@@ -7,7 +7,7 @@ import {
 import {
   vaultFile, loadNotes, noteErrors, ruleText, ruleTextParts, liveRules, knownDomain, alwaysSize, isUrl, validDay, normTopic, topicNotes, rawFile, toKey, resolver, linksUnder, noteLinks, byTopic, isTopicPage, isSourcePage, PAGE_KINDS, joinList,
   hasSection, footnotes, youSaid, linkedKeys, clip, citedSources, evidenceQuotes, keyOf, kindFolder, kindLabel, linkTo, parseNote, noteLinkSpans, maxChars, bundleOf, locate,
-  filled, isMap, sourceItem, authoredByUser, isUserPage, parsedFile, notTextError,
+  filled, isMap, sourceItem, authoredByUser, isUserPage, parsedFile, notTextError, manifestNames,
 } from './rules.mjs';
 import { setField } from './frontmatter.mjs';
 import { NAMESPACE_NAME } from './glob.mjs';
@@ -18,7 +18,7 @@ import { transcriptFor } from './sessions.mjs';
 import { typedMessages, saidIn, sourceTexts, userPageTexts } from './quotes.mjs';
 import {
   KINDS, LOCATORS, hashFile, lineCount, clockTime, parseLocator, anchorsIn, derivedAnchors, manifestLine, sourceProblems, refSources,
-  sourceChains, noteCitations, knowledgeDays,
+  sourceChains, noteCitations, knowledgeDays, newerCopies, copyStem,
 } from './sources.mjs';
 
 export const tally = found => {
@@ -26,17 +26,22 @@ export const tally = found => {
   return `${plural(errors, 'error')}, ${plural(found.length - errors, 'warning')}`;
 };
 
-export function lint(notes = loadNotes()) {
+// chains is sourceChains(), which a caller that also builds or lints again passes so raw/refs/ is read once.
+export function lint(notes = loadNotes(), chains = sourceChains()) {
   const found = [];
   const add = (level, file, msg, fix) => found.push({ level, file, msg, fix });
   const { domains, delivery } = config();
-  const chains = sourceChains();
   const citesOf = noteCitations(notes, chains);
   const checks = readJsonSafe(statePath('derived.json'))?.sources ?? {};
   // A source re-checked unchanged keeps its notes fresh, so the age counts from the day every source the note cites was
-  // last checked, when that is later than as_of.
+  // last checked, when that is later than as_of. A check that saved a copy newer than the one the note read found the
+  // source changed, which freshens nothing; with no copy to go by, the check's own result says so.
   const lastChecked = n => {
-    const days = [...citesOf(n).ids].map(id => checks[id]?.checked);
+    const { ids, latest } = citesOf(n);
+    const days = [...ids].map(id => {
+      const behind = latest.has(id) ? newerCopies(chains, id, latest.get(id)).length > 0 : checks[id]?.result === 'changed';
+      return behind ? null : checks[id]?.checked;
+    });
     return days.length && days.every(validDay) ? days.sort()[0] : null;
   };
   const keys = new Set(notes.map(n => n.key));
@@ -124,6 +129,7 @@ export function lint(notes = loadNotes()) {
   lintOrphans(notes, resolve, add);
   lintPicks(add);
   lintSources(add, chains);
+  lintManifestCase(add);
   lintBundles(add, hashOf);
   lintDerived(add, hashOf);
   lintReach(add);
@@ -141,7 +147,7 @@ export function lint(notes = loadNotes()) {
 
 // Applies the fixes lint gives whole, then rebuilds the generated files, which a fixed note can change too. The fixes
 // read a note with \n line ends, as parseNote does, and a file saved with \r\n gets them back.
-export function fix(found) {
+export function fix(found, chains) {
   const fixable = found.filter(f => f.fix);
   const written = [];
   for (const rel of new Set(fixable.map(f => f.file))) {
@@ -155,7 +161,7 @@ export function fix(found) {
     rewriteText(file, text.includes('\r\n') ? out.replace(/\n/g, '\r\n') : out);
     written.push(rel);
   }
-  return { fixed: fixable.filter(f => written.includes(f.file)), written, rebuilt: build() };
+  return { fixed: fixable.filter(f => written.includes(f.file)), written, rebuilt: build({ chains }) };
 }
 
 // Each fix parses the text it's given afresh, so the fixes to one file apply one after another, and a fix for a link
@@ -342,6 +348,17 @@ function lintSources(add, chains) {
     for (const msg of parsed.errors) add('warn', f, msg);
     if (parsed.data.url == null && parsed.data.repo == null) continue;
     for (const msg of sourceProblems(parsed.data, { body: parsed.body, rel: f, chains })) add('warn', f, msg);
+  }
+}
+
+// A doc set's manifest goes by its name exactly, though stat ignores case on Windows and macOS, so a set reads the same
+// on every machine; a file named like one in another case makes no set.
+function lintManifestCase(add) {
+  const names = manifestNames();
+  for (const f of filesIn(vaultPath('raw', 'refs'), '', 'raw/refs')) {
+    const name = `${copyStem(f)}${path.posix.extname(f)}`;
+    const m = names.find(x => x.toLowerCase() === name.toLowerCase());
+    if (m && m !== name) add('warn', f, `is named like the manifest ${m} in another case, so its folder is not a doc set. docSets.manifests names it exactly`);
   }
 }
 
@@ -713,12 +730,20 @@ function codeErrors(rel, src) {
     if (mod === 'child_process' && rel !== 'lib/git.mjs') errors.push('imports node:child_process; only lib/git.mjs runs another program, git, and hooks call only changedFiles from it');
     if (quiet && NETWORK.includes(mod)) errors.push(`imports node:${mod}; hooks, lib/ and ext/ stay off the network`);
   }
-  if (inHooks) {
-    for (const m of code.matchAll(/(?<![\w$.])import\s+([^'"`;]*?)\s+from\s*(?=['"])/g)) {
-      if (!/(?:^|\/)lib\/git\.mjs$/.test(strings.get(m.index + m[0].length) ?? '')) continue;
-      const { names, named } = bindings(m[1]);
+  // Hooks run what lib/ and ext/ export, so a module there that hands on more of lib/git.mjs reaches a hook too.
+  if (quiet && rel !== 'lib/git.mjs') {
+    const toGit = at => {
+      const s = strings.get(at);
+      return s !== undefined && /^\.\.?\//.test(s) && path.posix.join(path.posix.dirname(rel), s) === 'lib/git.mjs';
+    };
+    for (const m of code.matchAll(/(?<![\w$.])(import|export)\s+([^'"`;]*?)\s+from\s*(?=['"])/g)) {
+      if (!toGit(m.index + m[0].length)) continue;
+      const { names, named } = bindings(m[2]);
       const others = [...names, ...named.map(([orig]) => orig).filter(x => x !== 'changedFiles')];
-      if (others.length) errors.push(`imports ${others.join(', ')} from lib/git.mjs; hooks call only changedFiles from it`);
+      if (others.length) errors.push(`${m[1]}s ${others.join(', ')} from lib/git.mjs; hooks call only changedFiles from it`);
+    }
+    for (const m of code.matchAll(/(?<![\w$.])import\s*\(\s*(?=['"`])/g)) {
+      if (toGit(m.index + m[0].length)) errors.push('imports lib/git.mjs with import(); hooks call only changedFiles from it, through a static import');
     }
   }
   if (quiet && /(?<![\w$.])fetch\s*\(/.test(code)) errors.push('calls fetch(); hooks, lib/ and ext/ stay off the network');
