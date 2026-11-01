@@ -298,3 +298,19 @@ test('with no transcript a comment and notes are refused, and a pick without not
   assert.equal(pick(v, sid, { confirms: rowsIn(v, 'picks').at(-1).id }).code, 0);
   assert.equal(rowsIn(v, 'picks').length, 3);
 });
+
+test('a PDF sheet with derived text is taken, and one without is refused', async t => {
+  const { v, sid } = setup(t);
+  const sheet = v.write('raw/refs/cards.pdf', Buffer.concat([Buffer.from('%PDF-1.4\n'), Buffer.from('Flat cards.\fRaised cards.\n'), Buffer.from([0xff, 0xfe])]));
+  const refused = pick(v, sid, provisional({ sheet }));
+  assert.equal(refused.code, 1);
+  assert.match(refused.stderr, /sheet must be a \.png, \.jpg, \.jpeg or \.webp image, or a file with derived text \(node tools\/extract\.mjs\)\./);
+  assert.equal(fs.existsSync(v.at('raw', 'picks')) ? fs.readdirSync(v.at('raw', 'picks')).length : 0, 0);
+  const hash = (await v.import('lib/sources.mjs')).hashPath(sheet);
+  v.write(`derived/${hash}.md`, '---\nkind: pdf\nextractor: fixture\nextractor_version: \'1.0\'\nsource: raw/refs/cards.pdf\n---\n[p. 1]\nFlat cards.\n[p. 2]\nRaised cards.\n');
+  const r = pick(v, sid, provisional({ sheet }));
+  assert.equal(r.code, 0, r.stderr);
+  const [row] = rowsIn(v, 'picks');
+  assert.match(row.sheet, /^raw\/picks\/\d{4}-\d\d-\d\d-cards\.pdf$/);
+  assert.equal((await v.import('lib/sources.mjs')).hashFile(row.sheet), hash);
+});

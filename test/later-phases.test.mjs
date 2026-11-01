@@ -118,7 +118,7 @@ test('the first AskUserQuestion in a session is denied with the rule on it, and 
   assert.equal(denied(ask()), null);
 });
 
-test('a quote against a PDF is checked against its derived text', { todo: '6.4a, phase 5: derived text' }, t => {
+test('a quote against a PDF is checked against its derived text', t => {
   const v = makeVault(t, { presets: ['archive'] });
   const sid = sessionId();
   v.startSession(sid);
