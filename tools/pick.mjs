@@ -11,7 +11,7 @@ import { subjectRows, laterRows, liveRows, endedBy, newestFirst, entry, projectN
 import { UsageError, readInput, refuse, failure, line } from './lib/input.mjs';
 import { ownEntry, markShown, sessionRoots } from './lib/sessions.mjs';
 import { saidIn } from './lib/quotes.mjs';
-import { currentSession, typedFor } from './lib/agents.mjs';
+import { currentSession, typedFor, shortName } from './lib/agents.mjs';
 
 const RUN = 'usage: node tools/pick.mjs [session-id] < pick.json';
 const SHOW = '       node tools/pick.mjs show <session-id> <subject> [domain [project]]';
@@ -224,13 +224,13 @@ function record(sid, p) {
   const { make, sheet = null, replaces = '' } = kind.read(p, s);
   const base = {
     at: new Date().toISOString(), source: 'pick',
-    session: sid, transcript: s.transcript ?? null, cwd: s.cwd ?? null, domain: s.domain, project: s.project,
+    session: sid, agent: s.agent ?? null, transcript: s.transcript ?? null, cwd: s.cwd ?? null, domain: s.domain, project: s.project,
   };
 
   // Read under the lock, so two picks recorded at once can't both replace or confirm the same row.
   const out = withLock(statePath('pick.lock'), () => {
     const day = today();
-    const file = picksFile(sid, day);
+    const file = picksFile(shortName(sid, session.agent), day);
     const rows = pickRows();
     const later = laterRows(rows);
     const ids = new Set(rows.map(r => r.id));

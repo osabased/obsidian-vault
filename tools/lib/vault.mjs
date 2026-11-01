@@ -316,10 +316,10 @@ export const clock = (d = new Date()) => `${today(d)} ${pad(d.getHours())}:${pad
 // A session writes its own file, so two clones working on one day never append to the same one in git. Rows from before
 // that sit in <date>.jsonl. A sheet beside them is <date>-<subject>.<image extension>, which this never matches.
 const ROW_FILE = /^\d{4}-\d\d-\d\d(?:-[\w-]{1,8})?\.jsonl$/;
-const sessionFile = (folder, sid, day) => vaultPath('raw', folder, `${day}-${safeId(sid).slice(0, 8)}.jsonl`);
+const sessionFile = (folder, name, day) => vaultPath('raw', folder, `${day}-${safeId(name).slice(0, 8)}.jsonl`);
 
-export const inboxFile = (sid, day = today()) => sessionFile('inbox', sid, day);
-export const picksFile = (sid, day = today()) => sessionFile('picks', sid, day);
+export const inboxFile = (name, day = today()) => sessionFile('inbox', name, day);
+export const picksFile = (name, day = today()) => sessionFile('picks', name, day);
 
 export function datedFiles(folder) {
   const dir = vaultPath('raw', folder);

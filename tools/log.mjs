@@ -2,7 +2,7 @@ import { appendLog, fromRoot } from './lib/vault.mjs';
 import { KEY_RE, readNote, keyOf, isUrl, rawFile, loadNotes } from './lib/rules.mjs';
 import { build } from './lib/build.mjs';
 import { UsageError } from './lib/input.mjs';
-import { currentSession } from './lib/agents.mjs';
+import { currentSession, shortName } from './lib/agents.mjs';
 
 const USAGE = `usage: node tools/log.mjs <page>
        node tools/log.mjs ingest [--batch] <source> <page>...
@@ -49,8 +49,8 @@ try {
   const line = entry(process.argv.slice(2));
   // Built first, so a failed build logs nothing and a retry doesn't log the operation twice.
   build();
-  const sid = currentSession()?.id;
-  appendLog([`${line}${sid ? ` · session ${sid.slice(0, 8)}` : ''}`]);
+  const own = currentSession();
+  appendLog([`${line}${own ? ` · session ${shortName(own.id, own.agent)}` : ''}`]);
   console.log(`Logged in log.md: ${line}\nRebuilt index.md.`);
 } catch (e) {
   if (e instanceof UsageError) {

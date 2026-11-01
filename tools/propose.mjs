@@ -11,11 +11,11 @@ import {
 import { build } from './lib/build.mjs';
 import { entryKey } from './lib/glob.mjs';
 import { saidIn, normText, quoteTexts, userPageTexts } from './lib/quotes.mjs';
-import { ownEntry, marked, markMany, wasShown, carryMarkers, proposeDomains } from './lib/sessions.mjs';
+import { ownEntry, marked, markMany, wasShown, carryMarkers, proposeDomains, sessionName } from './lib/sessions.mjs';
 import { setField, yamlQuote, yamlScalar } from './lib/frontmatter.mjs';
 import { subjectRows, laterRows, endedBy, otherLabels } from './lib/picks.mjs';
 import { UsageError, readInput, refuse, failure, line } from './lib/input.mjs';
-import { currentSession, typedFor } from './lib/agents.mjs';
+import { currentSession, typedFor, shortName } from './lib/agents.mjs';
 
 const RUN = 'usage: node tools/propose.mjs [session-id] < rule.json';
 const USAGE = `${RUN}\n       node tools/propose.mjs --help lists the fields of rule.json`;
@@ -172,7 +172,7 @@ function pickEvidence(id, domain) {
   if (by?.how === 'replaces') refuse(`${id} was replaced by ${by.id}, so it no longer stands.`);
   if (by) refuse(`${id} was ${endedBy(by)}. Propose from that row.`);
   if (row.status === 'provisional') refuse(`${id} is provisional: an agent picked it, not the user. Propose from the row that confirms it.`);
-  const from = { pick: id, day: localDay(row.at) || today(), session: String(row.session ?? '').slice(0, 8) || 'unknown' };
+  const from = { pick: id, day: localDay(row.at) || today(), session: row.session ? sessionName(String(row.session), row.agent) : 'unknown' };
   if (typeof row.pick === 'string' && row.pick) {
     const said = row.notes ? `${row.pick} — ${row.notes}` : row.pick;
     const others = otherLabels(row);
@@ -290,7 +290,7 @@ function checkReadBack(n, f) {
 const yamlList = (name, xs) => (xs.length ? [`${name}:`, ...xs.map(x => `  - ${yamlQuote(x)}`)] : [`${name}: []`]);
 
 // A pick is cited from the day and session it was recorded in, and a page of the user's by its path.
-const citation = (f, e) => `- ${e.day ?? f.day} · ${e.label ?? e.kind} · ${e.page ?? `session ${e.session ?? f.sid.slice(0, 8)}`} · ${e.cite}`;
+const citation = (f, e) => `- ${e.day ?? f.day} · ${e.label ?? e.kind} · ${e.page ?? `session ${e.session ?? f.name}`} · ${e.cite}`;
 const evidenceLine = (f, e) => `${citation(f, e)} (${e.pick ? `${e.pick}; proposed as ` : ''}${f.id})`;
 
 const noteText = (f, e) => [
@@ -331,8 +331,8 @@ function addEvidence(f, e, scope, rules, same, row, notes) {
   if (n.kind === 'knowledge' && validDay(n.as_of) && checked > n.as_of) after = setField(after, 'as_of', checked);
   const now = parseNote(after, rel);
   writeSettled(file, after);
-  appendJsonl(inboxFile(f.sid), [row(target)]);
-  appendLog([`added evidence to ${target} · session ${f.sid.slice(0, 8)}`]);
+  appendJsonl(inboxFile(f.name), [row(target)]);
+  appendLog([`added evidence to ${target} · session ${f.name}`]);
   const [was, is] = [n, now].map(x => shortHash(ruleText(x)));
   if (was !== is) carryMarkers(f.sid, target, was, is);
   const moved = now.as_of !== n.as_of;
@@ -350,7 +350,7 @@ function propose(sid, p) {
   if (unknown) refuse(`${unknown} isn't a field propose.mjs takes. Fields like requires and tools are added to the note by hand. node tools/propose.mjs --help lists the fields.`);
   const domains = [...session.domains, 'global'];
   // Slugs compare in NFC, so a slug typed with combining accents names the same note as its composed spelling.
-  const f = { sid, domain: line(p, 'domain').normalize('NFC'), slug: line(p, 'slug').normalize('NFC') };
+  const f = { sid, name: shortName(sid, session.agent), domain: line(p, 'domain').normalize('NFC'), slug: line(p, 'slug').normalize('NFC') };
   // A vault-only domain isn't offered, and the note's own check says why it takes no rule.
   if (!domains.includes(f.domain) && !isVaultOnly(f.domain)) refuse(`domain must be ${joinList(domains, 'or')}.`);
   const key = `${f.domain}/${f.slug}`;
@@ -398,7 +398,7 @@ function propose(sid, p) {
     const rules = liveRules(notes);
     const row = note => ({
       id: f.id, at, source: 'agent', kind: e.kind, text: e.said, ...(e.fix ? { fix: e.fix } : {}),
-      note, session: sid, transcript: session.transcript ?? null, cwd: session.cwd ?? null, domain: rules[note]?.domain ?? f.domain, ...(e.pick ? { pick: e.pick } : {}), ...(e.page ? { page: e.page } : {}),
+      note, session: sid, agent: session.agent ?? null, transcript: session.transcript ?? null, cwd: session.cwd ?? null, domain: rules[note]?.domain ?? f.domain, ...(e.pick ? { pick: e.pick } : {}), ...(e.page ? { page: e.page } : {}),
     });
     if (f.repeats) return addEvidence(f, e, scope, rules, same, row, notes);
     const taken = readNote(key, notes);
@@ -406,8 +406,8 @@ function propose(sid, p) {
     const overlaps = checkRepeats(f, ruleText(n), scope, rules, same, notes);
     const file = vaultPath(...rel.split('/'));
     writeSettled(file, text);
-    appendJsonl(inboxFile(sid), [row(key)]);
-    appendLog([`wrote ${key} · session ${sid.slice(0, 8)}`]);
+    appendJsonl(inboxFile(f.name), [row(key)]);
+    appendLog([`wrote ${key} · session ${f.name}`]);
     const reply = [
       `**New ${f.kind === 'knowledge' ? 'knowledge rule' : 'rule'}** ${key}: ${ruleText(n)}`,
       ...(overlaps.length ? [`It may overlap ${joinList(overlaps, 'and')}.`] : []),

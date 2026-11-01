@@ -3,7 +3,7 @@ import { keyOf } from './lib/rules.mjs';
 import { lint, tally, fix } from './lib/lint.mjs';
 import { sourceChains } from './lib/sources.mjs';
 import { refStats } from './lib/cache.mjs';
-import { currentSession } from './lib/agents.mjs';
+import { currentSession, shortName } from './lib/agents.mjs';
 
 const args = process.argv.slice(2);
 const LEVELS = ['error', 'warn'];
@@ -29,8 +29,8 @@ try {
     for (const f of fixed) console.log(`fixed ${f.file}: ${f.msg}`);
     for (const name of rebuilt) console.log(`rebuilt ${name}`);
     if (written.length) {
-      const sid = currentSession()?.id;
-      appendLog([`fixed paths · notes ${written.map(keyOf).sort().join(', ')}${sid ? ` · session ${sid.slice(0, 8)}` : ''}`]);
+      const own = currentSession();
+      appendLog([`fixed paths · notes ${written.map(keyOf).sort().join(', ')}${own ? ` · session ${shortName(own.id, own.agent)}` : ''}`]);
     }
     found = lint(undefined, chains);
   }
