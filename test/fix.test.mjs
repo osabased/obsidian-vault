@@ -54,7 +54,11 @@ test('lint --fix rewrites the paths lint gives outside the quoted words, and reb
   const lines = r.stdout.trimEnd().split('\n');
   assert.equal(lines.filter(l => l.startsWith('fixed ')).length, 9, r.stdout);
   assert.ok(lines.includes('rebuilt index.md'), r.stdout);
-  assert.deepEqual(lines.slice(-2), ['warn wiki/glim/topics/code.md: links [[nowhere]], which has no note', '0 errors, 1 warning']);
+  assert.deepEqual(lines.slice(-3), [
+    'warn wiki/glim/topics/code.md: links [[nowhere]], which has no note',
+    "warn wiki: 2 quotes can't be checked: 2 cite a session whose transcript is gone. node tools/review.mjs status lists them.",
+    '0 errors, 2 warnings',
+  ]);
 
   assert.deepEqual(v.read('wiki/glim/topics/code.md').split('\n').slice(10, -1), [
     'Links [[wiki/glim/rules/said|said]] and [[wiki/glim/rules/said#Do|the rule]], [the rule](wiki/glim/rules/said.md) and [here](wiki/glim/rules/said.md), and [[nowhere]].',
@@ -95,7 +99,7 @@ test('lint --fix rewrites the paths lint gives outside the quoted words, and reb
   }
 
   const again = v.run('lint.mjs', ['--fix']);
-  assert.deepEqual(again.stdout.trimEnd().split('\n'), lines.slice(-2));
+  assert.deepEqual(again.stdout.trimEnd().split('\n'), lines.slice(-3));
   assert.deepEqual(v.read('log.md').split('\n').filter(l => l.includes('fixed paths')).map(l => l.split(' · ').slice(1).join(' · ')), [
     'fixed paths · notes glim/code, glim/guide, glim/said',
   ]);

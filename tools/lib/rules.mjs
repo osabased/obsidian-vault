@@ -700,15 +700,15 @@ export function rankPair(a, b, { fit } = {}) {
 }
 
 // The quotes of the user's words, of sources and of recorded rows, with what each is checked against. A line from a
-// row, whose id comes before the proposal's, quotes the row rather than the session. A line lint can't read comes back
-// as the line alone.
+// row, whose id comes before the proposal's, quotes the row rather than the session; any other line gives the
+// proposal's id, whose inbox row holds the quote. A line lint can't read comes back as the line alone.
 export const evidenceQuotes = n => evidenceLines(n).flatMap(({ line, kind, session, note, cite }) => {
   if (!EVIDENCE_KINDS.includes(kind) || (note && kind !== 'stated')) return [{ line }];
   if (!['stated', 'correction', 'source'].includes(kind)) return [];
   const m = cite.match(/^(?:(.+?) · dated [^·]* · )?["“](.*)["”](?: \(([^()]*)\))?[ \t]*$/);
   if (!m || (kind === 'source') !== (m[1] !== undefined)) return [{ line }];
   const [, source, quote, ids = ''] = m;
-  if (!ids.includes(';')) return [{ session, note, source, quote }];
+  if (!ids.includes(';')) return [{ session, note, source, quote, id: ids || undefined }];
   const pick = kind === 'stated' && ids.match(/^(\S+); proposed as \S+$/)?.[1];
   return pick ? [{ pick, quote }] : [{ line }];
 });

@@ -9,6 +9,7 @@ import { build } from './lib/build.mjs';
 import { subjectRows, laterRows, liveRows, endedBy, newestFirst, entry, projectName, sameProject } from './lib/picks.mjs';
 import { UsageError, readInput, refuse, failure, line } from './lib/input.mjs';
 import { ownEntry, markShown, sessionRoots } from './lib/sessions.mjs';
+import { typedMessages, saidIn } from './lib/quotes.mjs';
 
 const RUN = 'usage: node tools/pick.mjs <session-id> < pick.json';
 const SHOW = '       node tools/pick.mjs show <session-id> <subject> [domain [project]]';
@@ -89,6 +90,17 @@ function inDomain(s, { domain, project, from } = {}) {
 
 const optional = (p, name) => line(p, name, false) || null;
 
+// propose.mjs cites a row's notes and a comment's text as the user's words, so they are checked as its quotes are.
+const NOT_TYPED = {
+  notes: "notes aren't in anything the user typed in this session. Put their exact words in notes, with … where you leave some out, or your own in reason.",
+  comment: "the comment isn't in anything the user typed in this session. Record their exact words, with … where you leave some out.",
+};
+function checkSaid(s, text, what) {
+  const typed = s.transcript ? typedMessages(s.transcript) : null;
+  if (!typed) refuse("the taste vault has no transcript for this session, so it can't check these are the user's words.");
+  if (!saidIn(text, typed)) refuse(NOT_TYPED[what]);
+}
+
 function subjectOf(p) {
   const subject = line(p, 'subject');
   if (!KEBAB.test(subject)) refuse('subject must be lowercase-kebab-case.');
@@ -141,7 +153,7 @@ const KINDS = {
   options: {
     name: 'pick',
     fields: ['subject', 'domain', 'project', 'question', 'header', 'options', 'pick', 'status', 'notes', 'reason', 'sheet', 'replaces'],
-    read: p => {
+    read: (p, s) => {
       const subject = subjectOf(p);
       const question = line(p, 'question');
       const header = optional(p, 'header');
@@ -152,6 +164,7 @@ const KINDS = {
       if (!['user', 'provisional'].includes(status)) refuse('status must be user or provisional.');
       const notes = optional(p, 'notes');
       if (notes && status === 'provisional') refuse("notes are the user's words, and a provisional pick has none. Put your own reasons in reason.");
+      if (notes) checkSaid(s, notes, 'notes');
       const reason = optional(p, 'reason');
       return {
         sheet: sheetOf(p), replaces: line(p, 'replaces', false),
@@ -166,6 +179,7 @@ const KINDS = {
       const subject = p.subject === undefined ? null : subjectOf(p);
       const confirms = line(p, 'confirms');
       const notes = optional(p, 'notes');
+      if (notes) checkSaid(s, notes, 'notes');
       const reason = optional(p, 'reason');
       return {
         make: (rows, later) => {
@@ -182,9 +196,10 @@ const KINDS = {
   comment: {
     name: 'comment',
     fields: ['subject', 'domain', 'project', 'comment'],
-    read: p => {
+    read: (p, s) => {
       const subject = subjectOf(p);
       const text = line(p, 'comment');
+      checkSaid(s, text, 'comment');
       return { make: () => ({ subject, text, status: 'user' }) };
     },
   },

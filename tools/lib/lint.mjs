@@ -2,7 +2,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { isBuiltin } from 'node:module';
 import {
-  config, vaultPath, plural, today, datedFiles, filesIn, pickRows, rewriteText, lf, readJson, readJsonSafe, toPosix, memo, statePath, isVaultOnly, isMarkerName, clock, FILE_TOOLS, EDIT_HOOK_MATCHER,
+  config, vaultPath, plural, today, datedFiles, filesIn, pickRows, proposalRows, rewriteText, lf, readJson, readJsonSafe, toPosix, memo, statePath, isVaultOnly, isMarkerName, clock, FILE_TOOLS, EDIT_HOOK_MATCHER,
 } from './vault.mjs';
 import {
   vaultFile, loadNotes, noteErrors, ruleText, ruleTextParts, liveRules, knownDomain, alwaysSize, isUrl, validDay, normTopic, topicNotes, rawFile, toKey, resolver, linksUnder, noteLinks, byTopic, isTopicPage, isSourcePage, PAGE_KINDS, joinList,
@@ -71,6 +71,9 @@ export function lint(notes = loadNotes()) {
   const anchors = memo(rel => { const hash = hashOf(rel); return hash && derivedAnchors(hash); });
   let rows;
   const rowOf = id => (rows ??= new Map(pickRows().map(r => [r.id, r]))).get(id);
+  let inbox;
+  const inboxRow = id => (inbox ??= new Map(proposalRows().map(r => [r.id, r]))).get(id);
+  const unchecked = [];
 
   for (const n of notes) {
     if (n.depth === 1) add('error', n.rel, 'notes go in wiki/<domain>/');
@@ -87,11 +90,11 @@ export function lint(notes = loadNotes()) {
     if (n.type === 'page') {
       lintPage(n, () => watched(n), add);
       lintFootnotes(n, { lines, anchors }, add);
-      lintSaid(n, typedIn, add);
+      lintSaid(n, { typedIn, inboxRow, unchecked }, add);
     }
     if (n.type !== 'rule') continue;
 
-    lintEvidence(n, { typedIn, textsOf, pageTextsOf, rowOf }, add);
+    lintEvidence(n, { typedIn, textsOf, pageTextsOf, rowOf, inboxRow, unchecked }, add);
     if (n.superseded_by === n.key) add('error', n.rel, 'superseded_by names the note itself');
     else if (n.superseded_by && !keys.has(n.superseded_by)) add('error', n.rel, `superseded_by names ${n.superseded_by}, which has no note`);
     if (n.data.status !== undefined) add('warn', n.rel, 'status does nothing. To stop a rule, delete its note or set superseded_by');
@@ -117,6 +120,7 @@ export function lint(notes = loadNotes()) {
     }
   }
 
+  if (unchecked.length) found.push({ level: 'warn', file: 'wiki', msg: uncheckedTally(unchecked), unchecked });
   lintConfig(add);
   lintReaders(notes, add);
   lintTopics(notes, domains, add);
@@ -400,23 +404,38 @@ function lintDerived(add, hashOf) {
   }
 }
 
-// A session the registry has dropped, or whose transcript is gone, can't be checked, so its lines pass.
-function checkTyped(n, session, quote, typedIn, add) {
+// A session the registry has dropped, or whose transcript is gone, is checked against the inbox row the line names,
+// whose text propose.mjs checked as it wrote it. A line with no such row can't be checked, and goes in the tally.
+function checkTyped(n, { session, quote, id }, { typedIn, inboxRow, unchecked }, add) {
   const typed = typedIn(session);
-  if (typed && !saidIn(quote, typed)) add('warn', n.rel, `"${quote}" isn't in what the user typed in session ${session}. Quote their exact words, with … where you leave some out`);
+  if (typed) {
+    if (!saidIn(quote, typed)) add('warn', n.rel, `"${quote}" isn't in what the user typed in session ${session}. Quote their exact words, with … where you leave some out`);
+    return;
+  }
+  const row = id && inboxRow(id);
+  if (!row) unchecked.push({ note: n.rel, cites: `session ${session}`, quote, gone: true });
+  else if (!saidIn(quote, [String(row.text ?? '')])) add('warn', n.rel, `"${quote}" isn't in what row ${id} recorded`);
 }
 
-function lintSaid(n, typedIn, add) {
+// The user can't fix a URL or a pruned transcript, so these are one warning, and review.mjs status lists them.
+function uncheckedTally(unchecked) {
+  const gone = unchecked.filter(u => u.gone).length;
+  const parts = [[unchecked.length - gone, 'a URL'], [gone, 'a session whose transcript is gone']].filter(([count]) => count);
+  const said = parts.map(([count, what], i) => (i ? `${count} ${what}` : `${count} ${count === 1 ? 'cites' : 'cite'} ${what}`));
+  return `${plural(unchecked.length, 'quote')} can't be checked: ${said.join(', ')}. node tools/review.mjs status lists them.`;
+}
+
+function lintSaid(n, ctx, add) {
   for (const { line, session, quote } of youSaid(n)) {
-    if (session) checkTyped(n, session, quote, typedIn, add);
+    if (session) checkTyped(n, { session, quote }, ctx, add);
     else add('warn', n.rel, `a line under ## You said isn't in the form - <date> · session <id> · "<their exact words>", so lint can't check it: ${clip(line, 100)}`);
   }
 }
 
 // propose.mjs checks a quote as it writes it, but a rule written or edited by hand never passes through it.
-// A URL, or a source with no words such as a screenshot, can't be checked, so its lines pass.
-function lintEvidence(n, { typedIn, textsOf, pageTextsOf, rowOf }, add) {
-  for (const { line, session, note, source, pick, quote } of evidenceQuotes(n)) {
+// A source with no words such as a screenshot can't be checked, so its lines pass.
+function lintEvidence(n, { typedIn, textsOf, pageTextsOf, rowOf, inboxRow, unchecked }, add) {
+  for (const { line, session, note, source, pick, quote, id } of evidenceQuotes(n)) {
     if (line) {
       add('warn', n.rel, `an Evidence line isn't in the form propose.mjs writes, so lint can't check it: ${clip(line, 100)}`);
     } else if (note) {
@@ -429,12 +448,14 @@ function lintEvidence(n, { typedIn, textsOf, pageTextsOf, rowOf }, add) {
       if (!row) add('warn', n.rel, `an Evidence line cites ${pick}, which no row in raw/picks/ has`);
       else if (!saidIn(quote, [String(row.text ?? '')])) add('warn', n.rel, `"${quote}" isn't in what row ${pick} recorded. Quote the row's own words, with … where you leave some out`);
     } else if (source === undefined) {
-      checkTyped(n, session, quote, typedIn, add);
+      checkTyped(n, { session, quote, id }, { typedIn, inboxRow, unchecked }, add);
     } else if (!isUrl(source)) {
       const rel = rawFile(source);
       const texts = rel ? textsOf(rel) : null;
       if (!rel) add('warn', n.rel, `an Evidence line cites ${source}. Cite a URL or a file under raw/ that exists`);
       else if (texts && !saidIn(quote, texts)) add('warn', n.rel, `"${quote}" isn't in ${rel}. Quote the file's own words, with … where you leave some out`);
+    } else {
+      unchecked.push({ note: n.rel, cites: source, quote });
     }
   }
 }

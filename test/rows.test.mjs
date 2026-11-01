@@ -3,7 +3,7 @@ import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { makeVault, ruleNote, sessionId } from './fixture.mjs';
+import { makeVault, ruleNote, sessionId, userTurn } from './fixture.mjs';
 
 const ALPHA = { title: 'Alpha', markers: ['alpha.project'], topics: ['code', 'naming'] };
 const BETA = { title: 'Beta', markers: ['beta.project'], topics: ['code'] };
@@ -20,8 +20,17 @@ function monorepo(t) {
   return dir;
 }
 
+// pick.mjs checks comments and notes against what the user typed, so each session starts with them typed.
+const SAID = 'keep the cards roomy. first words, second words, alpha words, beta words, words for the other domain, words for glim, about a, about b. flat reads calmer';
+function vault(t, opts) {
+  const v = makeVault(t, opts);
+  const start = v.startSession;
+  v.startSession = (sid, o = {}) => start(sid, { transcript: v.transcript(sid, [userTurn(SAID)]), ...o });
+  return v;
+}
+
 function setup(t, { mono = false } = {}) {
-  const v = makeVault(t, mono ? { domains: { alpha: ALPHA, beta: BETA } } : {});
+  const v = vault(t, mono ? { domains: { alpha: ALPHA, beta: BETA } } : {});
   const sid = sessionId();
   const root = mono ? monorepo(t) : null;
   v.startSession(sid, root ? { cwd: root } : {});
@@ -151,7 +160,7 @@ test('a rule in a package\'s domain counts the sessions at the monorepo root in 
 });
 
 test('show leaves out the picks of another domain in the same folder', t => {
-  const v = makeVault(t, { domains: { other: { title: 'Other', topics: ['code'], markers: ['other.marker'] } } });
+  const v = vault(t, { domains: { other: { title: 'Other', topics: ['code'], markers: ['other.marker'] } } });
   fs.writeFileSync(path.join(v.project, 'other.marker'), '');
   const sid = sessionId();
   v.startSession(sid);
@@ -181,7 +190,7 @@ test("show lists the taste and knowledge rules of every domain in the project's 
 
 // Two packages that hold one domain's marker, under a root outside every configured path.
 function twoPackages(t) {
-  const v = makeVault(t, { domains: { mk: { title: 'Mk', topics: ['code'], markers: ['mk.marker'] } } });
+  const v = vault(t, { domains: { mk: { title: 'Mk', topics: ['code'], markers: ['mk.marker'] } } });
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'vault-mono-')).replace(/\\/g, '/');
   t.after(() => fs.rmSync(root, { recursive: true, force: true }));
   for (const p of ['a', 'b']) {
@@ -240,7 +249,7 @@ test('pick --help describes project', t => {
 });
 
 test('a pick in a domain reached by a path records that domain and the folder', t => {
-  const v = makeVault(t, { presets: ['journal'] });
+  const v = vault(t, { presets: ['journal'] });
   v.write('wiki/journal/rules/always-j.md', ruleNote({ domain: 'journal', topic: 'days', always: true, doLine: 'Date each entry.' }));
   const sid = sessionId();
   const cwd = v.projects.journal;
@@ -250,4 +259,42 @@ test('a pick in a domain reached by a path records that domain and the folder', 
   const [row] = rowsIn(v, 'picks');
   assert.equal(row.domain, 'journal');
   assert.equal(lower(row.project), lower(cwd));
+});
+
+test("notes and a comment the user didn't type are refused, and nothing is recorded", t => {
+  const { v, sid } = setup(t);
+  const typed = pick(v, sid, provisional({ status: 'user', notes: 'flat reads calmer' }));
+  assert.equal(typed.code, 0, typed.stderr);
+  const notes = pick(v, sid, provisional({ status: 'user', notes: 'raised feels heavy' }));
+  assert.equal(notes.code, 1);
+  assert.equal(notes.stderr, "Not recorded: notes aren't in anything the user typed in this session. Put their exact words in notes, with … where you leave some out, or your own in reason.\n");
+  assert.equal(pick(v, sid, provisional()).code, 0);
+  const second = rowsIn(v, 'picks').at(-1);
+  const confirmed = pick(v, sid, { confirms: second.id, notes: 'raised feels heavy' });
+  assert.equal(confirmed.code, 1);
+  assert.match(confirmed.stderr, /^Not recorded: notes aren't in anything the user typed in this session\./);
+  const said = pick(v, sid, comment({ comment: 'the cards feel cramped' }));
+  assert.equal(said.code, 1);
+  assert.equal(said.stderr, "Not recorded: the comment isn't in anything the user typed in this session. Record their exact words, with … where you leave some out.\n");
+  assert.equal(rowsIn(v, 'picks').length, 2);
+  assert.equal(pick(v, sid, { confirms: second.id, notes: 'flat … calmer' }).code, 0);
+});
+
+test('with no transcript a comment and notes are refused, and a pick without notes is recorded', t => {
+  const v = vault(t);
+  const sid = sessionId();
+  v.startSession(sid, { transcript: null });
+  const none = "the taste vault has no transcript for this session, so it can't check these are the user's words.";
+  const said = pick(v, sid, comment());
+  assert.equal(said.code, 1);
+  assert.equal(said.stderr, `Not recorded: ${none}\n`);
+  const notes = pick(v, sid, provisional({ status: 'user', notes: 'flat reads calmer' }));
+  assert.equal(notes.code, 1);
+  assert.equal(notes.stderr, `Not recorded: ${none}\n`);
+  assert.equal(fs.existsSync(v.at('raw', 'picks')) ? rowsIn(v, 'picks').length : 0, 0);
+  const plain = pick(v, sid, provisional({ status: 'user' }));
+  assert.equal(plain.code, 0, plain.stderr);
+  assert.equal(pick(v, sid, provisional()).code, 0);
+  assert.equal(pick(v, sid, { confirms: rowsIn(v, 'picks').at(-1).id }).code, 0);
+  assert.equal(rowsIn(v, 'picks').length, 3);
 });
