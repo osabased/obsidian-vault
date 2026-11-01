@@ -1,5 +1,5 @@
 import { runHook, sessionReach, inVaultFolder, readableDomains, vaultPath, toolsPath, toPosix, guarded, config, plural, clock, daysBetween } from '../lib/vault.mjs';
-import { alwaysContext, alwaysIn, fitContext, indexNote, scopeTopics, loadNotes, settledNotes, liveRules, deliverable, deliveryFor, readDerived, clip, undelivered, knownDomain, joinList } from '../lib/rules.mjs';
+import { alwaysContext, alwaysIn, fitContext, indexNote, scopeTopics, loadNotesAsync, settledNotes, liveRules, deliverable, deliveryFor, readDerived, clip, undelivered, knownDomain, joinList } from '../lib/rules.mjs';
 import { build } from '../lib/build.mjs';
 import { remaining } from '../lib/deadline.mjs';
 import { changedSinceBuild, noteTimes, refStats } from '../lib/cache.mjs';
@@ -86,7 +86,7 @@ function sourcesNote(scope, derived) {
   return `Taste vault: ${plural(stale.size, 'source')} the ${joinList(named, 'and')} notes cite ${verb} been checked in ${plural(Math.min(...limits), 'day')}. Remind the user to run /lint in \`${toPosix(vaultPath())}\`, which refreshes them.`;
 }
 
-runHook('session-start', input => {
+runHook('session-start', async input => {
   guarded('tidy', tidy);
   const hits = sessionReach(input.cwd);
   const doms = [...new Set(hits.map(d => d.domain))];
@@ -97,7 +97,7 @@ runHook('session-start', input => {
   const scope = [...doms, 'global'];
   // A session in this folder hears of notes outside any domain too.
   const walked = vaultFolder ? null : readable;
-  const notes = loadNotes(walked);
+  const notes = await loadNotesAsync(walked);
   // Notes edited in Obsidian go live without a build, and the always rules that don't fit point to active.md.
   // A build another tool is running already writes what changed, and one that waits longer would spend the hook's time.
   // A derived.json that is missing or corrupt counts as changed, so it is rebuilt once instead of failing every start. When
