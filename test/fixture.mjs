@@ -196,12 +196,13 @@ function merged(objects) {
 }
 const isPlain = x => typeof x === 'object' && x !== null && !Array.isArray(x);
 
-// The test run may itself be inside a Claude Code session, whose id would make propose.mjs and pick.mjs refuse the fixture's,
+// The test run may itself be inside an agent's session, whose id would make propose.mjs and pick.mjs refuse the fixture's,
 // or inside the pre-commit hook, whose GIT_DIR and GIT_INDEX_FILE would point a test's git at the vault's own repository.
 export function cleanEnv(extra) {
   const env = Object.fromEntries(Object.entries(process.env).filter(([k]) => !/^GIT_/i.test(k)));
   delete env.CLAUDE_CODE_SESSION_ID;
   delete env.CLAUDE_CODE_SAFE_MODE;
+  delete env.CODEX_THREAD_ID;
   return { ...env, ...extra };
 }
 

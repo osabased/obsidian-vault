@@ -1,0 +1,11 @@
+// node "<vault>/.live/tools/adapters/codex/launch.mjs" <hook> <seconds>
+// The vault is found from this file's own folder, so the command needs no option or environment variable. Codex's hook
+// input carries no timeout, so the seconds repeat the hook's timeout for the deadline.
+import { runHook } from '../../lib/vault.mjs';
+import * as agent from './adapter.mjs';
+
+const HOOKS = ['session-start', 'prompt', 'edit', 'subagent-start', 'stop'];
+const [hook, seconds] = process.argv.slice(2);
+if (seconds) process.env.VAULT_HOOK_TIMEOUT = seconds;
+if (HOOKS.includes(hook)) await import(`./hooks/${hook}.mjs`);
+else runHook(String(hook), agent, () => { throw new Error(`no hook ${hook}; the hooks are ${HOOKS.join(', ')}`); });

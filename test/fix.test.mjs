@@ -123,3 +123,18 @@ test('lint --fix takes --fail-on, and refuses other arguments', t => {
   assert.equal(v.run('lint.mjs', ['--fix', '--fix']).code, 2);
   assert.equal(v.run('lint.mjs', ['--mend']).code, 2);
 });
+
+test('lint errors when a skill has no byte copy in .agents/skills/, and lint --fix writes it', t => {
+  const v = makeVault(t);
+  const skill = '---\nname: ingest\ndescription: Take in a source.\n---\r\n\nSteps with a curly ’quote’.\n';
+  v.write('.claude/skills/ingest/SKILL.md', skill);
+  const missing = v.run('lint.mjs');
+  assert.match(missing.stdout, /^error \.agents\/skills\/ingest\/SKILL\.md: missing; run node tools\/lint\.mjs --fix to copy \.claude\/skills\/ingest\/SKILL\.md$/m);
+  v.write('.agents/skills/ingest/SKILL.md', skill.replace('\r\n', '\n'));
+  const differs = v.run('lint.mjs');
+  assert.match(differs.stdout, /^error \.agents\/skills\/ingest\/SKILL\.md: differs from \.claude\/skills\/ingest\/SKILL\.md; edit the skill there, then run node tools\/lint\.mjs --fix to copy it$/m);
+  const fixed = v.run('lint.mjs', ['--fix']);
+  assert.match(fixed.stdout, /^fixed \.agents\/skills\/ingest\/SKILL\.md: /m);
+  assert.ok(fs.readFileSync(v.at('.agents', 'skills', 'ingest', 'SKILL.md')).equals(Buffer.from(skill)));
+  assert.doesNotMatch(fixed.stdout.split(/^fixed .*$/m).at(-1), /\.agents\/skills/);
+});

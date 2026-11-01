@@ -102,7 +102,7 @@ function markerDomains() {
 const isFileAt = p => { try { return fs.statSync(p, { throwIfNoEntry: false })?.isFile() ?? false; } catch { return false; } };
 
 // A worktree checks out the same project, so its project root is the main checkout.
-const mainCheckout = dir => dir.replace(/[\\/]\.claude[\\/]worktrees[\\/][^\\/]+(?=[\\/]|$)/i, '');
+export const mainCheckout = dir => dir.replace(/[\\/]\.claude[\\/]worktrees[\\/][^\\/]+(?=[\\/]|$)/i, '');
 
 // The nearest folder at or above p that holds a marker, with every domain whose marker it holds. p may be a file the
 // edit is about to create, and a file path never holds a marker, so the walk can start at p itself.

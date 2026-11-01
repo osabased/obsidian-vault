@@ -1,6 +1,6 @@
 import { lf, plainText } from '../../lib/vault.mjs';
 
-export { typedMessages } from './transcript.mjs';
+export { typedMessages, transcriptCheck, newestTranscript } from './transcript.mjs';
 
 export const name = 'claude-code';
 

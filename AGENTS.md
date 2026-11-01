@@ -14,6 +14,7 @@ The user's taste and knowledge, kept as a small wiki so an agent can apply and l
 - `log.md`: the notes `tools/propose.mjs` wrote or added evidence to, the operations `tools/log.mjs` logged (a page changed on its own, an ingest, an answer filed back) and each `/lint` run's tally, newest last. Older entries record confirmations, retirements, drops and review decisions from before rules went live on writing.
 - `.state/`: the hooks' bookkeeping, including which rules and pages each session was shown, `derived.json`, which refresh and build write, and `versions.json`, the versions read from each project's lockfile.
 - `tools/`: the hooks and scripts. `tools/adapters/<agent>/` holds what is one agent's, its hooks included; the rest of `tools/` is the core and the scripts. Read `tools/CODING_STANDARDS.md` before changing them. Sessions run the hooks from `.live/tools/`, a copy of `tools/` that `.githooks/post-commit` keeps at the last commit, and the start hook names the `propose.mjs` and `pick.mjs` in that copy, so a change to the tools reaches project sessions once it's committed.
+- `.agents/skills/`: byte copies of `.claude/skills/` for agents that read skills there. Edit a skill in `.claude/skills/`; lint reports a copy that differs, and `node tools/lint.mjs --fix` writes it.
 
 ## How rules and pages reach the agent
 
@@ -193,7 +194,7 @@ A pick is the user's choice between options the agent showed them for one piece 
 
 ## What belongs here
 
-- **Rules** are one-line Do/Not taste, and facts training gets wrong, that the hooks deliver. Propose a rule only for what the project's CLAUDE.md or `.claude/rules/` doesn't already say.
+- **Rules** are one-line Do/Not taste, and facts training gets wrong, that the hooks deliver. Propose a rule only for what the project's own agent instructions, such as CLAUDE.md, AGENTS.md or `.claude/rules/`, don't already say.
 - **Pages** are knowledge: concepts, APIs, comparisons, what sources say, and research on any topic, including the background a rule's one line leaves out.
 - **Procedures and how-tos**, steps an agent follows, belong in skills; a page may link one. **Project facts**, such as how one project is built or where its files live, belong in that project's CLAUDE.md, docs or auto memory.
 
@@ -218,6 +219,6 @@ A pick is the user's choice between options the agent showed them for one piece 
 
 - Change a file that already exists in `raw/`. Put new material in a new file under `raw/refs/`.
 - Change the user's words: the quotes under `## Evidence` and `## You said`, and a page with `author: user` outside its `## Agent notes`. Add a line instead.
-- Write outside the vault.
+- Write outside the vault. `node tools/agents.mjs <agent>` prints the hooks for the user to install or merge, and writes nothing.
 
 The hooks refuse the first, the edits to a user's page the second forbids, and edits to `active.md`, `index.md`, `decisions.md`, `vault.local.json`, `derived/`, `.state/`, `.sources/` and `.live/`. They guard against mistakes, not deliberate workarounds.
