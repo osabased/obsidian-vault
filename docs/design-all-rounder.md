@@ -1133,7 +1133,8 @@ The phases build mechanism only. Adding real knowledge and taste is the user's c
        Each file becomes one event:
        - **Add File:** `added` is the content, the `+` lines without their `+`, and `after` returns the content.
        - **Update File:** `added` is the `+` lines joined with LF. `after(before)` applies each chunk in order after the one before it, at its `@@` context line when it has one. It looks for the chunk's ` ` and `-` lines exactly, then ignoring trailing whitespace, then ignoring both ends, then with Unicode dashes, quotes and spaces read as ASCII, as `seek_sequence.rs` does. It returns null when a chunk isn't found. Insertions at one line keep the patch's order, as `file_update.rs` applies them.
-       - **Move to:** a second event on the new path, with the same `added` and `after`.
+       - **Move to:** the source path's event is a delete, `added` `''` and `after` returning `''`. A second event on the new path has the update's `added`, and its `after` applies the chunks to the source's text, read from disk, whatever the destination held; null when the source can't be read.
+       - Codex applies the hunks in order (`lib.rs:504`), so hunks on one path compose: each event's `after` runs the patch up to its own hunk, from the `before` it is given for its own file and from disk for any other. An Add ignores what was there, a Delete leaves `''`, and a null carries through.
        - **Delete File:** `added` is `''` and `after` returns `''`. So `vaultGuard` refuses deleting what it guards, `noteGuard` refuses a page cut to nothing once, and a user's page is refused (`edit.mjs:97`).
        - A patch that doesn't parse throws. That is a loud hook failure, and Codex's own parser refuses the same patch.
      - **`output`.**
@@ -1273,6 +1274,7 @@ The phases build mechanism only. Adding real knowledge and taste is the user's c
      - **`test/codex.test.mjs`.**
        - The parser handles Add, Update with and without `@@` context, Move to, Delete, an Environment ID line, whitespace around the markers, and `*** End of File`.
        - A patch over two covered files gives one deny naming both. The same patch again passes. A malformed patch is a loud failure.
+       - A move's source event leaves `''` and its destination gets the source's new text; an update after an add or another update on the same path applies to the earlier result. A move onto a page that drops its `## You said` line, and an add then update that marks a page `author: user`, are refused.
        - `after()` on a wiki note: a patch that removes a `## You said` line is refused; one that adds lines under `## Agent notes` on a user's page passes; a chunk that matches nothing refuses a user's page.
        - Stop's output is `{"decision":"block","reason":…}` byte for byte. A prompt with that text afterwards gives no output and doesn't restamp the turn, and the provider drops it.
        - The provider keeps `user.text` and the text of a text-and-image message, drops `agents_md.*`, `environments.*`, `additional_content.*`, the question reply and a Stop continuation in Codex's `<hook_prompt>` shape, and returns null for any other user message with no `content_item_kinds` and for a missing file.
