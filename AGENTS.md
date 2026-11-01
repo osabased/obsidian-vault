@@ -60,7 +60,7 @@ applies_to:
   - '!src/client/UI/**/*.test.ts'
 triggers: []
 keywords:
-  - any
+  - typed props
 created: 2026-10-19
 updated: 2026-10-19
 ---
