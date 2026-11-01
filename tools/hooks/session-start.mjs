@@ -1,5 +1,5 @@
 import { runHook, sessionReach, inVaultFolder, readableDomains, vaultPath, toolsPath, toPosix, guarded, config, plural, clock } from '../lib/vault.mjs';
-import { alwaysContext, alwaysIn, fitContext, loadNotes, settledNotes, liveRules, domainTopics, joinList, clip, undelivered, knownDomain } from '../lib/rules.mjs';
+import { alwaysContext, alwaysIn, fitContext, indexNote, scopeTopics, loadNotes, settledNotes, liveRules, clip, undelivered, knownDomain } from '../lib/rules.mjs';
 import { build } from '../lib/build.mjs';
 import { changedSinceBuild, markBuilt } from '../lib/cache.mjs';
 import { touchSession, clearMarkers, markAlways, markShown, tidy, errorsSinceLint, sinceLint } from '../lib/sessions.mjs';
@@ -28,16 +28,6 @@ function pickNote(sid) {
     `Before building or reviewing a piece that has picks, run \`node "${script}" show ${sid} <subject>\` and keep to what it prints.`,
     `\`node "${script}" --help\` lists the fields.`,
   ].join(' ');
-}
-
-const indexNote = topics => [
-  `Taste vault: when the task touches ${joinList(topics, 'or')}, read \`${toPosix(vaultPath('index.md'))}\` and the pages it lists under those topics.`,
-  `File a useful answer that draws on the vault back as a page, as \`${toPosix(vaultPath('AGENTS.md'))}\` says under Pages.`,
-].join(' ');
-
-function topicsOf(scope, notes) {
-  const all = domainTopics(notes);
-  return [...new Set(scope.flatMap(d => all.get(d) ?? []))];
 }
 
 function errorsNote() {
@@ -93,7 +83,7 @@ runHook('session-start', input => {
   const ready = settledNotes(notes);
   const rules = liveRules(ready);
   const always = alwaysContext(scope, rules);
-  const topics = guarded('index note', () => topicsOf(readable, ready), []);
+  const topics = guarded('index note', () => scopeTopics(readable, ready), []);
   let propose = '';
   let pick = '';
   // Vault sessions register so /ingest can propose; the skill tells them how, so they get no note.

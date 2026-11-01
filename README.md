@@ -25,12 +25,13 @@ git config core.hooksPath .githooks
 .githooks/post-commit
 ```
 
-`pre-commit` runs the tests, rebuilds the generated files and lints. `post-commit` refreshes `.live/tools/` after each commit, and the other hooks run it after a checkout, merge or rebase. A domain reaches projects by the `markers` in `vault.config.json`, or by this machine's folders, which go in the untracked `vault.local.json` as `{ "domains": { "<domain>": { "paths": ["<absolute folder>"] } } }`. Then add the three hooks to `settings.json`, with the vault's path:
+`pre-commit` runs the tests, rebuilds the generated files and lints. `post-commit` refreshes `.live/tools/` after each commit, and the other hooks run it after a checkout, merge or rebase. A domain reaches projects by the `markers` in `vault.config.json`, or by this machine's folders, which go in the untracked `vault.local.json` as `{ "domains": { "<domain>": { "paths": ["<absolute folder>"] } } }`. Then add the four hooks to `settings.json`, with the vault's path:
 
 ```json
 "hooks": {
   "SessionStart": [{ "hooks": [{ "type": "command", "command": "node <vault>/.live/tools/hooks/session-start.mjs", "timeout": 10 }] }],
   "UserPromptSubmit": [{ "hooks": [{ "type": "command", "command": "node <vault>/.live/tools/hooks/prompt.mjs", "timeout": 10 }] }],
-  "PreToolUse": [{ "matcher": "Edit|Write|MultiEdit|NotebookEdit|Bash|PowerShell", "hooks": [{ "type": "command", "command": "node <vault>/.live/tools/hooks/edit.mjs", "timeout": 10 }] }]
+  "SubagentStart": [{ "hooks": [{ "type": "command", "command": "node <vault>/.live/tools/hooks/subagent-start.mjs", "timeout": 10 }] }],
+  "PreToolUse": [{ "matcher": "Edit|Write|MultiEdit|NotebookEdit|AskUserQuestion|mcp__.*", "hooks": [{ "type": "command", "command": "node <vault>/.live/tools/hooks/edit.mjs", "timeout": 10 }] }]
 }
 ```

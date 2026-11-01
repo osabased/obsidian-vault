@@ -2,9 +2,9 @@ import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
 import {
-  config, vaultPath, appendJsonl, picksFile, pickRows, copyNew, today, toPosix, withLock, statePath, guarded,
+  config, domainsFor, vaultPath, appendJsonl, picksFile, pickRows, copyNew, today, toPosix, withLock, statePath, guarded,
 } from './lib/vault.mjs';
-import { KEBAB, settledRules, ruleLine, normTopic, joinList, byKey, cmp } from './lib/rules.mjs';
+import { KEBAB, settledRules, ruleLine, normTopic, joinList, byKey, cmp, domainOrder } from './lib/rules.mjs';
 import { build } from './lib/build.mjs';
 import { subjectRows, laterRows, liveRows, endedBy, newestFirst, entry, projectName, sameProject } from './lib/picks.mjs';
 import { UsageError, readInput, refuse, failure, line } from './lib/input.mjs';
@@ -48,9 +48,9 @@ const help = () => [
   '  subject      as above',
   "  comment      the user's words, verbatim, one line",
   '',
-  'show prints the subject\'s live picks, newest first, then the domain\'s taste rules. Run it before building or',
-  "reviewing the piece, and paste what it prints into the reviewer's prompt. Give the domain when the session is in more than one,",
-  'and the project when the domain has more than one.',
+  'show prints the subject\'s live picks, newest first, then the taste and knowledge rules of the domain and of the other',
+  "domains whose projects hold its project. Run it before building or reviewing the piece, and paste what it prints into the",
+  "reviewer's prompt. Give the domain when the session is in more than one, and the project when the domain has more than one.",
 ].join('\n');
 
 function sessionOf(sid) {
@@ -247,12 +247,18 @@ function show(sid, subject, domain, project) {
   const out = live.length
     ? [`Picks for ${subject} in ${name}, newest first:`, ...live.flatMap(r => entry(r, { sheet, indent: '  ' }))]
     : [`No picks for ${subject} in ${name} yet.`, ...(others.length ? [`Subjects with picks: ${others.join(', ')}.`] : [])];
-  const skipped = [config().domains[s.domain]?.showSkipTopics ?? []].flat().filter(t => typeof t === 'string');
-  const skip = skipped.map(normTopic);
-  const rules = Object.entries(settledRules()).filter(([, r]) => r.domain === s.domain && r.kind !== 'knowledge' && !skip.includes(r.topic)).sort(byKey);
-  out.push('', skipped.length ? `${s.domain} taste rules, leaving out ${joinList(skipped, 'and')}:` : `${s.domain} taste rules:`);
-  out.push(...(rules.length ? rules.map(([k, r]) => ruleLine(k, r)) : ['None.']));
-  for (const [k] of rules) markShown(sid, k);
+  // An edit in the project takes the rules of every domain whose project holds it, so the reviewer hears them all.
+  const near = domainOrder(domainsFor(s.project).map(d => d.domain)).filter(d => d !== s.domain);
+  const all = settledRules();
+  for (const d of [s.domain, ...near]) {
+    const skipped = [config().domains[d]?.showSkipTopics ?? []].flat().filter(t => typeof t === 'string');
+    const skip = skipped.map(normTopic);
+    const rules = Object.entries(all).filter(([, r]) => r.domain === d && !skip.includes(r.topic)).sort(byKey);
+    if (d !== s.domain && !rules.length) continue;
+    out.push('', skipped.length ? `${d} rules, leaving out ${joinList(skipped, 'and')}:` : `${d} rules:`);
+    out.push(...(rules.length ? rules.map(([k, r]) => ruleLine(k, r)) : ['None.']));
+    for (const [k] of rules) markShown(sid, k);
+  }
   return out.join('\n');
 }
 
