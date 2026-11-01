@@ -1,6 +1,7 @@
 import fs from 'node:fs';
 import { runHook, config, domainsFor, everywhereDomains, inside, vaultRel, toPosix, cwdOf, FILE_TOOLS, toolFile, shortHash, lf } from '../lib/vault.mjs';
-import { settledNotes, liveRules, livePages, ruleLine, pagePointers, tryRegex, cmp, clip, parseNote, QUOTED } from '../lib/rules.mjs';
+import { settledNotes, liveRules, livePages, ruleLine, pagePointers, tryRegex, cmp, clip, parseNote, QUOTED, agentNotesSpan } from '../lib/rules.mjs';
+import { parse } from '../lib/frontmatter.mjs';
 import { bestMatch, specificity, bySpecificity } from '../lib/glob.mjs';
 import { marked, mark, markShown, markPages } from '../lib/sessions.mjs';
 
@@ -47,6 +48,41 @@ function textAfter(tool, ti, before) {
 const quotedLines = n => n.body.split(/^## /m).slice(1).filter(s => QUOTED.includes(s.split('\n')[0].trim().toLowerCase()))
   .flatMap(s => s.split('\n').slice(1).map(l => l.trim()).filter(Boolean));
 
+const userAuthored = text => parse(text).data.author === 'user';
+const headingLine = l => /^#{1,2}\s/.test(l);
+
+// A page the user wrote may gain lines under `## Agent notes`, or that heading with lines at its end, and nothing else.
+// Lines added without a heading in the way are the same text wherever the diff puts them, so any placement inside the
+// section is enough.
+function onlyNotesAdded(before, after) {
+  const [b, a] = [before, after].map(s => s.split('\n'));
+  const span = agentNotesSpan(b);
+  if (!span) {
+    if (!after.startsWith(before)) return false;
+    const rest = after.slice(before.length);
+    const gap = rest.match(/^\n*/)[0];
+    if (!gap && !before.endsWith('\n')) return false;
+    const [first, ...added] = rest.slice(gap.length).split('\n');
+    return /^## agent notes\s*$/i.test(first) && added.some(l => l.trim()) && !added.some(headingLine);
+  }
+  if (a.length < b.length) return false;
+  let head = 0;
+  while (head < b.length && a[head] === b[head]) head++;
+  let tail = 0;
+  while (tail < b.length && a[a.length - 1 - tail] === b[b.length - 1 - tail]) tail++;
+  if (head + tail < b.length) return false;
+  const at = Math.max(span.at + 1, b.length - tail);
+  return at <= Math.min(span.end, head) && !a.slice(at, at + a.length - b.length).some(headingLine);
+}
+
+function userNoteGuard(rel, before, after) {
+  if (userAuthored(after) && !userAuthored(before)) {
+    return `${rel} would be marked author: user. The user sets author: user themselves; the agent doesn't make a page theirs.`;
+  }
+  if (!userAuthored(before) || after === before || onlyNotesAdded(before, after)) return null;
+  return `${rel} is the user's own writing, so it stays as they wrote it. Add notes as new lines under ## Agent notes, and change nothing else in the file.`;
+}
+
 const PAGE_KEEPS = 0.7;
 
 // Notes are rewritten in place, so an edit that drops the user's words or most of a page is more likely a slip than a
@@ -54,10 +90,16 @@ const PAGE_KEEPS = 0.7;
 function noteGuard(input, file, cwd) {
   const rel = vaultRel(file, cwd);
   if (!rel || !/^wiki\/.+\.md$/i.test(rel)) return null;
-  let before;
-  try { before = lf(fs.readFileSync(toPosix(file, cwd), 'utf8')); } catch { return null; }
-  const after = textAfter(input.tool_name, input.tool_input ?? {}, before);
+  let before = null;
+  if (fs.existsSync(toPosix(file, cwd))) {
+    try { before = lf(fs.readFileSync(toPosix(file, cwd), 'utf8')); } catch { return null; }
+  }
+  const after = textAfter(input.tool_name, input.tool_input ?? {}, before ?? '');
   if (after === null) return null;
+  // A user's page gets no second try: a retry of an edit that changes their words would be the slip the guard is for.
+  const owned = userNoteGuard(rel, before ?? '', after);
+  if (owned) return owned;
+  if (before === null) return null;
   const was = parseNote(before, rel);
   const kept = new Set(quotedLines(parseNote(after, rel)));
   const lost = quotedLines(was).filter(l => !kept.has(l));

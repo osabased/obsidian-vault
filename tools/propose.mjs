@@ -10,7 +10,7 @@ import {
 } from './lib/rules.mjs';
 import { build } from './lib/build.mjs';
 import { entryKey } from './lib/glob.mjs';
-import { typedMessages, saidIn, normText, sourceTexts } from './lib/quotes.mjs';
+import { typedMessages, saidIn, normText, sourceTexts, userPageTexts } from './lib/quotes.mjs';
 import { ownEntry, marked, mark, wasShown, carryMarkers } from './lib/sessions.mjs';
 import { setField } from './lib/frontmatter.mjs';
 import { subjectRows, laterRows, endedBy, otherLabels } from './lib/picks.mjs';
@@ -33,6 +33,9 @@ const help = () => [
   ...topicLines(),
   '  basis        and what to cite for it, written into the note as given:',
   "    stated       the user's words state the rule. quote: their words, as they typed them in this session",
+  "                 page: instead of a session, the vault path of a page of the user's own, one with author: user,",
+  '                 like wiki/<domain>/<folder>/<slug>.md. quote: their words on that page; propose.mjs refuses one it',
+  "                 doesn't hold. The page's frontmatter and its ## Agent notes aren't the user's words.",
   '    inferred     taste only: you generalized a correction. quote: the words you generalized, as the user typed them',
   '                 A quote may leave words out with …; propose.mjs refuses one the user never typed in this session.',
   "    pick         taste only: the user's recorded answer from an earlier session backs the rule.",
@@ -79,7 +82,20 @@ function sessionOf(sid) {
 
 const REFS = /^raw\/refs\/./i;
 
+const WIKI_PAGE = /^wiki\/.+\.md$/i;
+
+function pageEvidence(page, quote) {
+  if (!WIKI_PAGE.test(page)) refuse('page must be a page under wiki/, like wiki/<domain>/<folder>/<slug>.md.');
+  const cited = vaultFile(page);
+  if (cited === null) refuse(`there's no file at ${page} in the vault.`);
+  if (!WIKI_PAGE.test(cited)) refuse('page must be a page under wiki/, like wiki/<domain>/<folder>/<slug>.md.');
+  return { kind: 'stated', said: quote, page: cited, cite: `"${quote}"` };
+}
+
 function evidence(f, p) {
+  const page = line(p, 'page', false);
+  if (page && f.basis !== 'stated') refuse('page is only for basis stated.');
+  if (page) return pageEvidence(page, line(p, 'quote'));
   if (f.basis === 'pick') return pickEvidence(line(p, 'pick'), f.domain);
   if (f.basis === 'failure') {
     const [error, fix, file] = ['error', 'fix', 'file'].map(name => line(p, name));
@@ -109,6 +125,12 @@ function evidence(f, p) {
 }
 
 function checkQuote(session, e) {
+  if (e.page) {
+    const texts = userPageTexts(e.page);
+    if (!texts) refuse(`${e.page} isn't an author: user page. Only a page the user marked author: user holds their words.`);
+    if (!saidIn(e.said, texts)) refuse(`the quote isn't in ${e.page}. Quote the user's own words there, not its frontmatter or its ## Agent notes.`);
+    return;
+  }
   if (e.kind === 'source') {
     const texts = REFS.test(e.source) ? sourceTexts(e.source) : null;
     if (texts && !saidIn(e.said, texts)) refuse(`the quote isn't in ${e.source}. Quote the file's own words.`);
@@ -252,8 +274,8 @@ function checkReadBack(n, f) {
 const yaml = s => (/^[a-z0-9-]+$/i.test(s) ? s : `'${s.replace(/'/g, "''")}'`);
 const yamlList = (name, xs) => (xs.length ? [`${name}:`, ...xs.map(x => `  - '${x.replace(/'/g, "''")}'`)] : [`${name}: []`]);
 
-// A pick is cited from the day and session it was recorded in.
-const citation = (f, e) => `- ${e.day ?? f.day} · ${e.label ?? e.kind} · session ${e.session ?? f.sid.slice(0, 8)} · ${e.cite}`;
+// A pick is cited from the day and session it was recorded in, and a page of the user's by its path.
+const citation = (f, e) => `- ${e.day ?? f.day} · ${e.label ?? e.kind} · ${e.page ?? `session ${e.session ?? f.sid.slice(0, 8)}`} · ${e.cite}`;
 const evidenceLine = (f, e) => `${citation(f, e)} (${e.pick ? `${e.pick}; proposed as ` : ''}${f.id})`;
 
 const noteText = (f, e) => [

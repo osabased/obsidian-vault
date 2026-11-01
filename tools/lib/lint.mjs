@@ -3,7 +3,7 @@ import path from 'node:path';
 import { isBuiltin } from 'node:module';
 import { config, vaultPath, plural, today, datedFiles, filesIn, pickRows, rewriteText, lf, readJson } from './vault.mjs';
 import {
-  loadNotes, noteErrors, ruleText, ruleTextParts, liveRules, knownDomain, alwaysSize, isUrl, validDay, normTopic, topicNotes, rawFile, toKey, resolver, linksUnder, noteLinks, byTopic, isTopicPage, isSourcePage, PAGE_KINDS, joinList,
+  vaultFile, loadNotes, noteErrors, ruleText, ruleTextParts, liveRules, knownDomain, alwaysSize, isUrl, validDay, normTopic, topicNotes, rawFile, toKey, resolver, linksUnder, noteLinks, byTopic, isTopicPage, isSourcePage, PAGE_KINDS, joinList,
   hasSection, footnotes, youSaid, linkedKeys, clip, isResearch, citedSources, evidenceQuotes, keyOf, kindFolder, kindLabel, linkTo, parseNote, noteLinkSpans, maxChars,
 } from './rules.mjs';
 import { parse, setField } from './frontmatter.mjs';
@@ -11,7 +11,7 @@ import { NAMESPACE_NAME } from './glob.mjs';
 import { build } from './build.mjs';
 import { readJsonSafe, toPosix } from './vault.mjs';
 import { transcriptFor } from './sessions.mjs';
-import { typedMessages, saidIn, sourceTexts } from './quotes.mjs';
+import { typedMessages, saidIn, sourceTexts, userPageTexts } from './quotes.mjs';
 import { bundleOf, locate } from './rules.mjs';
 import {
   KINDS, LOCATORS, filled, hashFile, lineCount, clockTime, parseLocator, anchorsIn, derivedAnchors, manifestLine, sourceProblems, refSources,
@@ -59,6 +59,7 @@ export function lint(notes = loadNotes()) {
   const textsOf = memo(rel => {
     try { return sourceTexts(rel); } catch { return null; }
   });
+  const pageTextsOf = memo(userPageTexts);
   const hashOf = memo(rel => { try { return hashFile(rel); } catch { return null; } });
   const lines = memo(lineCount);
   const anchors = memo(rel => { const hash = hashOf(rel); return hash && derivedAnchors(hash); });
@@ -82,7 +83,7 @@ export function lint(notes = loadNotes()) {
     }
     if (n.type !== 'rule') continue;
 
-    lintEvidence(n, { typedIn, textsOf, rowOf }, add);
+    lintEvidence(n, { typedIn, textsOf, pageTextsOf, rowOf }, add);
     if (n.superseded_by === n.key) add('error', n.rel, 'superseded_by names the note itself');
     else if (n.superseded_by && !keys.has(n.superseded_by)) add('error', n.rel, `superseded_by names ${n.superseded_by}, which has no note`);
     if (n.data.status !== undefined) add('warn', n.rel, 'status does nothing. To stop a rule, delete its note or set superseded_by');
@@ -369,10 +370,15 @@ function lintSaid(n, typedIn, add) {
 
 // propose.mjs checks a quote as it writes it, but a rule written or edited by hand never passes through it.
 // A URL, or a source with no words such as a screenshot, can't be checked, so its lines pass.
-function lintEvidence(n, { typedIn, textsOf, rowOf }, add) {
-  for (const { line, session, source, pick, quote } of evidenceQuotes(n)) {
+function lintEvidence(n, { typedIn, textsOf, pageTextsOf, rowOf }, add) {
+  for (const { line, session, note, source, pick, quote } of evidenceQuotes(n)) {
     if (line) {
       add('warn', n.rel, `an Evidence line isn't in the form propose.mjs writes, so lint can't check it: ${clip(line, 100)}`);
+    } else if (note) {
+      const texts = pageTextsOf(note);
+      if (!vaultFile(note)) add('warn', n.rel, `an Evidence line cites ${note}, which isn't a file in the vault`);
+      else if (!texts) add('warn', n.rel, `an Evidence line cites ${note}, which isn't an author: user page`);
+      else if (!saidIn(quote, texts)) add('warn', n.rel, `"${quote}" isn't in ${note}. Quote the page's own words, with … where you leave some out`);
     } else if (pick) {
       const row = rowOf(pick);
       if (!row) add('warn', n.rel, `an Evidence line cites ${pick}, which no row in raw/picks/ has`);
