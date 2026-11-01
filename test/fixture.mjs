@@ -1,4 +1,5 @@
 import fs from 'node:fs';
+import http from 'node:http';
 import os from 'node:os';
 import path from 'node:path';
 import { execFileSync, spawn, spawnSync } from 'node:child_process';
@@ -9,7 +10,9 @@ const TOOLS = path.resolve(import.meta.dirname, '..', 'tools');
 
 // The tools find the vault from their own location, so each test runs a copy of tools/ inside a vault of its own.
 // presets names shapes from PRESETS to add; the test's own domains, local and config merge over theirs.
-export function makeVault(t, { config = {}, domain = 'glim', topics = ['layout', 'code'], domains = {}, local = {}, presets = [], under = os.tmpdir() } = {}) {
+// sources gives the almanac preset's saved sources a url, repo and commit to point at, such as a server from serve() or a
+// repository from gitRepo(), in place of hosts that never resolve.
+export function makeVault(t, { config = {}, domain = 'glim', topics = ['layout', 'code'], domains = {}, local = {}, presets = [], under = os.tmpdir(), sources = {} } = {}) {
   const unknown = presets.filter(p => !Object.hasOwn(PRESETS, p));
   if (unknown.length) throw new Error(`no preset ${unknown.join(', ')}; the presets are ${Object.keys(PRESETS).join(', ')}`);
   if (presets.includes('glim') && domain !== 'glim') throw new Error(`the glim preset fills the default domain, so it needs domain 'glim', not '${domain}'`);
@@ -97,8 +100,7 @@ export function makeVault(t, { config = {}, domain = 'glim', topics = ['layout',
     // hooks path, a template or a line-ending check there could fail the commit. Git for Windows reads /dev/null as its
     // null device and refuses os.devNull's \\.\nul.
     checkout() {
-      const env = cleanEnv({ GIT_CONFIG_NOSYSTEM: '1', GIT_CONFIG_GLOBAL: '/dev/null' });
-      const git = (...args) => execFileSync('git', ['-c', 'user.name=t', '-c', 'user.email=t@example.com', '-c', 'commit.gpgsign=false', ...args], { cwd: root, env, stdio: 'pipe' });
+      const git = gitIn(root);
       git('init', '-q');
       git('add', '-A');
       git('commit', '-q', '--allow-empty', '-m', 'notes');
@@ -116,13 +118,70 @@ export function makeVault(t, { config = {}, domain = 'glim', topics = ['layout',
   const marker = `${domain}.project`;
   fs.writeFileSync(path.join(project, marker), '');
   const asOf = localDay(new Date(Date.now() - 30 * 86400e3));
-  const shapes = presets.map(name => PRESETS[name](v, { newProject, asOf }));
+  const shapes = presets.map(name => PRESETS[name](v, { newProject, asOf, sources }));
   v.write('vault.config.json', `${JSON.stringify({
     domains: merged([{ [domain]: { title: 'Glim', topics, markers: [marker] } }, ...shapes.map(s => s.domains ?? {}), domains]),
     ...merged([...shapes.map(s => s.config ?? {}), config]),
   }, null, 2)}\n`);
   v.write('vault.local.json', `${JSON.stringify({ domains: merged([...shapes.map(s => s.local ?? {}), local]) }, null, 2)}\n`);
   return v;
+}
+
+const gitIn = cwd => {
+  const env = cleanEnv({ GIT_CONFIG_NOSYSTEM: '1', GIT_CONFIG_GLOBAL: '/dev/null' });
+  return (...args) => execFileSync('git', ['-c', 'user.name=t', '-c', 'user.email=t@example.com', '-c', 'commit.gpgsign=false', ...args], { cwd, env, stdio: 'pipe' }).toString('utf8').trim();
+};
+
+// A git repository in a temp folder holding files, committed, as a git source to refresh from. change writes or, given
+// null, removes files and commits, returning the new commit.
+export function gitRepo(t, files) {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'vault-repo-'));
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  const git = gitIn(dir);
+  git('init', '-q');
+  const change = more => {
+    for (const [rel, text] of Object.entries(more)) {
+      const file = path.join(dir, ...rel.split('/'));
+      if (text === null) {
+        fs.rmSync(file, { force: true });
+        continue;
+      }
+      fs.mkdirSync(path.dirname(file), { recursive: true });
+      fs.writeFileSync(file, text);
+    }
+    git('add', '-A');
+    git('commit', '-q', '--allow-empty', '-m', 'docs');
+    return git('rev-parse', 'HEAD');
+  };
+  return { dir: dir.replace(/\\/g, '/'), commit: change(files), change };
+}
+
+// An HTTP server on 127.0.0.1 for refresh to fetch from. routes maps a path to { body, etag, lastModified, status,
+// location, hang }; a GET that sends the route's etag or lastModified back gets 304, and a route with hang never answers.
+export async function serve(t, routes = {}) {
+  const table = new Map(Object.entries(routes));
+  const hits = new Map();
+  const server = http.createServer((req, res) => {
+    const at = req.url.split('?')[0];
+    hits.set(at, (hits.get(at) ?? 0) + 1);
+    const r = table.get(at);
+    if (!r) return res.writeHead(404).end('not found');
+    if (r.hang) return;
+    const headers = {
+      ...(r.etag ? { ETag: r.etag } : {}), ...(r.lastModified ? { 'Last-Modified': r.lastModified } : {}), ...(r.location ? { Location: r.location } : {}),
+    };
+    const fresh = (r.etag && req.headers['if-none-match'] === r.etag) || (r.lastModified && req.headers['if-modified-since'] === r.lastModified);
+    if (fresh && !r.status) return res.writeHead(304, headers).end();
+    res.writeHead(r.status ?? 200, { 'Content-Type': 'text/plain; charset=utf-8', ...headers }).end(r.body ?? '');
+  });
+  await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
+  // A route that never answers holds its socket open, and close() would wait on it.
+  t.after(() => new Promise(resolve => {
+    server.closeAllConnections();
+    server.close(resolve);
+  }));
+  const base = `http://127.0.0.1:${server.address().port}`;
+  return { url: p => `${base}${p}`, set: (p, route) => table.set(p, route), hits: p => hits.get(p) ?? 0 };
 }
 
 // Each key's value from the objects given, later ones winning. Where two give an object for a key, their fields merge
@@ -224,6 +283,9 @@ const FIXTURE_ALIAS = [
   '',
 ].join('\n');
 
+export const LEDGER_GUIDE = '# Opening a ledger\n\nIn pkg 2, openLedger takes a path and returns the ledger.\nIn pkg 3, openLedger takes an options object with a path field.\n';
+export const LEDGER_REPO = 'openLedger returns the ledger it opened.\n';
+
 // The five shapes a domain can take (design §8 item 3). Each writes its notes and files into v and returns its share of
 // vault.config.json and vault.local.json. Tests address their keys, slugs and ids, so those stay as they are.
 export const PRESETS = {
@@ -256,16 +318,16 @@ export const PRESETS = {
   },
 
   // Knowledge, reached by its marker in a project of its own, whose lockfile nothing reads yet.
-  almanac(v, { newProject, asOf }) {
+  almanac(v, { newProject, asOf, sources }) {
     const dir = newProject();
     v.projects.almanac = dir;
     fs.writeFileSync(path.join(dir, 'almanac.project'), '');
     fs.writeFileSync(path.join(dir, 'almanac.lock'), 'pkg 2.4.0\n');
-    const guide = '# Opening a ledger\n\nIn pkg 2, openLedger takes a path and returns the ledger.\nIn pkg 3, openLedger takes an options object with a path field.\n';
+    const guide = LEDGER_GUIDE;
     v.write('raw/refs/ledger-guide.md', withFields({
-      url: 'https://pkg.invalid/ledger', fetched: asOf, etag: `'"ledger-1"'`, last_modified: 'Tue, 15 Sep 2026 08:12:31 GMT', sha256: sha256(guide),
+      url: sources.url ?? 'https://pkg.invalid/ledger', fetched: asOf, etag: `'"ledger-1"'`, last_modified: 'Tue, 15 Sep 2026 08:12:31 GMT', sha256: sha256(guide),
     }, guide));
-    v.write('raw/refs/ledger-repo.md', withFields({ repo: 'https://example.com/pkg.git', path: 'docs/ledger.md', commit: 'a1b2c3d4e5f6' }, 'openLedger returns the ledger it opened.\n'));
+    v.write('raw/refs/ledger-repo.md', withFields({ repo: sources.repo ?? 'https://example.com/pkg.git', path: 'docs/ledger.md', commit: sources.commit ?? 'a1b2c3d4e5f6' }, LEDGER_REPO));
     const knowledge = (since, before, quote, doLine, notLine) => ruleNote({
       domain: 'almanac', topic: 'ledger', kind: 'knowledge', basis: 'source', applies_to: ['src/**'], keywords: ['openLedger'], doLine, notLine, because: 'The ledger guide says so.',
       extra: [`as_of: ${asOf}`, `requires: [{ package: { ecosystem: fixture, name: pkg }, ranges: [{ type: SEMVER, events: [{ introduced: '${since}' }${before ? `, { fixed: '${before}' }` : ''}] }] }]`],

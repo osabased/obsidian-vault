@@ -1,8 +1,12 @@
 import fs from 'node:fs';
+import path from 'node:path';
 import { createHash } from 'node:crypto';
 import { parse } from './frontmatter.mjs';
-import { filesIn, vaultPath } from './vault.mjs';
-import { isUrl, validDay, rawFile, bundleOf, filled, parsedFile } from './rules.mjs';
+import { filesIn, vaultPath, memo, config } from './vault.mjs';
+import {
+  isUrl, validDay, rawFile, bundleOf, isDocSet, manifestNames, filled, parsedFile, normUrl, evidenceSources, footnotes, locate, linkedKeys,
+  isSourcePage, undelivered, resolver, cmp, isMap, joinList,
+} from './rules.mjs';
 
 export const KINDS = ['pdf', 'video', 'audio', 'image'];
 export const LOCATORS = 'Use #page=3, #t=00:12:31 or #L10-L20';
@@ -115,7 +119,8 @@ export function manifestLine(line) {
 
 // The shape of the fields a saved source or a bundle's source.md starts with. Each is checked when it is there;
 // a file's sha256 is the hash of what follows its frontmatter, and a bundle's is a list of lines, checked apart.
-export function sourceProblems(data, { body, bundle = false } = {}) {
+// replaces is checked only given the file's path and sourceChains().
+export function sourceProblems(data, { body, bundle = false, rel, chains } = {}) {
   const out = [];
   const has = k => data[k] != null;
   if (has('url') && !isUrl(data.url)) out.push('url must be a URL starting http:// or https://');
@@ -128,6 +133,15 @@ export function sourceProblems(data, { body, bundle = false } = {}) {
   if (has('path') && !(filled(data.path) && insideFolder(data.path))) out.push('path must be a relative path inside the repo');
   if (has('repo') && !bundle) {
     for (const k of ['path', 'commit']) if (!has(k)) out.push(`no ${k}. A git source gives repo, path and commit`);
+  }
+  if (has('baseline') && data.baseline !== true) out.push('baseline must be true when present. Refresh sets it on the first copy it fetched of a source it had no sha256 for');
+  if (has('replaces') && chains && rel) {
+    const target = typeof data.replaces === 'string' ? rawFile(data.replaces) : null;
+    const id = chains.files.get(rel)?.id;
+    const others = (chains.replacedBy.get(target) ?? []).filter(r => r !== rel);
+    if (!target?.startsWith('raw/refs/')) out.push(`replaces names ${data.replaces}, which isn't a file in raw/refs/. It names the copy this one replaces, by its path from the vault root`);
+    else if (!id || chains.files.get(target)?.id !== id) out.push(`replaces names ${target}, which is a copy of another source`);
+    else if (others.length) out.push(`${joinList(others, 'and')} ${others.length > 1 ? 'replace' : 'replaces'} ${target} too. One copy replaces each copy at most`);
   }
   if (!bundle && has('sha256')) {
     if (typeof data.sha256 !== 'string' || !HEX64.test(data.sha256)) out.push('sha256 must be 64 lowercase hex digits');
@@ -149,13 +163,14 @@ export function refSources() {
 
 // Where a saved source came from and which copy of it this is, so a copy fetched again with different content is a new
 // version of the same source. The version is the hash of the body, the commit, or for a bundle with a hash per file, the hash
-// of those lines. A source with no URL or repo has none.
+// of those lines; a doc set's is its latest manifest copy's. A source with no URL or repo has none.
 export function sourceVersion(rel) {
   let data;
   try {
     const folder = fs.statSync(vaultPath(...rel.split('/'))).isDirectory();
     if (!folder && !rel.endsWith('.md')) return null;
-    ({ data } = parse(readRel(folder ? `${rel}/source.md` : rel).toString('utf8')));
+    if (folder && isDocSet(rel)) ({ data } = manifestChain(rel).at(-1));
+    else ({ data } = parse(readRel(folder ? `${rel}/source.md` : rel).toString('utf8')));
     const where = isUrl(data.url) ? data.url : filled(data.repo) ? (folder || !filled(data.path) ? data.repo : `${data.repo} ${data.path}`) : null;
     if (!where) return null;
     const lines = Array.isArray(data.sha256) ? sha256(data.sha256.map(String).sort().join('\n')) : data.sha256;
@@ -163,4 +178,190 @@ export function sourceVersion(rel) {
   } catch {
     return null;
   }
+}
+
+// A new copy's name starts with this: the previous copy's name without its extension, its .<8 hex> suffix and the -2
+// a taken name gets.
+export const copyStem = rel => path.posix.basename(rel).replace(/\.[^.]*$/, '').replace(/\.[0-9a-f]{8}(?:-\d+)?$/, '');
+const isManifest = (rel, names = manifestNames()) => names.includes(`${copyStem(rel)}${path.posix.extname(rel)}`);
+
+// Where a saved file came from, the same for every copy of it, or null for one refresh can't check.
+export function sourceId(data) {
+  if (isUrl(data.url)) return normUrl(data.url);
+  if (filled(data.repo) && filled(data.path)) return `${data.repo} ${data.path}`;
+  return null;
+}
+
+// A source's copies, oldest first. fetched can't order two copies from one day and mtimes don't survive a clone, so each
+// copy names the one it replaces; copies that replace none, such as two that /ingest saved, go by fetched, then by name.
+function ordered(rels, files) {
+  const group = new Set(rels);
+  const next = new Map();
+  const roots = [];
+  for (const r of rels) {
+    const p = files.get(r).replacesFile;
+    if (p && p !== r && group.has(p)) next.set(p, [...(next.get(p) ?? []), r]);
+    else roots.push(r);
+  }
+  const byFetched = (a, b) => cmp(String(files.get(a).data.fetched ?? ''), String(files.get(b).data.fetched ?? '')) || cmp(a, b);
+  const out = [];
+  const seen = new Set();
+  const walk = r => {
+    if (seen.has(r)) return;
+    seen.add(r);
+    out.push(r);
+    for (const n of (next.get(r) ?? []).sort(byFetched)) walk(n);
+  };
+  for (const r of roots.sort(byFetched)) walk(r);
+  // Copies that replace each other in a ring have no first one.
+  for (const r of [...rels].sort(byFetched)) walk(r);
+  return out;
+}
+
+const fileEntry = (rel, id) => {
+  const parsed = parsedFile(rel);
+  if (!parsed) return null;
+  const replacesFile = typeof parsed.data.replaces === 'string' ? rawFile(parsed.data.replaces) : null;
+  return { id, data: parsed.data, body: parsed.body, ok: parsed.ok, errors: parsed.errors, replacesFile };
+};
+
+// A doc set's manifest and the copies refresh saved of it, oldest first, each as { rel, data }.
+export function manifestChain(folder) {
+  const names = manifestNames();
+  const files = new Map();
+  let entries = [];
+  try { entries = fs.readdirSync(vaultPath(...folder.split('/')), { withFileTypes: true }); } catch {}
+  for (const e of entries) {
+    const rel = `${folder}/${e.name}`;
+    if (!e.isFile() || !isManifest(rel, names)) continue;
+    const entry = fileEntry(rel, folder);
+    if (entry) files.set(rel, entry);
+  }
+  return ordered([...files.keys()], files).map(rel => ({ rel, data: files.get(rel).data }));
+}
+
+// Every saved source in raw/refs/, each as the chain of its copies: a file saved from a URL, one from a git repo, each
+// page of a doc set, and a doc set's manifest, whose id is the set's folder. chains holds only the ones refresh can check,
+// so not a set whose latest manifest gives no url. A bundle with a source.md is left out, since nothing fetches one yet.
+// files maps each copy to { id, set, data, body, ok, errors, replacesFile }; unreadable lists the files that couldn't be read.
+export function sourceChains() {
+  const files = new Map();
+  const unreadable = [];
+  const names = manifestNames();
+  const setOf = memo(folder => (folder && isDocSet(folder) ? folder : null));
+  for (const f of filesIn(vaultPath('raw', 'refs'), '', 'raw/refs')) {
+    const bundle = bundleOf(f);
+    const set = setOf(bundle);
+    if (bundle && !set) continue;
+    const manifest = Boolean(set) && path.posix.dirname(f) === set && isManifest(f, names);
+    if (!manifest && !f.endsWith('.md')) continue;
+    if (rawFile(f) !== f) continue;
+    const entry = fileEntry(f, null);
+    if (!entry) {
+      unreadable.push(f);
+      continue;
+    }
+    entry.id = manifest ? set : sourceId(entry.data);
+    if (entry.id) files.set(f, { ...entry, set, manifest });
+  }
+  const groups = new Map();
+  for (const [rel, e] of files) groups.set(e.id, [...(groups.get(e.id) ?? []), rel]);
+  const chains = new Map();
+  for (const [id, rels] of [...groups].sort(([a], [b]) => cmp(a, b))) {
+    const chain = ordered(rels, files);
+    const latest = files.get(chain.at(-1));
+    if (!latest.manifest || isUrl(latest.data.url)) chains.set(id, chain);
+  }
+  const replacedBy = new Map();
+  for (const [rel, e] of files) if (e.replacesFile) replacedBy.set(e.replacesFile, [...(replacedBy.get(e.replacesFile) ?? []), rel]);
+  return { chains, files, unreadable, replacedBy };
+}
+
+// The sources each note cites, as ids, and for each source whose copies it cites by file, the place in the chain of the
+// latest copy it cites. Citations are its Evidence lines, its footnotes and the sources of the source pages it links; a
+// page in a doc set is cited as its own source and as the set.
+export function noteCitations(notes, chains) {
+  const resolve = resolver(notes);
+  const pages = new Map(notes.filter(isSourcePage).map(n => [n.key, n]));
+  const at = new Map();
+  for (const [id, rels] of chains.chains) rels.forEach((r, i) => at.set(r, [id, i]));
+  const placeOf = memo(ref => {
+    const file = rawFile(ref);
+    if (file && at.has(file)) return { file: at.get(file), set: chains.files.get(file)?.set ?? null };
+    return { file: null, set: bundleOf(ref) };
+  });
+  return n => {
+    const refs = [
+      ...evidenceSources(n),
+      ...footnotes(n).defs.flatMap(d => (d.target ? [locate(d).base] : [])),
+      ...linkedKeys(n, resolve).flatMap(k => (typeof pages.get(k)?.data.source === 'string' ? [pages.get(k).data.source] : [])),
+    ];
+    const ids = new Set();
+    const latest = new Map();
+    for (const ref of refs) {
+      if (isUrl(ref)) {
+        if (chains.chains.has(normUrl(ref))) ids.add(normUrl(ref));
+        continue;
+      }
+      const { file, set } = placeOf(ref);
+      if (set && chains.chains.has(set)) ids.add(set);
+      if (!file) continue;
+      const [id, i] = file;
+      ids.add(id);
+      latest.set(id, Math.max(latest.get(id) ?? -1, i));
+    }
+    return { ids, latest };
+  };
+}
+
+// The copies later in a source's chain than place i that aren't a baseline, so a note citing copy i hasn't seen them.
+export const newerCopies = (chains, id, i) => chains.chains.get(id).slice(i + 1).filter(r => chains.files.get(r).data.baseline !== true);
+
+// .state/derived.json from raw/refs/ and the notes (design §8 item 4): each source's chain and the check refresh last
+// recorded for it, the delivered notes a changed source has left unverified, and per domain the sources its delivered
+// notes cite. checked is the later of the check on record and the latest copy's fetched day, since a fetch is a check.
+export function derive(notes, old = {}, chains = sourceChains()) {
+  const was = isMap(old?.sources) ? old.sources : {};
+  const sources = {};
+  for (const [id, chain] of chains.chains) {
+    const w = isMap(was[id]) ? was[id] : {};
+    const fetched = chains.files.get(chain.at(-1)).data.fetched;
+    sources[id] = {
+      chain,
+      checked: [w.checked, fetched].filter(validDay).sort().at(-1) ?? null,
+      result: w.result ?? null, why: w.why ?? null, etag: w.etag ?? null, lastModified: w.lastModified ?? null,
+    };
+  }
+  const cites = noteCitations(notes, chains);
+  const unverified = {};
+  const domains = {};
+  for (const n of notes) {
+    if (n.superseded_by || undelivered(n)) continue;
+    const { ids, latest } = cites(n);
+    for (const id of ids) (domains[n.domain] ??= new Set()).add(id);
+    const changed = [...latest].flatMap(([id, i]) => {
+      const newer = newerCopies(chains, id, i);
+      return newer.length ? [{ id, day: chains.files.get(newer[0]).data.fetched }] : [];
+    });
+    if (!changed.length) continue;
+    unverified[n.key] = {
+      mtime: n.saved, size: n.size, since: changed.map(c => c.day).filter(validDay).sort()[0] ?? null, sources: changed.map(c => c.id).sort(cmp),
+    };
+  }
+  const byName = ([a], [b]) => cmp(a, b);
+  return { version: 1, sources, unverified, domains: Object.fromEntries(Object.entries(domains).sort(byName).map(([d, ids]) => [d, [...ids].sort(cmp)])) };
+}
+
+// A note's unverified entry holds only while the note is as build read it, so an edit to cite the new copy clears it at once.
+export const unverifiedNow = (derived, n) => {
+  const e = derived?.unverified?.[n.key];
+  return isMap(e) && e.mtime === n.saved && e.size === n.size ? e : null;
+};
+
+// The day counts for a domain: knowledge in vault.config.json, then the domain's own knowledge fields.
+export function knowledgeDays(domain) {
+  const own = config().domains[domain]?.knowledge;
+  const out = { ...config().knowledge };
+  for (const k of ['staleAfterDays', 'checkAfterDays']) if (isMap(own) && Number.isFinite(own[k])) out[k] = own[k];
+  return out;
 }

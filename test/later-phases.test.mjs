@@ -1,7 +1,8 @@
+import fs from 'node:fs';
 import path from 'node:path';
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { makeVault, sessionId, editFile, denied, ruleNote, sha256, sectionOf } from './fixture.mjs';
+import { makeVault, sessionId, editFile, denied, ruleNote, sha256, sectionOf, serve, gitRepo, LEDGER_GUIDE, LEDGER_REPO } from './fixture.mjs';
 import { today } from '../tools/lib/vault.mjs';
 
 // The design checks that need phase 4 or 5 code, each run on the preset it names (design §8 item 3).
@@ -22,15 +23,58 @@ test('a project whose lockfile pins pkg 2 delivers only the v2 rule, and review 
   assert.match(pairs.join('\n'), /almanac\/ledger-v2 and almanac\/ledger-v3, .* · almanac\/ledger-v2 ranks first: /);
 });
 
-test('refresh labels a rule unverified once a source it cites has changed', { todo: '6.2a, phase 4: refresh' }, t => {
-  const v = makeVault(t, { presets: ['almanac'] });
-  const r = v.run('refresh.mjs');
+// Until package V delivers the label, the refusal and the start of a session show the rule without it, so both tests
+// fail on their last assertion.
+const LABEL_TODO = '6.2a, phase 4: the source changed label comes with version delivery';
+const rawFiles = v => Object.fromEntries(fs.readdirSync(v.at('raw'), { recursive: true, withFileTypes: true })
+  .filter(e => e.isFile()).map(e => [path.relative(v.root, path.join(e.parentPath, e.name)).replace(/\\/g, '/'), sha256(fs.readFileSync(path.join(e.parentPath, e.name)))]));
+
+test('refresh labels a rule unverified once the URL source it cites has changed', { todo: LABEL_TODO }, async t => {
+  const server = await serve(t, { '/ledger': { body: LEDGER_GUIDE, etag: '"ledger-1"' } });
+  const repo = gitRepo(t, { 'docs/ledger.md': LEDGER_REPO });
+  const v = makeVault(t, { presets: ['almanac'], sources: { url: server.url('/ledger'), repo: repo.dir, commit: repo.commit } });
+  const cwd = v.projects.almanac;
+  const before = rawFiles(v);
+  let r = await v.runAsync('refresh.mjs');
+  assert.equal(r.code, 0, r.stderr);
+  assert.match(r.stdout, /^unchanged http:\/\/127\.0\.0\.1:\d+\/ledger \(304\)$/m);
+  assert.deepEqual(rawFiles(v), before, 'an unchanged source wrote a file under raw/');
+  const first = sessionId();
+  v.startSession(first, { cwd });
+  assert.doesNotMatch(ledgerEdit(v, first), /source changed on/);
+
+  server.set('/ledger', { body: LEDGER_GUIDE.replace('takes a path and', 'takes a path or a URL and'), etag: '"ledger-2"' });
+  r = await v.runAsync('refresh.mjs');
+  assert.equal(r.code, 0, r.stderr);
+  assert.match(r.stdout, /^changed http:\/\/127\.0\.0\.1:\d+\/ledger: raw\/refs\/ledger-guide\.[0-9a-f]{8}\.md$/m);
+  const unverified = sectionOf(v.run('review.mjs', ['status'], { cwd }).stdout, 'Notes a changed source has left unverified') ?? [];
+  assert.match(unverified.join('\n'), /^- almanac\/ledger-v2: /m);
+  assert.match(unverified.join('\n'), /^- almanac\/ledger-v3: /m);
   const sid = sessionId();
-  v.startSession(sid, { cwd: v.projects.almanac });
-  assert.match(ledgerEdit(v, sid), /- almanac\/ledger-v2: .* source changed on \d{4}-\d\d-\d\d/, `refresh exited ${r.code}: ${r.stderr}`);
+  v.startSession(sid, { cwd });
+  assert.match(ledgerEdit(v, sid), /- almanac\/ledger-v2: .* source changed on \d{4}-\d\d-\d\d/);
 });
 
-test('a doc set of 2,000 links and 50 cited pages starts a session in under 500 ms and is one source', { todo: '6.2b, phase 4: doc sets' }, t => {
+test('refresh labels a rule unverified once the git source it cites has changed upstream', { todo: LABEL_TODO }, async t => {
+  const repo = gitRepo(t, { 'docs/ledger.md': LEDGER_REPO });
+  const v = makeVault(t, { presets: ['almanac'], sources: { repo: repo.dir, commit: repo.commit } });
+  const cwd = v.projects.almanac;
+  v.write('wiki/almanac/rules/ledger-returns.md', ruleNote({
+    domain: 'almanac', topic: 'ledger', kind: 'knowledge', basis: 'source', applies_to: ['src/**'], extra: ['as_of: 2026-10-01'],
+    doLine: 'Use the ledger openLedger returns.', notLine: 'Open the ledger a second time.', because: 'The pkg docs say so.',
+    evidence: ['- 2026-10-01 · source · session 1a2b3c4d · raw/refs/ledger-repo.md · dated 2026-10-01 · "openLedger returns the ledger it opened" (a-00000003)'],
+  }));
+  const changed = repo.change({ 'docs/ledger.md': 'openLedger returns the ledger it opened, or null when the path is locked.\n' });
+  const r = await v.runAsync('refresh.mjs');
+  assert.equal(r.code, 0, r.stderr);
+  assert.ok(r.stdout.split('\n').includes(`changed ${repo.dir} docs/ledger.md: raw/refs/ledger-repo.${changed.slice(0, 8)}.md`), r.stdout);
+  assert.ok(JSON.parse(v.read('.state/derived.json')).unverified['almanac/ledger-returns'], 'derived.json has the rule unverified');
+  const sid = sessionId();
+  v.startSession(sid, { cwd });
+  assert.match(ledgerEdit(v, sid), /- almanac\/ledger-returns: .* source changed on \d{4}-\d\d-\d\d/);
+});
+
+test('a doc set of 2,000 links and 50 cited pages starts a session in under 500 ms and is one source', t => {
   const v = makeVault(t, { presets: ['almanac'] });
   const set = 'raw/refs/ledger-docs';
   const page = i => `https://example.com/pkg/docs/page-${i}.md`;
