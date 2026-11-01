@@ -33,19 +33,24 @@ export function codexPatch(ops) {
   return `${out.join('\n')}\n`;
 }
 
+const xmlEscape = s => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&apos;');
+
+// A Stop continuation as Codex records it: a user message with no content_item_kinds, one input_text per fragment.
+export const hookPrompt = (...reasons) => ({ kinds: null, content: reasons.map(r => ({ type: 'input_text', text: `<hook_prompt hook_run_id="run-1">${xmlEscape(r.trim())}</hook_prompt>` })) });
+
 // A rollout as Codex writes it under ~/.codex/sessions/: a session_meta line, then one response_item per message. A
-// message is the user's typed text, or { kinds, text } for one Codex injects, or { role, text }. The shape was read from
-// local rollouts, field names only.
+// message is the user's typed text, or { kinds, text } for one Codex injects, or { role, text }, or { kinds, content } with
+// the content items given. The shape was read from local rollouts, field names only.
 export function codexRollout(v, sid, messages) {
   const file = v.at('.transcripts', `rollout-2026-11-01T00-00-00-${sid}.jsonl`);
   fs.mkdirSync(path.dirname(file), { recursive: true });
   const at = i => new Date(Date.UTC(2026, 10, 1, 0, 0, i)).toISOString();
   const lines = [{ timestamp: at(0), type: 'session_meta', payload: { id: sid, cwd: v.project, cli_version: '0.153.4' } }];
   messages.forEach((m, i) => {
-    const { role = 'user', kinds = ['user.text'], text } = typeof m === 'string' ? { text: m } : m;
+    const { role = 'user', kinds = ['user.text'], text, content } = typeof m === 'string' ? { text: m } : m;
     const meta = kinds === null ? {} : { internal_chat_message_metadata_passthrough: { content_item_kinds: kinds } };
     const type = role === 'user' ? 'input_text' : 'output_text';
-    lines.push({ timestamp: at(i + 1), type: 'response_item', payload: { type: 'message', role, content: [{ type, text }], ...meta } });
+    lines.push({ timestamp: at(i + 1), type: 'response_item', payload: { type: 'message', role, content: content ?? [{ type, text }], ...meta } });
   });
   fs.writeFileSync(file, lines.map(l => `${JSON.stringify(l)}\n`).join(''));
   return file;

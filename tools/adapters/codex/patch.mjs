@@ -38,7 +38,7 @@ export function addedText(op) {
   return op.chunks.flatMap(c => PLUS.get(c) ?? []).join('\n');
 }
 
-const headerPath = (line, marker) => (line.startsWith(marker) ? line.slice(marker.length).trim() : null);
+const headerPath = (line, marker) => (line.startsWith(marker) ? line.slice(marker.length) : null);
 
 // [{ op: 'add', path, lines }, { op: 'delete', path }, { op: 'update', path, moveTo?, chunks: [{ context, old, new, eof }] }]
 export function parsePatch(text) {
@@ -79,7 +79,7 @@ export function parsePatch(text) {
       }
       if (t.startsWith(MOVE)) {
         if (cur.chunks.length) fail(`line ${lineNo(i)}: '${MOVE.trim()}' must come before the first chunk`);
-        cur.moveTo = t.slice(MOVE.length).trim();
+        cur.moveTo = t.slice(MOVE.length);
         continue;
       }
       const last = cur.chunks.at(-1);
@@ -162,7 +162,8 @@ export function applyChunks(text, chunks) {
     swaps.push([at, old.length, add]);
     idx = at + old.length;
   }
-  for (const [at, n, add] of swaps.sort((a, b) => b[0] - a[0])) lines.splice(at, n, ...add);
+  // Ascending then reversed, as Codex applies them, so insertions at one line keep the patch order.
+  for (const [at, n, add] of swaps.sort((a, b) => a[0] - b[0]).reverse()) lines.splice(at, n, ...add);
   if (lines.at(-1) !== '') lines.push('');
   return lines.join('\n');
 }
