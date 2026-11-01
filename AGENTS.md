@@ -21,7 +21,7 @@ Each domain in `vault.config.json` says which sessions it reaches:
 
 - `markers`: file names, such as a manifest every project of the domain's kind has. A folder holding one is the root of a project in the domain. An edit takes the domains of the nearest marker folder at or above its file. A session takes those at or above its folder, and those of markers up to `reach.markerDepth` (3 by default) folders below it, so a session at a monorepo root is in each package's domain.
 - `paths`: this machine's project folders, kept in the untracked `vault.local.json` as `{ "domains": { "<domain>": { "paths": ["<absolute folder>"] } } }`, since folders differ per machine. Lint reports a path that doesn't exist here as an error. The file is the user's to change.
-- `everywhere: true`: the domain's pages and keyword rules reach every session. Its `always` and `applies_to` rules still reach only the sessions its markers and paths put it in.
+- `everywhere: true`: the domain's pages, keyword rules and `tools` rules reach every session. Its `always` and `applies_to` rules still reach only the sessions its markers and paths put it in.
 - `vaultOnly: true`: the domain holds pages only, which sessions in this folder read. `tools/propose.mjs` refuses a rule in it, and lint reports one written any other way as an error, which blocks commits.
 
 Global reaches every session. A domain that isn't vault-only and reaches no project on this machine gets a lint warning. A domain's project root, the marker folder or the path, is where its globs and picks start. A marker folder in a worktree under `.claude/worktrees/` has the main checkout as its root.
