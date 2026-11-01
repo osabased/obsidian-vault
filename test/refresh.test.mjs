@@ -240,6 +240,15 @@ test('refresh reports a config it cannot read as a failure, and arguments as a u
   assert.equal(r.stderr, 'usage: node tools/refresh.mjs\n');
 });
 
+test('refresh reads a corrupt derived.json as empty, logs it by name, and the build after it rewrites the file', async t => {
+  const v = makeVault(t, { presets: ['almanac'] });
+  v.write('.state/derived.json', '{ "unverified": ', { saved: null });
+  const r = await v.runAsync('refresh.mjs');
+  assert.equal(r.code, 0, r.stderr);
+  assert.deepEqual(Object.keys(derived(v)).sort(), ['domains', 'sources', 'unverified', 'version']);
+  assert.ok(v.read('.state/errors.log').includes('.state/derived.json is corrupt'));
+});
+
 test('a source saved with no sha256 gets a baseline copy, which marks nothing unverified, and later checks compare with it', async t => {
   const server = await serve(t, { '/notes': { body: 'Served text.\n' } });
   const v = makeVault(t);

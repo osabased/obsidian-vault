@@ -1,7 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
-import { config, vaultPath, writeText, readJson, statePath, today, plural, toPosix, shortHash, removeDir } from './lib/vault.mjs';
-import { isUrl, normUrl, cmp } from './lib/rules.mjs';
+import { config, vaultPath, writeText, today, plural, toPosix, shortHash, removeDir } from './lib/vault.mjs';
+import { isUrl, normUrl, cmp, readDerived } from './lib/rules.mjs';
 import { yamlQuote } from './lib/frontmatter.mjs';
 import { sourceChains, copyStem, sourceProblems, sha256 } from './lib/sources.mjs';
 import { clone, hasOrigin, fetchOrigin, hasCommit, remoteHead, lastChange, sizeAt, showAt } from './lib/git.mjs';
@@ -202,7 +202,7 @@ async function main() {
   timeout = timeoutSeconds * 1000;
   const chains = sourceChains();
   if (chains.unreadable.length) throw new Error(`can't read ${chains.unreadable.join(', ')}`);
-  const before = readJson(statePath('derived.json'), {});
+  const before = readDerived() ?? {};
   const ids = [...chains.chains.keys()].sort(cmp);
   const isGit = id => !isUrl(chains.files.get(chains.chains.get(id).at(-1)).data.url);
   const results = new Map();
@@ -239,7 +239,7 @@ async function main() {
       return { ...derived, sources };
     },
   });
-  const after = readJson(statePath('derived.json'), {});
+  const after = readDerived() ?? {};
   const tally = { unchanged: 0, changed: 0, baseline: 0, failed: 0 };
   const lines = ids.map(id => {
     const r = results.get(id);

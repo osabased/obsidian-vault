@@ -38,7 +38,7 @@ test('compareSemver follows SemVer 2.0.0 precedence', () => {
   assert.throws(() => compareSemver('1.0', '1.0.0'), /not a semver version/);
 });
 
-test('OSV range events apply in order', () => {
+test('OSV range events: introduced opens a range and fixed, last_affected and limit close it', () => {
   const at = (v, events) => inRange(v, events, compareSemver);
   assert.equal(at('0.0.1', [{ introduced: '0' }]), true, "introduced '0' opens from the start");
   assert.equal(at('2.4.0', [{ introduced: '2.0.0' }, { fixed: '3.0.0' }]), true);

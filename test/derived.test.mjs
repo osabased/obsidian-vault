@@ -79,3 +79,38 @@ test('a check that finds the source changed leaves a note on the old copy as sta
   assert.equal(r.code, 0, r.stderr);
   assert.match(stale().join('\n'), /as_of is 30\d days old/);
 });
+
+test('a missing or corrupt derived.json is rebuilt by the next session start, which logs it once', t => {
+  const v = makeVault(t, { presets: ['almanac'] });
+  const cwd = v.projects.almanac;
+  v.startSession(sessionId(), { cwd });
+  const start = () => v.run('hooks/session-start.mjs', [], { input: { cwd, session_id: sessionId(), hook_event_name: 'SessionStart', source: 'startup' }, cwd });
+  const logged = () => (v.exists('.state/errors.log') ? v.read('.state/errors.log').match(/derived.json is corrupt/g) ?? [] : []).length;
+  const valid = () => Object.keys(JSON.parse(v.read('.state/derived.json'))).sort().join();
+  v.write('.state/derived.json', '{ "unverified": ', { saved: null });
+  for (const i of [0, 1, 2]) {
+    const r = start();
+    assert.equal(r.code, 0, r.stderr);
+    assert.equal(valid(), 'domains,sources,unverified,version', `start ${i}`);
+    assert.equal(logged(), 1, `start ${i}: one line, not one per start`);
+  }
+  fs.rmSync(v.at('.state', 'derived.json'));
+  assert.equal(start().code, 0);
+  assert.equal(valid(), 'domains,sources,unverified,version', 'a missing file is written');
+  assert.equal(logged(), 1, 'a missing file is not an error');
+});
+
+test('a build derives again once the derive code changes, and skips it while nothing changed', t => {
+  const v = makeVault(t, { presets: ['almanac'] });
+  v.run('build.mjs');
+  const mark = '{"version":1,"sources":{},"unverified":{},"domains":{}}';
+  v.write('.state/derived.json', mark, { saved: null });
+  assert.equal(v.run('build.mjs').code, 0);
+  assert.equal(v.read('.state/derived.json'), mark, 'unchanged inputs keep the file');
+  v.write('tools/lib/sources.mjs', `${v.read('tools/lib/sources.mjs')}
+// a later version of derive
+`);
+  assert.equal(v.run('build.mjs').code, 0);
+  assert.notEqual(v.read('.state/derived.json'), mark, 'changed derive code rewrites it');
+  assert.ok(Object.keys(JSON.parse(v.read('.state/derived.json')).sources).length > 0);
+});
