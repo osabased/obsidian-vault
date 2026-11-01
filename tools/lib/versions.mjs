@@ -2,7 +2,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { config, statePath, readJsonSafe, writeJson, logError, toPosix } from './vault.mjs';
 import { extension } from './ext.mjs';
-import { RACY_MS } from './cache.mjs';
+import { isRacy } from './cache.mjs';
 
 export const SEMVER = /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-([0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*))?(?:\+[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?$/;
 export const SCHEMES = ['SEMVER', 'ECOSYSTEM'];
@@ -108,7 +108,7 @@ function versionsAt(root, name, r) {
   const lockfile = toPosix(found.file);
   const e = cached()[key];
   const same = e && e.lockfile === lockfile && e.mtimeMs === found.st.mtimeMs && e.size === found.st.size;
-  if (same && Math.abs(e.at - e.mtimeMs) >= RACY_MS) return e.versions ?? null;
+  if (same && !isRacy(e.at, e.mtimeMs)) return e.versions ?? null;
   const entry = { lockfile, mtimeMs: found.st.mtimeMs, size: found.st.size, at: Date.now() };
   try {
     entry.versions = asVersions(r.read(path.dirname(found.file)));
