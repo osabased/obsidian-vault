@@ -1,8 +1,9 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
+import { armDeadline } from './deadline.mjs';
 
-// The hooks in settings.json run a copy of tools/ inside the vault, which .githooks/post-commit keeps at the last
+// The plugin's hooks run a copy of tools/ inside the vault, which .githooks/post-commit keeps at the last
 // commit, so the vault is the nearest folder above the code that holds vault.config.json.
 function findRoot() {
   const home = path.resolve(import.meta.dirname, '..', '..');
@@ -396,6 +397,7 @@ export const toolFile = (name, input) => (name === 'NotebookEdit' ? input.notebo
 // A failed hook exits 1 with one line, so the user sees a hook error and the call goes ahead; exit 2 would block it.
 export function runHook(name, fn) {
   if (process.env.CLAUDE_CODE_SAFE_MODE === '1') return;
+  armDeadline();
   try {
     const out = fn(JSON.parse(fs.readFileSync(0, 'utf8').replace(/^\uFEFF/, '')));
     if (out) process.stdout.write(JSON.stringify(out));

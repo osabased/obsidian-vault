@@ -95,10 +95,12 @@ test('session start builds only when a note changed since the last build', t => 
 test('a hook past its deadline stops and logs why', t => {
   const v = makeVault(t);
   v.write('wiki/demo/rules/gate.md', ruleNote({ applies_to: ['src/**'] }));
-  v.run('hooks/edit.mjs', [], {
+  const r = v.run('hooks/edit.mjs', [], {
     input: { session_id: sessionId(), cwd: v.project, hook_event_name: 'PreToolUse', tool_name: 'Edit', tool_input: { file_path: path.join(v.project, 'src', 'a.txt'), old_string: 'a', new_string: 'b' } },
     cwd: v.project, env: { VAULT_HOOK_TIMEOUT: '0.001' },
   });
+  assert.equal(r.code, 1);
+  assert.equal(r.stderr, 'vault edit failed: stopped at its deadline, 0.0002 s before the 0.001 s hook timeout; see .state/errors.log\n');
   assert.match(v.read('.state/errors.log'), /edit: Error: stopped at its deadline, 0\.0002 s before the 0\.001 s hook timeout/);
 });
 

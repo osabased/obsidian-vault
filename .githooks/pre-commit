@@ -9,7 +9,7 @@ if [ -n "$changed" ] && [ "$VAULT_ALLOW_RAW_CHANGES" != 1 ]; then
   exit 1
 fi
 # Notes and sources don't change what the tests run, so only a change to the code or its tests waits on them.
-if git diff --cached --name-only | grep -qE '^(tools|test|\.githooks)/'; then
+if git diff --cached --name-only | grep -qE '^(tools|test|hooks|\.githooks)/'; then
   node --test --test-reporter=dot "test/*.test.mjs" || exit 1
 fi
 node tools/build.mjs && git add active.md index.md decisions.md && exec node tools/lint.mjs --fail-on error

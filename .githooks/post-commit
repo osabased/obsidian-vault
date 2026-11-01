@@ -1,5 +1,5 @@
 #!/bin/sh
-# The hooks in settings.json run .live/tools/, a copy of tools/ as of HEAD, so a half-made change to tools/ never runs
+# The plugin's hooks run .live/tools/, a copy of tools/ as of HEAD, so a half-made change to tools/ never runs
 # in a session. The copy is built beside the old one and swapped in.
 set -e
 cd "$(git rev-parse --show-toplevel)"

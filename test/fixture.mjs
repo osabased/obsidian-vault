@@ -55,7 +55,7 @@ export function makeVault(t, { config = {}, domain = 'demo', topics = ['layout',
         child.stdin.end(input === undefined ? '' : typeof input === 'string' ? input : JSON.stringify(input));
       });
     },
-    // Hooks fail open, logging what went wrong and printing nothing, so a hook that crashed would read as one that let
+    // A failed hook exits 1 with a line on stderr and the call goes ahead, so a hook that crashed would read as one that let
     // the call through.
     hook(name, input, { timeout } = {}) {
       const log = at('.state', 'errors.log');
