@@ -2,11 +2,11 @@ import fs from 'node:fs';
 import crypto from 'node:crypto';
 import {
   vaultPath, writeSettled, appendJsonl, appendLog, inboxFile, proposalRows, pickRows, statePath, withLock, today, localDay, toPosix, guarded,
-  shortHash, isVaultOnly,
+  shortHash, isVaultOnly, sessionReach, cwdOf,
 } from './lib/vault.mjs';
 import {
   KEY_RE, BASES, wrongBasis, parseNote, noteErrors, ruleText, ruleTextParts, loadNotes, readNote, liveRules, mentions, isUrl, validDay, byKey, normTopic, domainTopics, vaultFile, joinList,
-  sharedFiles, rankPair, maxChars,
+  sharedFiles, rankPair, maxChars, fitIn,
 } from './lib/rules.mjs';
 import { build } from './lib/build.mjs';
 import { entryKey } from './lib/glob.mjs';
@@ -250,8 +250,9 @@ function sameFiles(f, n, notes, rules) {
   const near = Object.entries(rules).sort(byKey).filter(([, r]) => sharedFiles(r, mine)).map(([k]) => k);
   if (!near.length) return '';
   const one = near.length === 1;
+  const fit = fitIn(sessionReach(cwdOf({})));
   const ranked = near.flatMap(k => {
-    const rank = rankPair(n, readNote(k, notes));
+    const rank = rankPair(n, readNote(k, notes), { fit });
     if (!rank) return [];
     return [rank.first ? `${rank.first.key} ranks before ${rank.last.key} (${rank.why})` : `${n.key} and ${k} tie (${rank.why})`];
   });

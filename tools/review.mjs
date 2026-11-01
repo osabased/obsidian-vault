@@ -1,7 +1,7 @@
-import { config, plural, toPosix, guarded, hookErrors, errorsLog, localDay, appendLog, isVaultOnly } from './lib/vault.mjs';
+import { config, plural, toPosix, guarded, hookErrors, errorsLog, localDay, appendLog, isVaultOnly, sessionReach, cwdOf } from './lib/vault.mjs';
 import {
   clip, normTopic, topicNotes, loadNotes, liveRules, evidenceSessions, validDay, byKey, cmp, sharedFiles, resolver, linkedKeys, evidenceSources, isSourcePage, joinList,
-  rankPair, sourceItem,
+  rankPair, sourceItem, fitIn,
 } from './lib/rules.mjs';
 import { lint, tally } from './lib/lint.mjs';
 import { lintRan, lintDone, tidy, trackedSessions, sessionDomains } from './lib/sessions.mjs';
@@ -87,8 +87,10 @@ function neverShown() {
 
 function globPairs() {
   const rules = liveNotes().filter(([, r]) => r.applies_to?.length);
+  // Knowledge rules rank first by how their versions fit the projects this folder reaches.
+  const fit = fitIn(sessionReach(cwdOf({})));
   const order = (na, nb) => {
-    const rank = rankPair(na, nb);
+    const rank = rankPair(na, nb, { fit });
     return !rank ? '' : ` · ${rank.first ? `${rank.first.key} ranks first` : 'neither ranks first'}: ${rank.why}`;
   };
   return rules.flatMap(([a, ra, na], i) => rules.slice(i + 1).flatMap(([b, rb, nb]) => {

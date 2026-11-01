@@ -1,5 +1,5 @@
 import { domainsFor, everywhereDomains, inside, toPosix } from './vault.mjs';
-import { tryRegex, cmp } from './rules.mjs';
+import { tryRegex, cmp, byFit } from './rules.mjs';
 import { bestMatch, specificity, bySpecificity } from './glob.mjs';
 import { marked, agentKey } from './sessions.mjs';
 
@@ -20,7 +20,7 @@ export function matcher(file, cwd, doms = domainsFor(file, cwd)) {
 
 export function fileScope(file, cwd) {
   const doms = domainsFor(file, cwd);
-  return { domains: [...doms.map(d => d.domain), 'global', ...everywhereDomains()], matching: matcher(file, cwd, doms) };
+  return { domains: [...doms.map(d => d.domain), 'global', ...everywhereDomains()], hits: doms, matching: matcher(file, cwd, doms) };
 }
 
 // A note with triggers comes up only on an edit whose new text matches one.
@@ -39,7 +39,7 @@ export function dueRules(input, matched, text) {
     if (marked('gate', input.session_id, id) || (triggered && !fires(note, read()))) continue;
     hits.push({ key, note, rel, id, triggered, spec });
   }
-  return hits.sort((a, b) => Number(b.triggered) - Number(a.triggered) || bySpecificity(a.spec, b.spec) || cmp(a.key, b.key));
+  return hits.sort((a, b) => Number(b.triggered) - Number(a.triggered) || bySpecificity(a.spec, b.spec) || byFit(a.note, b.note) || cmp(a.key, b.key));
 }
 
 // A file an Edit or Write call reached through the gate this turn, by any agent of the session. The Stop hook leaves
