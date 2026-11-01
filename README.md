@@ -15,7 +15,7 @@ claude plugin marketplace add osabased/obsidian-vault
 claude plugin install obsidian-vault@obsidian-vault --config vault=<path to your vault checkout>
 ```
 
-The plugin has one option, `vault`, the folder of your vault checkout. To set or change it later, run `claude plugin configure obsidian-vault` to see the option, or save it with `echo '{"vault":"<path>"}' | claude plugin configure obsidian-vault --values-stdin`. An unset option, a vault with no `.live/tools/` or a hook that cannot load prints `vault <hook> failed: <why>` as a hook error, and the call goes ahead.
+The plugin has one option, `vault`, the folder of your vault checkout. To set or change it later, run `claude plugin configure obsidian-vault` to see the option, or save it with `echo '{"vault":"<path>"}' | claude plugin configure obsidian-vault --values-stdin`. An unset option, a relative path, a vault with no `.live/tools/` or a hook that cannot load prints `vault <hook> failed: <why>` as a hook error, and the call goes ahead.
 
 The skills run this vault's `tools/` in the working folder, so open a checkout of the vault before using them. If `settings.json` still holds the vault's hooks from before the plugin, remove them, or each hook runs twice.
 

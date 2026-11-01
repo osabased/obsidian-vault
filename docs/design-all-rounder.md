@@ -1,6 +1,6 @@
 # All-rounder vault: design draft
 
-Status: draft, 2026-11-01. Phase 0 (checks) and phase 1 (format) are built and merged into main. Phase 2 is next.
+Status: draft, 2026-11-01. Phase 0 (checks) and phase 1 (format) are built and merged into main. Phase 2 (delivery) is built on `phase-2-integration` and reviewed at max effort, with the findings fixed. It waits for the user's OK to land. Phase 3 is next.
 
 Scope: structure, design and architecture only. This design adds no knowledge to the vault. It names no domain, platform, package ecosystem or site as built in. Where it needs an example, it uses a placeholder.
 
@@ -79,7 +79,7 @@ The bar asks for features native to the vault. Where a Claude Code mechanism doe
 |---|---|---|
 | Deny an edit and show why | PreToolUse `deny` | Holds in every permission mode, including bypass (hooks-guide). |
 | Context for a subagent | `SubagentStart` `additionalContext` | Injected before the subagent's first prompt. Re-injected only when its context lost the earlier copy. Input carries only `agent_id` and `agent_type`, not the task (hooks). |
-| Install hooks on any machine | Plugin `hooks/hooks.json`, with a `userConfig` option of type `directory` for the vault path | That option reaches hook processes as `CLAUDE_PLUGIN_OPTION_<KEY>`. `${CLAUDE_PLUGIN_ROOT}` is the installed copy (plugins-reference). The plugin today ships skills only (`.claude-plugin/plugin.json`). |
+| Install hooks on any machine | Plugin `hooks/hooks.json`, with a `userConfig` option of type `directory` for the vault path | That option reaches hook processes as `CLAUDE_PLUGIN_OPTION_<KEY>`. `${CLAUDE_PLUGIN_ROOT}` is the installed copy (plugins-reference). The plugin ships the skills and the hooks (`.claude-plugin/plugin.json`, `hooks/hooks.json`). |
 | A crashed gate must not pass silently | Exit code 1 with stderr | Shows a `hook error` notice in the transcript. Stderr from a hook that exits 0 is never seen (hooks). |
 | Catch files a shell command wrote | A `Stop` hook that checks the working tree once per turn | The hooks guide gives this pattern with `git status --porcelain`. A Stop hook's `additionalContext` keeps Claude working and gives it the text, with no hook-error notice (hooks, 6.3d). |
 | Path-scoped rules | The vault's own hook, not `.claude/rules` `paths:` | `paths:` rules load on Read too and survive compaction. But they can't deny, deliver once per session, point to pages, or wait for a note to settle. |
@@ -102,7 +102,7 @@ The bar asks for features native to the vault. Where a Claude Code mechanism doe
 3. **Edits are gated wherever the agent exposes them; shell writes are caught after the fact.**
    - A non-file edit tool, such as an MCP tool that edits objects in a running app, is mapped by config to a target namespace (6.3b). Its edits are then gated like file edits, and no code names the tool.
    - Shell writes are caught by a `Stop` hook once per turn, and Claude is sent the rules for the files they touched (6.3d).
-   - `Bash|PowerShell` leaves the PreToolUse matcher (README.md:34). Today it starts a hook for every shell call, and `edit.mjs:126` returns from it at once.
+   - `Bash|PowerShell` is out of the PreToolUse matcher (`hooks/hooks.json`). It started a hook for every shell call, which the edit hook returned from at once.
    - *Alternatives not taken:* one adapter per edit tool, written in code; and denying shell writes to rule-covered files through permission rules.
 4. **Agents without hooks get compiled rule files, written by a command the user runs.**
    - `node tools/compile.mjs <project>` writes into a project only when `vault.config.json` opts that project in.
@@ -283,10 +283,16 @@ Phase-3 notes then need no migration, even where the tooling lands later.
 
   Each session start also runs a full `build()` (`session-start.mjs:83`).
 - *Design.*
-  - **One cache.** Parsed notes are cached in `.state/`, keyed on path, mtime and size, with each note's body hash. A note is read and hashed only when its stat changes. Settling (6.6d) uses the same cache.
-  - **Scoped walk.** Hooks walk only `wiki/<the session's domains>/` and `wiki/global/`.
+  - **One cache.** Parsed notes are cached in `.state/cache/<folder>.json`, one file per folder of `wiki/` (`cache.mjs`), keyed on path, mtime and size, with each note's body hash. A note is read and hashed only when its stat changes. Settling (6.6d) uses the same cache.
+    - Folders are matched to config domains by their NFC names, since the config names domains in NFC and a file system may store a folder NFD.
+    - The cache's stamp hashes `frontmatter.mjs`, `cache.mjs` and the reader that parses each note (`rules.mjs`), so a change to any of them reads every note again.
+    - The cache only saves reading time, so its writes are best effort: a failed write is logged once, and the call goes on with what it read.
+    - A note that fails to read keeps its old entry. A note with no entry rethrows, so it is never dropped silently.
+    - A walk stopped at the deadline saves what it read, and drops none of the notes it didn't reach, so the next call goes further.
+    - An entry is trusted once its read time and mtime are 2 s apart in either direction, so a file dated in the future isn't read again on every call.
+  - **Scoped walk.** Hooks walk only `wiki/<the session's domains>/` and `wiki/global/`. The `/lint` reminder still counts notes vault-wide: the walked notes reuse their stats, and the other folders are stat'ed only, never parsed (`noteTimes`).
   - **Derived state** (unverified, settled) is precomputed by refresh and build (6.2a), and hooks read it.
-  - **Build on change.** Session start builds only when the cache reports a changed note. Propose, pick, lint and pre-commit build as today.
+  - **Build on change.** Session start builds only when a fingerprint changed. The fingerprints, in `.state/cache/.built.json`, hash each folder's notes and the config except each domain's `paths`, which differ per machine and shape no generated file. Every build that writes records them (`build.mjs`), so propose, pick, lint and pre-commit keep them current. A dot name keeps the file apart from the folders' cache files.
   - **scale:**
     - `index.md` lists domains and their topics, and each domain's notes go in `index/<domain>.md`.
     - Session start names a set number of topics per domain, ranked by note count, then "and N more in index/<domain>.md".
@@ -350,10 +356,15 @@ Phase-3 notes then need no migration, even where the tooling lands later.
 - *Design.*
   - A `Stop` hook runs `git status --porcelain` in the project once per turn, as the hooks guide suggests, through the one module allowed to run git (6.6d).
   - The prompt hook records when the turn started. Stop considers only changed files saved after that, so files the user changed earlier in their own editor don't count.
-  - Edits through Edit or Write are already marked as gated, so the changed files left unmarked are the ones a shell command wrote. A file the user saves in their own editor during the turn is counted too, which costs at most one extra block.
-  - For each changed file whose matching rules this session (and agent) hasn't been shown, the hook returns those rules as Stop `additionalContext`, and marks them shown. The turn continues, and Claude re-reads its change against them before stopping.
+  - An Edit or Write call that a rule covers writes a turn-scoped file marker (`gatedFile`, `scope.mjs`), so the changed files left unmarked are the ones a shell command wrote. A file the user saves in their own editor during the turn is counted too, which costs at most one extra continuation. A later turn checks the file again.
+    - The same-turn gap is accepted: an Edit that passes with no rule due, because a trigger missed its text, followed by a shell write to that file in the same turn, goes unchecked.
+  - The vault's own files are skipped through one `vaultOwn(rel)` predicate (`vault.mjs`), which the edit guard shares.
+  - For each changed file whose matching rules this session (and agent) hasn't been gated on, the hook returns those rules as Stop `additionalContext`. The turn continues, and Claude re-reads its change against them before stopping.
+    - The lead line is "Taste rules apply to a file this turn wrote. Re-read the change against them before you stop.", or with several files "Taste rules apply to files this turn wrote. Re-read the changes against them before you stop."
+    - Triggers are tested on the whole file text as `plainText` gives it (LF line ends, BOM stripped), the text the edit hook tests. The text is read only when a due rule has triggers, and triggers aren't tested on a file over 1 MiB.
+    - Every due rule is gated on its file; only those the output budget kept count as shown.
   - Not `decision: "block"`. It continues the turn too, but tells the user "Stop hook error occurred", so routine rules would look like the vault failing (phase 2 trial). Both work in bypass mode.
-  - `stop_hook_active` and the shown-markers keep it to one continuation per file. Claude Code also ends the turn after 8 stop-hook continuations in a row (hooks).
+  - The gate markers keep it to one continuation per file, and Claude Code ends the turn after 8 stop-hook continuations in a row (hooks). `stop_hook_active` is ignored: honouring it would skip the files a continuation writes.
   - A project that isn't a git repo gets no detection, which the adapter declares.
 - *Check.* A turn that writes a rule-covered file with a shell command and stops is sent that rule once and continues. The next stop passes.
 
@@ -396,19 +407,26 @@ Phase-3 notes then need no migration, even where the tooling lands later.
 - *Problem.* At 3 rules per refusal (`maxRulesPerEdit`, `edit.mjs:111`), 20 rules on one glob refused the first edit of each file 7 times, though AGENTS.md says "The retry goes through".
 - *Design.*
   - The first refusal shows the top rules in full, the rest as one-line pointers, and the due pages as pointers with summaries (decision 6), all within the budget (6.6e).
-  - It marks everything it showed as shown.
+  - It gates every due rule and page on the file, so the retry passes. It counts as shown only what `fitContext` kept, rule pointers included.
+  - Rules the budget cut stay gated after the refusal. This is a trade-off the user chose: gating only the kept rules would bring back repeat refusals. The overflow line says how many it left out and points to `index.md`, which lists them.
+  - Pages are gated per file, and told of once per agent. A page the budget cut isn't marked, so it comes up on the next file it covers.
+  - The other hooks follow the same rule: each counts as shown, and marks delivered, only what survived `fitContext`.
+    - The exception is the always rules that session start's block cut for its own cap. They are marked, since the block points to `active.md` for them.
+    - A session-start always block that the budget drops whole marks nothing, so the next prompt delivers it.
 - *Check.* 20 rules and 2 pages on one glob refuse the first edit once, and the retry passes.
 
 ### 6.6 Hooks that never fail silently
 
 **a. Loud failure.** `runHook` (`vault.mjs:261-269`) catches every error, logs it and exits 0, so neither Claude nor the user sees it. It now writes one line to stderr ("vault <hook> failed: <message>; see .state/errors.log") and exits 1.
 - Claude Code records that line as a hook error for SessionStart, UserPromptSubmit, PreToolUse, Stop and SubagentStart, and the action goes ahead. A Stop failure also raises a "Stop hook error occurred" notice (phase 2 trial).
-- A failure inside a subagent, its SubagentStart included, is recorded in the subagent's transcript only (§7).
+- A failure inside a subagent is recorded in the subagent's transcript only (§7). SubagentStart is not inside: its failure shows in the main session's stream (phase 2 plugin trial, headless).
 
 **b. Internal deadline.**
 - A hook killed at its timeout prints nothing and logs nothing.
-- Hook input carries no timeout field, so the hook command passes the configured timeout as `VAULT_HOOK_TIMEOUT`, next to `timeout` in `hooks.json`.
-- Each hook checks the deadline (that timeout minus a margin) between notes. Past it, the hook stops, writes the notice and exits 1.
+- Hook input carries no timeout field, and a command hook has no per-hook env field. So `hooks/hooks.json` passes the timeout as an exec-form arg, `hooks/launch.mjs <hook> <seconds>`, next to `timeout`, and the launcher sets `VAULT_HOOK_TIMEOUT` from it.
+- `runHook` arms the deadline, so scripts and lint, which have no timeout, never hit it. Each hook checks the deadline (that timeout minus a margin of 1 s, or a fifth of a shorter timeout) between notes. Past it, the hook stops, writes the notice and exits 1.
+- `guarded()` rethrows a deadline error (`code: 'EDEADLINE'`) rather than logging it and going on, so a missed deadline fails loudly instead of running into the silent kill.
+- git, which can't call the check, gets a timeout capped at the time left before the deadline (`remaining()`, `deadline.mjs`).
 - A JS timer can't fire during a long synchronous regex, so the check runs in the loop, and 6.6c keeps each test short.
 
 **c. Regex cost.**
@@ -457,13 +475,18 @@ Phase-3 notes then need no migration, even where the tooling lands later.
   - it gives up after 3 s, while a propose holds the lock for 5.6 s at 3,000 notes;
   - it treats a lock as stale after 10 s;
   - it releases without checking its owner.
-- *Design.* The lock file holds an owner token, and release removes only its own. The rebuild runs after the lock is released.
+- *Design.*
+  - The lock file holds an owner token, `<pid>:<random>`, and release removes only its own. A waiter waits up to 60 s.
+  - A dead owner's lock is stale at once. A live owner's lock goes stale at 30 s, since Windows reuses pids and a dead owner can look alive; 30 s passes well before a waiter gives up and well after the longest real hold. A lock file with no token yet goes stale at 10 s.
+  - `withLock` gives up with an error whose `code` is `'ELOCKED'`, so a caller can tell a lock timeout from a real failure.
+  - Builds run one at a time. `build()` takes `build.lock` and loads the notes inside it, so a build that read the notes before another's note landed can't write last without it. This covers propose, pick, session start, `build.mjs` and `lint --fix`.
+  - Session start waits for `build.lock` at most `min(2 s, time left)`. When another build holds it, session start skips its own build, since that build writes what changed.
 - *Check.* Three parallel proposes at 3,000 notes all succeed.
 
-**g. Bounded housekeeping.** `tidy` (`sessions.mjs:181-194`) runs in session start (`session-start.mjs:74`) and took 5.3 s at 20,000 markers. Session start now removes at most a set number of markers per run, and `/lint` runs a full tidy.
+**g. Bounded housekeeping.** `tidy` (`sessions.mjs:181-194`) runs in session start (`session-start.mjs:74`) and took 5.3 s at 20,000 markers. Session start now removes at most `delivery.tidyMaxMarkers` (2,000) marker files per run, and `/lint` runs a full tidy. An unregistered session's age is read from its marker folders' mtimes, so a partial prune restores the folder's mtime, and the rest isn't kept another 30 days.
 
 **h. Small fixes.**
-- A folded YAML `summary: >-` reads as `">-"`. It should parse, or be a lint error.
+- A folded YAML `summary: >-` read as `">-"`. Block scalars now parse to their text: `>` folds lines with spaces, and `|` keeps them, with their indentation relative to the first line. Lines starting with `#` inside a block are dropped, where YAML would keep them (a known limit of `frontmatter.mjs`).
 - Paths with the `\\?\` prefix match no domain.
 
 ### 6.7 Adapter boundary
@@ -496,8 +519,9 @@ The Claude Code adapter maps hook I/O (`hookSpecificOutput`, `permissionDecision
 
 **d. Packaging.**
 - The plugin ships `hooks/hooks.json` and a `userConfig` option `vault` of type `directory`.
-- Each hook is a command hook in exec form, which runs with no shell: `"command": "node", "args": ["${CLAUDE_PLUGIN_ROOT}/launch.mjs", "<hook>"]` (hooks). This skips the Git Bash start on Windows (6.2c).
+- Each hook is a command hook in exec form, which runs with no shell: `"command": "node", "args": ["${CLAUDE_PLUGIN_ROOT}/hooks/launch.mjs", "<hook>", "<seconds>"]` (hooks). This skips the Git Bash start on Windows (6.2c). The seconds repeat the hook's `timeout` for the deadline (6.6b).
 - The launcher reads `CLAUDE_PLUGIN_OPTION_VAULT` and imports the hook from that vault's `.live/tools/`. So the installed plugin copy never goes stale against the vault.
+- On Windows the launcher reads a Git Bash spelling, `/c/...`, as `C:/...`. It refuses a relative path with a hook error, since one would name a different folder in each session.
 - The plugin reference confirms each part: `userConfig` takes type `directory`, hook processes get `CLAUDE_PLUGIN_OPTION_VAULT`, and `${CLAUDE_PLUGIN_ROOT}` resolves in exec-form `args`. On Windows, exec form needs `command` to resolve to a real executable, which `node.exe` is.
 
 **e. Codex.**
@@ -537,7 +561,7 @@ These are limits of the agent, not features the vault is missing. The adapter de
   - Parsing shell commands for writes would be a workaround.
 - **Code-execution tools.** An MCP tool that runs arbitrary code inside an app has no target to map, and a Stop-time check can't see what it changed.
 - **Hookless agents** get advice, not enforcement (6.7f).
-- **Failures inside a subagent.** Claude Code records them in the subagent's transcript, not the parent's (6.6a).
+- **Failures inside a subagent.** Claude Code records them in the subagent's transcript, not the parent's (6.6a). A SubagentStart failure is the exception and reaches the parent's stream.
 
 ## 8. Phases
 
@@ -552,7 +576,7 @@ The phases build mechanism only. Adding real knowledge and taste is the user's c
    - Every field in 6.1, plus the derived-text and bundle formats (6.4a, 6.4b), target namespaces (6.3b) and `tools` (6.3c).
    - Free while the wiki is empty.
    - Update AGENTS.md with it (§10).
-2. **Delivery that can be trusted.**
+2. **Delivery that can be trusted.** Built on `phase-2-integration`, reviewed at max effort with the findings fixed, and waiting for the user's OK to land.
    - loud failure, deadline and linear regex (6.6a–c);
    - the cache and content settling (6.2c, 6.6d), with the one git module and the standard and lint check changed to allow it:
      - the cache here is the one cache, the scoped walk and build on change;
@@ -585,15 +609,16 @@ The phases build mechanism only. Adding real knowledge and taste is the user's c
 
 | Check | Passing means | Today |
 |---|---|---|
-| `node --test test/*.test.mjs` | All pass; each `todo` fails for the reason its design section names | 310 pass, 9 `todo`, 1 skipped, 22 s |
-| Neutral-core test (§3) | No configured domain's key or title appears in `tools/`, `.claude/skills/`, `test/` or AGENTS.md | Fails: the domain key in `propose.mjs:58` and `:363` |
-| The probes as `todo` tests (phase 0) | Each passes with its `todo` mark removed: slow trigger, subagent gate, settle after an mtime change, negated glob, one refusal per file, frontmatter | In `test/delivery` and `test/rules`: 8 `todo`, all red: slow trigger, subagent gate (2), settle after an mtime change (2), one refusal per file, frontmatter, long-path prefix. Negated glob passes (phase 1). In `test/propose-repeats`, `setField-bom` passes, and three parallel proposes on a small vault pass, so the default run guards the lock too. |
-| Perf group: `VAULT_PERF=1 node --test test/perf/*.perf.mjs` (about 30 s, outside the default run) | Fastest of 5 gated edits under 1,000 ms at 1,000 notes; fastest of 3 under 300 ms at 3,000 (`todo`); three parallel proposes of unrelated rules at 3,000 notes all succeed (`todo`, 6.6f) | 814 ms; 2,244 ms; 2 of 3 fail on the lock |
+| `node --test test/*.test.mjs` | All pass; each `todo` fails for the reason its design section names | 381 tests: 379 pass, 1 skipped (making a link needs Developer Mode on Windows), 1 `todo` (neutral core, §3), 28 s. Lint: 0 errors. |
+| Neutral-core test (§3) | No configured domain's key or title appears in `tools/`, `.claude/skills/`, `test/` or AGENTS.md | Passes on this vault's config. Its `todo` mark stays until phase 3 replaces the fixtures, which name one platform without its domain's key. |
+| The probes as `todo` tests (phase 0) | Each passes with its `todo` mark removed: slow trigger, subagent gate, settle after an mtime change, negated glob, one refusal per file, frontmatter | All pass with their marks removed (phase 2): slow trigger, subagent gate (2), settle after an mtime change (2), one refusal per file, frontmatter, long-path prefix. Negated glob passes (phase 1). |
+| Perf group: `VAULT_PERF=1 node --test test/perf/*.perf.mjs` (about 10 s, outside the default run) | Fastest of 5 gated edits under 1,000 ms at 1,000 notes; fastest of 3 under 300 ms at 3,000; three parallel proposes of unrelated rules at 3,000 notes all succeed (6.6f) | About 135–156 ms; about 250–272 ms; all succeed in about 4.3–5.0 s, since builds run one at a time under `build.lock`. A warm session start at 3,000 notes takes about 340 ms, including the vault-wide stat for the lint reminder. The timings are noisy on this machine. |
 | Each *Check* in §6 | As stated there, against the phase-3 fixtures | Not built |
 | Transcript provider test (6.7c) | The fields the provider reads still exist in a current transcript | Not built |
 | Linear regex test (6.6c) | `new RegExp(p, 'l')` works after `v8.setFlagsFromString` on the installed Node | Works on Node 22.14 |
 | Vault server trial (6.7g) | A PreToolUse `mcp_tool` hook's JSON deny stops an Edit, and a gated edit is faster than the cached command hook | Run once in a scratch folder, not kept. Deny honored, but it fails open. |
 | Hook trials (6.2c, 6.3d, 6.6a) | In headless runs of the installed Claude Code: Stop `additionalContext` and `decision: "block"` continue the turn in bypass mode; a failing hook is recorded on each event; exec form is faster than Git Bash | Run once in a scratch folder on 2.1.296, not kept. All three hold. Exec form saves about 50 ms a call, less than measured outside Claude Code. |
+| Plugin trial (6.7d) | In headless runs with the plugin loaded by `--plugin-dir`, the hooks deliver from the vault the option names | Run once in the scratchpad (phase 2), not kept. 7 of 7 behaviors held: `CLAUDE_PLUGIN_OPTION_VAULT` from the parent env reached the hooks; the SessionStart always rule; one refusal, then the retry; Stop context for a shell write; SubagentStart context and the per-agent gate; 107–209 ms per hook; a loud failure on every hook for a bad vault path. |
 
 ## 10. AGENTS.md changes
 
@@ -623,6 +648,7 @@ The design changes these parts of AGENTS.md. Each change lands with the phase th
 3. The V8 linear engine flag is experimental. It works on Node 22.14, in-process.
 4. That a denied `AskUserQuestion` costs one agent retry and no user turn (6.3c).
 5. For the second adapter and compiled files: OpenCode v2 payloads, whether Claude Code reads `.agents/skills`, and whether the Copilot cloud agent can reach the vault.
+6. Whether Claude Code normalizes a `directory` option's path itself. The launcher doesn't rely on it: it reads a Git Bash `/c/...` path as `C:/...` and refuses a relative one (6.7d). What the phase 2 plugin trial settled: `CLAUDE_PLUGIN_OPTION_VAULT` from the parent env reaches the hooks under `--plugin-dir`, and `pluginConfigs` is read from user settings, `--settings` and managed settings, never project settings (Claude Code's debug log).
 
 ## 12. Not doing
 
