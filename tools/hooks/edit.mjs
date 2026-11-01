@@ -1,7 +1,7 @@
 import fs from 'node:fs';
 import { runHook, config, domainsFor, everywhereDomains, vaultRel, vaultOwn, toPosix, cwdOf, FILE_TOOLS, toolFile, shortHash, lf, plainText, readableDomains, inVaultFolder } from '../lib/vault.mjs';
 import {
-  loadNotes, settledNotes, liveRules, livePages, deliverable, deliveryFor, byFit, ruleLine, rulePointer, pageLine, fitContext, cmp, clip, parseNote, QUOTED, agentNotesSpan, authoredByUser, AGENT_NOTES, TOP_HEADING, isMap,
+  loadNotesAsync, settledNotes, liveRules, livePages, deliverable, deliveryFor, byFit, ruleLine, rulePointer, pageLine, fitContext, cmp, clip, parseNote, QUOTED, agentNotesSpan, authoredByUser, AGENT_NOTES, TOP_HEADING, isMap,
 } from '../lib/rules.mjs';
 import { matchTarget, targetNames, specificity, bySpecificity } from '../lib/glob.mjs';
 import { matcher, fileScope, fires, dueRules, gatedFile } from '../lib/scope.mjs';
@@ -277,7 +277,7 @@ function refusal(input, hits, pages, written) {
 
 const deny = why => ({ hookSpecificOutput: { hookEventName: 'PreToolUse', permissionDecision: 'deny', permissionDecisionReason: why } });
 
-runHook('edit', input => {
+runHook('edit', async input => {
   const t = target(input);
   if (!t && FILE_TOOLS.includes(input.tool_name)) return null;
   const cwd = cwdOf(input);
@@ -287,7 +287,7 @@ runHook('edit', input => {
     if (vaultOwn(vaultRel(t.path, cwd))) return null;
   }
   const { domains, hits: reach, matching } = scopeOf(input, t, cwd);
-  const notes = settledNotes(loadNotes(domains));
+  const notes = settledNotes(await loadNotesAsync(domains));
   const text = plainText(newText(input.tool_name, input.tool_input ?? {}));
   const ctx = deliveryFor(reach);
   const matched = deliverable(matching(liveRules(notes)), ctx);

@@ -1,7 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { config, vaultPath, writeText, today, plural, toPosix, shortHash, removeDir } from './lib/vault.mjs';
-import { isUrl, normUrl, cmp, readDerived } from './lib/rules.mjs';
+import { isUrl, normUrl, cmp, readDerived, parsedFile } from './lib/rules.mjs';
 import { yamlQuote } from './lib/frontmatter.mjs';
 import { sourceChains, copyStem, sourceProblems, sha256 } from './lib/sources.mjs';
 import { clone, hasOrigin, fetchOrigin, hasCommit, remoteHead, lastChange, sizeAt, showAt } from './lib/git.mjs';
@@ -95,9 +95,13 @@ function copyName(prev, hash, ext) {
   }
 }
 
+// The chains keep each copy's frontmatter only, so the latest copy's text is read when it is checked.
+const bodyOf = rel => parsedFile(rel)?.body ?? '';
+
 async function checkUrl(id, chain, chains, was) {
   const latest = chain.at(-1);
-  const { data, body } = chains.files.get(latest);
+  const { data } = chains.files.get(latest);
+  const body = bodyOf(latest);
   // A stored etag belongs to the copy that was latest when it came, so a copy saved since then sends its own.
   const stored = was?.chain?.at(-1) === latest && (was.etag || was.lastModified);
   const sent = stored ? { etag: was.etag, lastModified: was.lastModified } : { etag: data.etag, lastModified: data.last_modified };
@@ -153,7 +157,8 @@ function syncClone(repo) {
 
 function checkGit(chain, chains) {
   const latest = chain.at(-1);
-  const { data, body } = chains.files.get(latest);
+  const { data } = chains.files.get(latest);
+  const body = bodyOf(latest);
   const problems = sourceProblems(data, { body });
   if (problems.length) throw new Failed(`${latest}: ${problems.join('; ')}`);
   const repo = String(data.repo);

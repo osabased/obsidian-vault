@@ -6,7 +6,8 @@ import { changedFiles } from './git.mjs';
 
 // Reading and hashing every note costs more than a hook may spend, so each note's parsed text is kept in .state/cache/,
 // one file per folder of wiki/, and read again only when its size or mtime changes. Each entry also keeps when its text
-// was first seen, which settling reads, and whether git last found it unchanged from HEAD.
+// was first seen, which settling reads, and whether git last found it unchanged from HEAD. The frontmatter of each copy in
+// raw/refs/ is kept the same way, in .refs.json.
 
 const CACHE = ['.state', 'cache'];
 // A file saved within this long of being read may change again within the same mtime on a coarse file system, so it
@@ -21,10 +22,10 @@ const bucketOf = rel => {
   const parts = rel.split('/');
   return parts.length > 2 ? nfc(parts[1]) : '';
 };
-// Names starting with a dot are never walked, so .root can't be a folder's file.
-const cacheFile = b => vaultPath(...CACHE, `${b === '' ? '.root' : /^[\p{L}\p{N}_-]+$/u.test(b) ? b : shortHash(b)}.json`);
-const readBucket = (b, stamp) => {
-  const c = readJsonSafe(cacheFile(b));
+// Names starting with a dot are never walked, so .root and .refs, which holds the copies in raw/refs/, can't be a folder's file.
+const REFS_BUCKET = '.refs';
+const cacheFile = b => vaultPath(...CACHE, `${b === '' ? '.root' : b === REFS_BUCKET || /^[\p{L}\p{N}_-]+$/u.test(b) ? b : shortHash(b)}.json`);
+const readBucket = (b, stamp, c = readJsonSafe(cacheFile(b))) => {
   return c?.stamp === stamp && c.notes && typeof c.notes === 'object' ? c.notes : {};
 };
 
@@ -61,24 +62,43 @@ function mdFiles(dir, deep) {
   return out;
 }
 
-// The notes under wiki/<bucket>/ for each bucket named, or under all of wiki/ when buckets is null, as
-// { rel, m, s, h, seen, at, clean, note }, where note is what read(rel, text) gave when the text was last read.
-// stamp names the reader's version, so a cache another version of read wrote is read afresh.
-export function cachedNotes(buckets, read, stamp) {
-  const root = vaultPath('wiki');
+// Each bucket named, or every one when buckets is null, with the notes its folder of wiki/ holds.
+function walks(root, buckets) {
   let tops = [];
   try { tops = fs.readdirSync(root, { withFileTypes: true }); } catch {}
   const dirs = new Map(tops.filter(e => e.isDirectory() && !e.name.startsWith('.')).map(e => [nfc(e.name), e.name]));
   const names = buckets
     ? [...new Set(buckets.filter(b => typeof b === 'string').map(nfc))].filter(b => b && !b.startsWith('.'))
     : ['', ...dirs.keys()];
+  return names.map(b => ({ b, files: b === '' ? mdFiles(root, false) : dirs.has(b) ? mdFiles(path.join(root, dirs.get(b)), true) : [] }));
+}
+
+// On Windows a stat opens the file, so at thousands of notes, stats taken one at a time are most of a hook's time, and
+// taken at once they cost a fraction of it. A hook awaits this and hands the result to cachedNotes. The cache files are
+// read while the stats run. A file whose stat failed for any reason but its absence is left out, so cachedNotes stats it
+// again and meets the error itself.
+export async function noteStats(buckets) {
+  const walked = walks(vaultPath('wiki'), buckets);
+  const files = walked.flatMap(w => w.files);
+  const pending = Promise.all(files.map(f => fs.promises.stat(f).catch(e => (e.code === 'ENOENT' || e.code === 'ENOTDIR' ? null : undefined))));
+  const caches = new Map(walked.map(({ b }) => [b, readJsonSafe(cacheFile(b))]));
+  const stats = await pending;
+  return { walked, caches, stats: new Map(files.map((f, i) => [f, stats[i]]).filter(([, st]) => st !== undefined)) };
+}
+
+// The notes under wiki/<bucket>/ for each bucket named, or under all of wiki/ when buckets is null, as
+// { rel, m, s, h, seen, at, clean, note }, where note is what read(rel, text) gave when the text was last read.
+// stamp names the reader's version, so a cache another version of read wrote is read afresh. pre is noteStats() for
+// the same buckets, taken just before; a file its stats don't hold is stat'ed here.
+export function cachedNotes(buckets, read, stamp, pre) {
+  const root = vaultPath('wiki');
+  const stats = pre?.stats ?? new Map();
   const out = [];
-  for (const b of names) {
-    const old = readBucket(b, stamp);
+  for (const { b, files } of pre?.walked ?? walks(root, buckets)) {
+    const old = readBucket(b, stamp, pre?.caches.get(b));
     const found = {};
     let changed = false;
     let whole = false;
-    const files = b === '' ? mdFiles(root, false) : dirs.has(b) ? mdFiles(path.join(root, dirs.get(b)), true) : [];
     // A walk the deadline stops keeps what it read, and drops none of the notes it didn't reach.
     try {
       for (const full of files) {
@@ -89,7 +109,7 @@ export function cachedNotes(buckets, read, stamp) {
         let text;
         // A file another program holds for a moment keeps its last entry, but a note never read can't be served.
         try {
-          st = fs.statSync(full, { throwIfNoEntry: false });
+          st = stats.has(full) ? stats.get(full) : fs.statSync(full, { throwIfNoEntry: false });
           if (!st) continue;
           // A file dated in the future would otherwise never be trusted.
           if (e && e.m === st.mtimeMs && e.s === st.size && !isRacy(e.at, e.m)) {
@@ -116,6 +136,41 @@ export function cachedNotes(buckets, read, stamp) {
       if (changed || dropped.length) saveBucket(b, stamp, found, dropped);
     }
     for (const [rel, e] of Object.entries(found)) out.push({ rel, ...e });
+  }
+  return out;
+}
+
+// What read(rel) gave for each file named, from .state/cache/.refs.json while the file's size and mtime hold, as a Map in
+// the order given. Reading every copy in raw/refs/ costs seconds at thousands of copies, so only the ones that changed are
+// read. read returns null for a file it can't use, which is never kept, so read sees it again on every call. lstat keys
+// the cache, so a file that becomes a link is read again.
+export function cachedFiles(rels, read, stamp) {
+  const old = readBucket(REFS_BUCKET, stamp);
+  const found = {};
+  const out = new Map();
+  let changed = false;
+  let whole = false;
+  try {
+    for (const rel of rels) {
+      checkDeadline();
+      const e = old[rel];
+      const st = fs.lstatSync(vaultPath(...rel.split('/')), { throwIfNoEntry: false });
+      if (st && e && e.m === st.mtimeMs && e.s === st.size && !isRacy(e.at, e.m)) {
+        found[rel] = e;
+        out.set(rel, e.value);
+        continue;
+      }
+      const value = read(rel);
+      if (value === null) continue;
+      out.set(rel, value);
+      if (!st) continue;
+      found[rel] = { m: st.mtimeMs, s: st.size, at: Date.now(), value };
+      changed = true;
+    }
+    whole = true;
+  } finally {
+    const dropped = whole ? Object.keys(old).filter(rel => !found[rel]) : [];
+    if (changed || dropped.length) saveBucket(REFS_BUCKET, stamp, found, dropped);
   }
   return out;
 }
