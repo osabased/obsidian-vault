@@ -6,7 +6,7 @@ import { makeVault, userTurn, assistantTurn, toolResult } from './fixture.mjs';
 const SID = '9f8e7d6c-0000-4000-8000-000000000001';
 
 const rule = (extra = {}) => ({
-  domain: 'demo', slug: 'strict-scripts', topic: 'code', basis: 'stated',
+  domain: 'glim', slug: 'strict-scripts', topic: 'code', basis: 'stated',
   do: 'Start scripts with --!strict.', not: 'Leave scripts nonstrict.', because: '', applies_to: ['src/**/*.luau'], ...extra,
 });
 
@@ -26,7 +26,7 @@ test('a stated quote the user typed is written', t => {
   const v = session(t, [userTurn('please, I want scripts in strict mode always')]);
   const r = v.propose(SID, rule({ quote: 'I want scripts in strict mode always' }));
   assert.equal(r.code, 0, r.stderr);
-  assert.match(v.read('wiki/demo/rules/strict-scripts.md'), /"I want scripts in strict mode always"/);
+  assert.match(v.read('wiki/glim/rules/strict-scripts.md'), /"I want scripts in strict mode always"/);
 });
 
 test('case, spacing and curly quotes do not count against a quote', t => {
@@ -44,7 +44,7 @@ test('an ellipsis may skip words, in order, within one message', t => {
 test('a stated quote the user never typed is refused', t => {
   const v = session(t, [userTurn('make the buttons bigger')]);
   notTyped(v.propose(SID, rule({ quote: 'I want scripts in strict mode always' })));
-  assert.equal(v.exists('wiki/demo/rules/strict-scripts.md'), false);
+  assert.equal(v.exists('wiki/glim/rules/strict-scripts.md'), false);
 });
 
 test("the agent's own words, tool output and injected context are not the user's", t => {
@@ -165,7 +165,7 @@ test('a saved web page is read with its Latin-1 and typographic entities', t => 
 test('a Markdown source may be quoted as it reads or as it is written', t => {
   const quote = q => {
     const v = session(t, [userTurn('hi')]);
-    v.write('raw/refs/guide.md', 'Use **strict mode** always. Set the `Padding` value. See the [docs](https://example.com/docs) or [[wiki/demo/x|the note]] here.\n');
+    v.write('raw/refs/guide.md', 'Use **strict mode** always. Set the `Padding` value. See the [docs](https://example.com/docs) or [[wiki/glim/x|the note]] here.\n');
     return v.propose(SID, knowledge('raw/refs/guide.md', q));
   };
   for (const q of ['Use strict mode always', 'Set the Padding value', 'See the docs or the note here', 'Use **strict mode** always']) {

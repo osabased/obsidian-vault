@@ -6,7 +6,7 @@ const DAY = 864e5;
 const ago = ms => new Date(Date.now() - ms);
 const stamp = (v, at) => v.write('.state/lint.json', `${JSON.stringify({ at: at.toISOString(), errors: 0 })}\n`);
 const note = (v, i, saved) => {
-  const rel = `wiki/demo/rules/r${i}.md`;
+  const rel = `wiki/glim/rules/r${i}.md`;
   v.write(rel, ruleNote({ doLine: `Do thing ${i}.`, because: 'It reads better.' }), { saved });
 };
 const reminder = v => v.startSession(sessionId())?.hookSpecificOutput.additionalContext.split('\n\n').find(l => l.startsWith('Taste vault: /lint')) ?? null;

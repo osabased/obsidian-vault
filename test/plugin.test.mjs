@@ -55,7 +55,7 @@ function liveVault(t) {
 
 test('the launcher runs the hook from the vault, with the timeout it was given', t => {
   const v = liveVault(t);
-  v.write('wiki/demo/rules/gate.md', '---\ntype: rule\ndomain: demo\nkind: taste\nbasis: stated\ntopic: code\nalways: false\napplies_to:\n  - "src/**"\ntriggers: []\nkeywords: []\ncreated: 2026-01-01\nupdated: 2026-01-01\n---\n\n**Do:** Do it.\n**Not:** Not it.\n**Because:**\n');
+  v.write('wiki/glim/rules/gate.md', '---\ntype: rule\ndomain: glim\nkind: taste\nbasis: stated\ntopic: code\nalways: false\napplies_to:\n  - "src/**"\ntriggers: []\nkeywords: []\ncreated: 2026-01-01\nupdated: 2026-01-01\n---\n\n**Do:** Do it.\n**Not:** Not it.\n**Because:**\n');
   const started = launch('session-start', { vault: v.root, input: JSON.stringify({ session_id: sessionId(), cwd: v.project, hook_event_name: 'SessionStart', source: 'startup' }) });
   assert.equal(started.code, 0, started.stderr);
   assert.match(JSON.parse(started.stdout).hookSpecificOutput.additionalContext, /^Taste vault/);

@@ -4,8 +4,8 @@ import assert from 'node:assert/strict';
 import { makeVault, pageNote, denied, lintFound } from './fixture.mjs';
 
 const SID = '9f8e7d6c-0000-4000-8000-000000000003';
-const REL = 'wiki/demo/concepts/journal.md';
-const AGENT_REL = 'wiki/demo/concepts/agent-journal.md';
+const REL = 'wiki/glim/concepts/journal.md';
+const AGENT_REL = 'wiki/glim/concepts/agent-journal.md';
 const SEEN = '- the shop screen packs six tabs into one strip';
 const BODY = ['Cards need room to breathe.', 'Tabs should never feel cramped.', '', '## Agent notes', SEEN];
 const mine = (body = BODY, extra = ['author: user']) => pageNote({ kind: 'concept', topic: "''", summary: "''", extra, body });
@@ -22,7 +22,7 @@ const change = (old_string, new_string) => ({ old_string, new_string });
 test("an Edit that changes the body of a user's page is denied, with no retry", t => {
   const v = vault(t);
   const out = edit(v, 'Edit', change('Tabs should never feel cramped.', 'Tabs may feel cramped.'));
-  assert.match(denied(out) ?? '', /wiki\/demo\/concepts\/journal\.md is the user's own writing[\s\S]*new lines under ## Agent notes/);
+  assert.match(denied(out) ?? '', /wiki\/glim\/concepts\/journal\.md is the user's own writing[\s\S]*new lines under ## Agent notes/);
   assert.doesNotMatch(denied(out), /retry/);
   assert.ok(denied(edit(v, 'Edit', change('Tabs should never feel cramped.', 'Tabs may feel cramped.'))));
 });
@@ -79,7 +79,7 @@ test("a Write that rewrites a user page's frontmatter is denied", t => {
 
 test('a Write that creates a page with author: user is denied, and so is an Edit that flips author: agent to user', t => {
   const v = vault(t, { text: mine(BODY, []), rel: AGENT_REL });
-  const created = denied(edit(v, 'Write', { content: mine() }, 'wiki/demo/concepts/new.md'));
+  const created = denied(edit(v, 'Write', { content: mine() }, 'wiki/glim/concepts/new.md'));
   assert.match(created ?? '', /sets author: user themselves/);
   const flipped = denied(edit(v, 'Edit', change('summary: \'\'', "summary: ''\nauthor: user"), AGENT_REL));
   assert.match(flipped ?? '', /sets author: user themselves/);
@@ -90,11 +90,11 @@ test('a page without author: user is edited as before', t => {
   const v = vault(t, { text: mine(BODY, []) });
   assert.equal(denied(edit(v, 'Edit', change('Tabs should never feel cramped.', 'Tabs may feel cramped.'))), null);
   assert.equal(denied(edit(v, 'Write', { content: mine(BODY, ['author: agent']) })), null);
-  assert.equal(denied(edit(v, 'Write', { content: mine(BODY, []) }, 'wiki/demo/concepts/new.md')), null);
+  assert.equal(denied(edit(v, 'Write', { content: mine(BODY, []) }, 'wiki/glim/concepts/new.md')), null);
 });
 
 const rule = (extra = {}) => ({
-  domain: 'demo', slug: 'roomy-cards', topic: 'layout', basis: 'stated', page: REL, quote: 'Cards need room to breathe',
+  domain: 'glim', slug: 'roomy-cards', topic: 'layout', basis: 'stated', page: REL, quote: 'Cards need room to breathe',
   do: 'Leave 12px around cards.', not: 'Pack cards edge to edge.', because: '', applies_to: ['src/**/*.luau'], ...extra,
 });
 
@@ -108,7 +108,7 @@ test("propose writes a rule quoting a user's page, naming the page's path in the
   const v = proposer(t);
   const r = v.propose(SID, rule());
   assert.equal(r.code, 0, r.stderr);
-  assert.match(v.read('wiki/demo/rules/roomy-cards.md'), /^- \d{4}-\d\d-\d\d · stated · wiki\/demo\/concepts\/journal\.md · "Cards need room to breathe" \(a-[0-9a-f]{8}\)$/m);
+  assert.match(v.read('wiki/glim/rules/roomy-cards.md'), /^- \d{4}-\d\d-\d\d · stated · wiki\/glim\/concepts\/journal\.md · "Cards need room to breathe" \(a-[0-9a-f]{8}\)$/m);
 });
 
 test('the quote may leave words out with … and is matched by the transcript rules', t => {
@@ -122,15 +122,15 @@ test('a knowledge rule may cite the page the same way', t => {
   const v = proposer(t);
   const r = v.propose(SID, rule({ kind: 'knowledge', slug: 'card-spacing', quote: 'Tabs should never feel cramped' }));
   assert.equal(r.code, 0, r.stderr);
-  assert.match(v.read('wiki/demo/rules/card-spacing.md'), / · stated · wiki\/demo\/concepts\/journal\.md · "Tabs should never feel cramped"/);
+  assert.match(v.read('wiki/glim/rules/card-spacing.md'), / · stated · wiki\/glim\/concepts\/journal\.md · "Tabs should never feel cramped"/);
 });
 
 test('a quote the page does not hold is refused', t => {
   const v = proposer(t);
   const r = v.propose(SID, rule({ quote: 'Cards want a drop shadow' }));
   assert.equal(r.code, 1);
-  assert.match(r.stderr, /the quote isn't in wiki\/demo\/concepts\/journal\.md/);
-  assert.equal(v.exists('wiki/demo/rules/roomy-cards.md'), false);
+  assert.match(r.stderr, /the quote isn't in wiki\/glim\/concepts\/journal\.md/);
+  assert.equal(v.exists('wiki/glim/rules/roomy-cards.md'), false);
 });
 
 test("a quote only in ## Agent notes, or only in the page's frontmatter, is refused", t => {
@@ -138,7 +138,7 @@ test("a quote only in ## Agent notes, or only in the page's frontmatter, is refu
   for (const [slug, quote] of [['from-notes', 'packs six tabs'], ['from-summary', 'Shop notes'], ['from-topic', 'layout']]) {
     const r = v.propose(SID, rule({ slug, quote }));
     assert.equal(r.code, 1, quote);
-    assert.match(r.stderr, /the quote isn't in wiki\/demo\/concepts\/journal\.md/);
+    assert.match(r.stderr, /the quote isn't in wiki\/glim\/concepts\/journal\.md/);
   }
 });
 
@@ -147,9 +147,9 @@ test('a page that is not author: user, or is not there, is refused', t => {
   const agent = v.propose(SID, rule());
   assert.equal(agent.code, 1);
   assert.match(agent.stderr, /isn't an author: user page/);
-  v.write('wiki/demo/rules/some-rule.md', '---\ntype: rule\ndomain: demo\n---\n\nCards need room to breathe\n');
-  assert.match(v.propose(SID, rule({ page: 'wiki/demo/rules/some-rule.md' })).stderr, /isn't an author: user page/);
-  assert.match(v.propose(SID, rule({ page: 'wiki/demo/concepts/gone.md' })).stderr, /there's no file at wiki\/demo\/concepts\/gone\.md/);
+  v.write('wiki/glim/rules/some-rule.md', '---\ntype: rule\ndomain: glim\n---\n\nCards need room to breathe\n');
+  assert.match(v.propose(SID, rule({ page: 'wiki/glim/rules/some-rule.md' })).stderr, /isn't an author: user page/);
+  assert.match(v.propose(SID, rule({ page: 'wiki/glim/concepts/gone.md' })).stderr, /there's no file at wiki\/glim\/concepts\/gone\.md/);
   assert.match(v.propose(SID, rule({ page: 'raw/refs/x.md' })).stderr, /page must be a page under wiki\//);
 });
 
@@ -163,20 +163,20 @@ test('page is for basis stated only', t => {
 test('a repeat adds the Evidence line with the path to the rule it repeats', t => {
   const v = proposer(t);
   assert.equal(v.propose(SID, rule()).code, 0);
-  const r = v.propose(SID, rule({ slug: 'again', quote: 'Tabs should never feel cramped', repeats: 'demo/roomy-cards' }));
+  const r = v.propose(SID, rule({ slug: 'again', quote: 'Tabs should never feel cramped', repeats: 'glim/roomy-cards' }));
   assert.equal(r.code, 0, r.stderr);
-  const text = v.read('wiki/demo/rules/roomy-cards.md');
-  assert.match(text, /· stated · wiki\/demo\/concepts\/journal\.md · "Cards need room to breathe"/);
-  assert.match(text, /· stated · wiki\/demo\/concepts\/journal\.md · "Tabs should never feel cramped"/);
+  const text = v.read('wiki/glim/rules/roomy-cards.md');
+  assert.match(text, /· stated · wiki\/glim\/concepts\/journal\.md · "Cards need room to breathe"/);
+  assert.match(text, /· stated · wiki\/glim\/concepts\/journal\.md · "Tabs should never feel cramped"/);
 });
 
 test('Evidence lines naming a page are read as lines without a session', async t => {
   const v = proposer(t);
   assert.equal(v.propose(SID, rule()).code, 0);
   const rules = await v.import('lib/rules.mjs');
-  const n = rules.readNote('demo/roomy-cards');
+  const n = rules.readNote('glim/roomy-cards');
   assert.deepEqual(rules.evidenceSessions(n), []);
-  assert.deepEqual(rules.evidenceQuotes(n), [{ session: undefined, note: 'wiki/demo/concepts/journal.md', source: undefined, quote: 'Cards need room to breathe' }]);
+  assert.deepEqual(rules.evidenceQuotes(n), [{ session: undefined, note: 'wiki/glim/concepts/journal.md', source: undefined, quote: 'Cards need room to breathe' }]);
 });
 
 test('lint checks the quote against the page and warns when the sentence is gone', async t => {
@@ -186,15 +186,15 @@ test('lint checks the quote against the page and warns when the sentence is gone
   v.write(REL, mine(['Cards can be tight.', '', '## Agent notes', 'Cards need room to breathe, the user said.']));
   const found = await lintFound(v, /isn't in/);
   assert.equal(found.length, 1);
-  assert.equal(found[0].file, 'wiki/demo/rules/roomy-cards.md');
-  assert.match(found[0].msg, /"Cards need room to breathe" isn't in wiki\/demo\/concepts\/journal\.md/);
+  assert.equal(found[0].file, 'wiki/glim/rules/roomy-cards.md');
+  assert.match(found[0].msg, /"Cards need room to breathe" isn't in wiki\/glim\/concepts\/journal\.md/);
 });
 
 test('lint warns when the cited page is gone or is no longer the user\'s', async t => {
   const v = proposer(t);
   assert.equal(v.propose(SID, rule()).code, 0);
   v.write(REL, mine(BODY, []));
-  assert.match((await lintFound(v, /Evidence/))[0]?.msg ?? '', /cites wiki\/demo\/concepts\/journal\.md, which isn't an author: user page/);
+  assert.match((await lintFound(v, /Evidence/))[0]?.msg ?? '', /cites wiki\/glim\/concepts\/journal\.md, which isn't an author: user page/);
   v.write(REL, 'nothing');
   assert.equal((await lintFound(v, /Evidence/)).length, 1);
 });
@@ -202,7 +202,7 @@ test('lint warns when the cited page is gone or is no longer the user\'s', async
 test('the inbox row of a rule quoting a page names the page, for a new rule and for a repeat', t => {
   const v = proposer(t);
   assert.equal(v.propose(SID, rule()).code, 0);
-  assert.equal(v.propose(SID, rule({ slug: 'again', quote: 'Tabs should never feel cramped', repeats: 'demo/roomy-cards' })).code, 0);
+  assert.equal(v.propose(SID, rule({ slug: 'again', quote: 'Tabs should never feel cramped', repeats: 'glim/roomy-cards' })).code, 0);
   const rows = fs.readdirSync(v.at('raw', 'inbox')).flatMap(f => v.read(`raw/inbox/${f}`).trim().split(/\r?\n/).map(l => JSON.parse(l)));
   assert.equal(rows.length, 2);
   assert.deepEqual(rows.map(r => r.page), [REL, REL]);
@@ -245,7 +245,7 @@ test('a Write that only drops or adds a byte order mark, or adds a note too, is 
 test('a file in a worktree of the vault is guarded as the same file in the vault', t => {
   const rel = `.claude/worktrees/w1/${REL}`;
   const v = vault(t, { rel });
-  assert.match(denied(edit(v, 'Edit', change('Tabs should never feel cramped.', 'Tabs may feel cramped.'), rel)) ?? '', /^wiki\/demo\/concepts\/journal\.md is the user's own writing/);
+  assert.match(denied(edit(v, 'Edit', change('Tabs should never feel cramped.', 'Tabs may feel cramped.'), rel)) ?? '', /^wiki\/glim\/concepts\/journal\.md is the user's own writing/);
   v.write('.claude/worktrees/w1/raw/refs/a.md', 'x');
   assert.match(denied(edit(v, 'Write', { content: 'y' }, '.claude/worktrees/w1/raw/refs/a.md')) ?? '', /raw\/ is append-only: raw\/refs\/a\.md already exists/);
   assert.match(denied(edit(v, 'Write', { content: 'y' }, '.claude/worktrees/w1/index.md')) ?? '', /^index\.md is generated/);
@@ -268,7 +268,7 @@ test('an old_string that spells a character as \\uXXXX is matched as Claude Code
 });
 
 test("frontmatter lines that read as a heading or a fence don't move ## Agent notes", t => {
-  const head = ['---', 'type: page', 'domain: demo', 'kind: concept', "topic: ''", "summary: ''", 'author: user'];
+  const head = ['---', 'type: page', 'domain: glim', 'kind: concept', "topic: ''", "summary: ''", 'author: user'];
   const commented = vault(t, { text: [...head, '## Agent notes', '---', '# Journal', 'Cards need room.', ''].join('\n') });
   assert.ok(denied(edit(commented, 'Edit', change('## Agent notes\n---', '## Agent notes\nstatus: draft\n---'))));
   assert.ok(denied(edit(commented, 'Edit', change('## Agent notes\n---', '## Agent notes\nauthor: agent\n---'))));

@@ -9,43 +9,43 @@ const SID8 = SID.slice(0, 8);
 test('the index lists a topic\'s pages by kind, each but a source page with how many sources it draws on', async t => {
   const v = makeVault(t);
   v.write('raw/refs/notes.md', 'notes');
-  v.write('wiki/demo/source-changelog.md', sourcePage({ source: 'https://example.com/changelog' }));
-  v.write('wiki/demo/source-notes.md', sourcePage({ source: 'raw/refs/notes.md' }));
-  v.write('wiki/demo/strict-mode.md', page({ kind: 'synthesis', body: ['Typed.[^1]', '', '[^1]: https://example.com/changelog · dated 2026-09-30'] }));
-  v.write('wiki/demo/luau-types.md', page({ kind: 'concept', body: ['Typed.[^1] Strict.[^2]', '', '[^1]: raw/refs/notes.md', '[^2]: https://example.com/strict'] }));
-  v.write('wiki/demo/code.md', page({
-    kind: 'topic', body: ['From [[wiki/demo/source-changelog|source-changelog]] and [[source-notes]].[^1]', '', '[^1]: https://example.com/changelog', '', '## Rules'],
+  v.write('wiki/glim/source-changelog.md', sourcePage({ source: 'https://example.com/changelog' }));
+  v.write('wiki/glim/source-notes.md', sourcePage({ source: 'raw/refs/notes.md' }));
+  v.write('wiki/glim/strict-mode.md', page({ kind: 'synthesis', body: ['Typed.[^1]', '', '[^1]: https://example.com/changelog · dated 2026-09-30'] }));
+  v.write('wiki/glim/luau-types.md', page({ kind: 'concept', body: ['Typed.[^1] Strict.[^2]', '', '[^1]: raw/refs/notes.md', '[^2]: https://example.com/strict'] }));
+  v.write('wiki/glim/code.md', page({
+    kind: 'topic', body: ['From [[wiki/glim/source-changelog|source-changelog]] and [[source-notes]].[^1]', '', '[^1]: https://example.com/changelog', '', '## Rules'],
   }));
-  v.write('wiki/demo/roblox.md', page({ kind: 'entity' }));
-  v.write('wiki/demo/some-rule.md', ruleNote({ keywords: ['x'] }));
+  v.write('wiki/glim/roblox.md', page({ kind: 'entity' }));
+  v.write('wiki/glim/some-rule.md', ruleNote({ keywords: ['x'] }));
   const rules = await v.import('lib/rules.mjs');
   const lines = rules.renderIndex(rules.loadNotes()).split('\n').filter(l => l.startsWith('- '));
   assert.deepEqual(lines.slice(0, 6).map(l => l.split(' · ').slice(0, 3).join(' · ')), [
-    '- [[wiki/demo/code|code]] · topic page · 2 sources',
-    '- [[wiki/demo/luau-types|luau-types]] · concept page · 2 sources',
-    '- [[wiki/demo/roblox|roblox]] · entity page · no sources',
-    '- [[wiki/demo/strict-mode|strict-mode]] · synthesis page · 1 source',
-    '- [[wiki/demo/source-changelog|source-changelog]] · source page · What we know.',
-    '- [[wiki/demo/source-notes|source-notes]] · source page · What we know.',
+    '- [[wiki/glim/code|code]] · topic page · 2 sources',
+    '- [[wiki/glim/luau-types|luau-types]] · concept page · 2 sources',
+    '- [[wiki/glim/roblox|roblox]] · entity page · no sources',
+    '- [[wiki/glim/strict-mode|strict-mode]] · synthesis page · 1 source',
+    '- [[wiki/glim/source-changelog|source-changelog]] · source page · What we know.',
+    '- [[wiki/glim/source-notes|source-notes]] · source page · What we know.',
   ]);
-  assert.match(lines[6], /^- \[\[wiki\/demo\/some-rule\|some-rule\]\] · /);
+  assert.match(lines[6], /^- \[\[wiki\/glim\/some-rule\|some-rule\]\] · /);
 });
 
 test('lint warns on a page missing a section its kind has, or holding a source field only a source page takes', async t => {
   const v = makeVault(t);
-  v.write('wiki/demo/source-shop.md', sourcePage({ source: 'https://example.com/shop', body: ['## You said', '', 'Shows a shop.'] }));
-  v.write('wiki/demo/source-full.md', sourcePage({ source: 'https://example.com/full' }));
-  v.write('wiki/demo/code.md', page({ kind: 'topic' }));
-  v.write('wiki/demo/layout.md', page({ kind: 'topic', topic: 'layout', body: ['## Rules'] }));
-  v.write('wiki/demo/luau-types.md', page({ kind: 'concept', extra: ['source: https://example.com/x', 'source_date: 2026-09-30'] }));
-  v.write('wiki/demo/roblox.md', page({ kind: 'entity', extra: ['source: notes.md'] }));
+  v.write('wiki/glim/source-shop.md', sourcePage({ source: 'https://example.com/shop', body: ['## You said', '', 'Shows a shop.'] }));
+  v.write('wiki/glim/source-full.md', sourcePage({ source: 'https://example.com/full' }));
+  v.write('wiki/glim/code.md', page({ kind: 'topic' }));
+  v.write('wiki/glim/layout.md', page({ kind: 'topic', topic: 'layout', body: ['## Rules'] }));
+  v.write('wiki/glim/luau-types.md', page({ kind: 'concept', extra: ['source: https://example.com/x', 'source_date: 2026-09-30'] }));
+  v.write('wiki/glim/roblox.md', page({ kind: 'entity', extra: ['source: notes.md'] }));
   const found = await lintFound(v, /section|for source pages/);
   assert.deepEqual((await lintFound(v, /./)).filter(f => f.level === 'error'), []);
   assert.deepEqual(found.map(f => [f.file, f.msg]).sort(), [
-    ['wiki/demo/code.md', 'no ## Rules section. A topic page has ## Rules, even when it is empty'],
-    ['wiki/demo/luau-types.md', 'source and source_date are for source pages. Cite a source with a footnote instead'],
-    ['wiki/demo/roblox.md', 'source is for source pages. Cite a source with a footnote instead'],
-    ['wiki/demo/source-shop.md', "no ## Agent's reading or ## Rules section. A source page has ## You said, ## Agent's reading and ## Rules, even when one is empty"],
+    ['wiki/glim/code.md', 'no ## Rules section. A topic page has ## Rules, even when it is empty'],
+    ['wiki/glim/luau-types.md', 'source and source_date are for source pages. Cite a source with a footnote instead'],
+    ['wiki/glim/roblox.md', 'source is for source pages. Cite a source with a footnote instead'],
+    ['wiki/glim/source-shop.md', "no ## Agent's reading or ## Rules section. A source page has ## You said, ## Agent's reading and ## Rules, even when one is empty"],
   ]);
   assert.ok(found.every(f => f.level === 'warn'));
 });
@@ -53,7 +53,7 @@ test('lint warns on a page missing a section its kind has, or holding a source f
 test('lint warns on a footnote that names no source, one cited but never written, and one written but never cited', async t => {
   const v = makeVault(t);
   v.write('raw/refs/shop.png', 'png');
-  v.write('wiki/demo/luau-types.md', page({
+  v.write('wiki/glim/luau-types.md', page({
     kind: 'concept', body: [
       'One.[^1] Two.[^2] Three.[^3] Four.[^4] Five.[^gone] In code: `[^code]`.', 'Tabs[^5]: home and shop.', '', '```', 'x[^fenced]', '```', '',
       '[^1]: raw/refs/shop.png · dated 2026-09-30', '[^2]: https://example.com/x', '[^3]: raw/refs/missing.png', '[^4]: ./raw/refs/shop.png',
@@ -68,25 +68,25 @@ test('lint warns on a footnote that names no source, one cited but never written
     'footnote [^4] names ./raw/refs/shop.png. Write it as raw/refs/shop.png, the path from the vault root',
     'footnote [^spare] is never cited',
   ]);
-  assert.ok(found.every(f => f.level === 'warn' && f.file === 'wiki/demo/luau-types.md'));
+  assert.ok(found.every(f => f.level === 'warn' && f.file === 'wiki/glim/luau-types.md'));
 });
 
 test('lint warns on a page no other note links, except a topic page or a note with an error', async t => {
   const v = makeVault(t);
-  v.write('wiki/demo/code.md', page({ kind: 'topic', body: ['See [[luau-types]] and [the store](../demo/source-store.md).', '', '## Rules'] }));
-  v.write('wiki/demo/luau-types.md', page({ kind: 'concept' }));
-  v.write('wiki/demo/source-store.md', sourcePage({ source: 'https://example.com/store' }));
-  v.write('wiki/demo/roblox.md', page({ kind: 'entity', body: ['Itself: [[roblox]].'] }));
-  v.write('wiki/demo/strict-mode.md', page({ kind: 'synthesis' }));
-  v.write('wiki/demo/source-quoted.md', sourcePage({ source: 'https://example.com/q' }));
-  v.write('wiki/demo/source-shop.md', sourcePage({ source: 'https://example.com/shop', body: ['## You said', '- 2026-10-22 · session 00000000 · "see [[source-quoted]]"', '', "## Agent's reading", '', '## Rules'] }));
-  v.write('wiki/demo/elsewhere.md', page({ kind: 'concept', domain: 'other' }));
-  v.write('wiki/demo/some-rule.md', ruleNote({ keywords: ['x'] }).replace('## Examples\n', '## Examples\n- [[wiki/demo/strict-mode|strict-mode]]\n'));
+  v.write('wiki/glim/code.md', page({ kind: 'topic', body: ['See [[luau-types]] and [the store](../glim/source-store.md).', '', '## Rules'] }));
+  v.write('wiki/glim/luau-types.md', page({ kind: 'concept' }));
+  v.write('wiki/glim/source-store.md', sourcePage({ source: 'https://example.com/store' }));
+  v.write('wiki/glim/roblox.md', page({ kind: 'entity', body: ['Itself: [[roblox]].'] }));
+  v.write('wiki/glim/strict-mode.md', page({ kind: 'synthesis' }));
+  v.write('wiki/glim/source-quoted.md', sourcePage({ source: 'https://example.com/q' }));
+  v.write('wiki/glim/source-shop.md', sourcePage({ source: 'https://example.com/shop', body: ['## You said', '- 2026-10-22 · session 00000000 · "see [[source-quoted]]"', '', "## Agent's reading", '', '## Rules'] }));
+  v.write('wiki/glim/elsewhere.md', page({ kind: 'concept', domain: 'other' }));
+  v.write('wiki/glim/some-rule.md', ruleNote({ keywords: ['x'] }).replace('## Examples\n', '## Examples\n- [[wiki/glim/strict-mode|strict-mode]]\n'));
   const found = await lintFound(v, /no other note links/);
   assert.deepEqual(found.map(f => [f.level, f.file, f.msg]).sort(), [
-    ['warn', 'wiki/demo/roblox.md', "no other note links this page. Link it from its topic's page"],
-    ['warn', 'wiki/demo/source-quoted.md', "no other note links this page. Link it from its topic's page"],
-    ['warn', 'wiki/demo/source-shop.md', "no other note links this page. Link it from its topic's page"],
+    ['warn', 'wiki/glim/roblox.md', "no other note links this page. Link it from its topic's page"],
+    ['warn', 'wiki/glim/source-quoted.md', "no other note links this page. Link it from its topic's page"],
+    ['warn', 'wiki/glim/source-shop.md', "no other note links this page. Link it from its topic's page"],
   ]);
 });
 
@@ -95,15 +95,15 @@ test('lint warns when a source page on a topic page\'s topic changes after it, a
   // Saved before the fixture's updated date, so each page's day stays 2026-10-01 whenever the test runs.
   const saved = new Date(2026, 8, 1);
   const old = rel => fs.utimesSync(v.at(...rel.split('/')), saved, saved);
-  v.write('wiki/demo/code.md', page({ kind: 'topic', body: ['## Rules'] }));
-  v.write('wiki/demo/luau-types.md', page({ kind: 'concept' }));
-  v.write('wiki/demo/layout.md', page({ kind: 'topic', topic: 'layout', body: ['## Rules'] }));
-  v.write('wiki/demo/source-grid.md', sourcePage({ source: 'https://example.com/grid', topic: 'layout' }));
-  ['wiki/demo/code.md', 'wiki/demo/luau-types.md', 'wiki/demo/layout.md', 'wiki/demo/source-grid.md'].forEach(old);
-  v.write('wiki/demo/source-shop.md', sourcePage({ source: 'https://example.com/shop' }));
+  v.write('wiki/glim/code.md', page({ kind: 'topic', body: ['## Rules'] }));
+  v.write('wiki/glim/luau-types.md', page({ kind: 'concept' }));
+  v.write('wiki/glim/layout.md', page({ kind: 'topic', topic: 'layout', body: ['## Rules'] }));
+  v.write('wiki/glim/source-grid.md', sourcePage({ source: 'https://example.com/grid', topic: 'layout' }));
+  ['wiki/glim/code.md', 'wiki/glim/luau-types.md', 'wiki/glim/layout.md', 'wiki/glim/source-grid.md'].forEach(old);
+  v.write('wiki/glim/source-shop.md', sourcePage({ source: 'https://example.com/shop' }));
   const found = await lintFound(v, /after this page/);
-  assert.deepEqual(found.map(f => [f.level, f.file]), [['warn', 'wiki/demo/code.md']]);
-  assert.match(found[0].msg, /^demo\/source-shop changed on \d{4}-\d\d-\d\d, after this page \(2026-10-01\)\. Check the page still matches it, then set updated$/);
+  assert.deepEqual(found.map(f => [f.level, f.file]), [['warn', 'wiki/glim/code.md']]);
+  assert.match(found[0].msg, /^glim\/source-shop changed on \d{4}-\d\d-\d\d, after this page \(2026-10-01\)\. Check the page still matches it, then set updated$/);
 });
 
 test('lint warns when a source page another page cites, by footnote or link, changes after it', async t => {
@@ -111,20 +111,20 @@ test('lint warns when a source page another page cites, by footnote or link, cha
   const saved = new Date(2026, 8, 1);
   const old = rel => fs.utimesSync(v.at(...rel.split('/')), saved, saved);
   v.write('raw/refs/shop.md', 'The shop.\n');
-  v.write('wiki/demo/luau-types.md', page({ kind: 'concept', body: ['Typed.[^1]', '', '[^1]: raw/refs/shop.md'] }));
-  v.write('wiki/demo/roact.md', page({ kind: 'entity', body: ['See [[source-shop]].'] }));
-  v.write('wiki/demo/strict-mode.md', page({ kind: 'concept' }));
-  ['wiki/demo/luau-types.md', 'wiki/demo/roact.md', 'wiki/demo/strict-mode.md'].forEach(old);
-  v.write('wiki/demo/source-shop.md', sourcePage({ source: 'raw/refs/shop.md' }));
+  v.write('wiki/glim/luau-types.md', page({ kind: 'concept', body: ['Typed.[^1]', '', '[^1]: raw/refs/shop.md'] }));
+  v.write('wiki/glim/roact.md', page({ kind: 'entity', body: ['See [[source-shop]].'] }));
+  v.write('wiki/glim/strict-mode.md', page({ kind: 'concept' }));
+  ['wiki/glim/luau-types.md', 'wiki/glim/roact.md', 'wiki/glim/strict-mode.md'].forEach(old);
+  v.write('wiki/glim/source-shop.md', sourcePage({ source: 'raw/refs/shop.md' }));
   const found = await lintFound(v, /after this page/);
-  assert.deepEqual(found.map(f => f.file), ['wiki/demo/luau-types.md', 'wiki/demo/roact.md']);
-  assert.match(found[0].msg, /^demo\/source-shop changed on/);
+  assert.deepEqual(found.map(f => f.file), ['wiki/glim/luau-types.md', 'wiki/glim/roact.md']);
+  assert.match(found[0].msg, /^glim\/source-shop changed on/);
 });
 
 test('lint warns on a quote under You said that the user did not type in its session, and skips a session it has no transcript for', async t => {
   const v = makeVault(t);
   v.startSession(SID, { cwd: v.root, transcript: v.transcript(SID, [userTurn('the cards breathe, the tabs feel cramped'), assistantTurn('the tabs look tight')]) });
-  v.write('wiki/demo/source-shop.md', sourcePage({ source: 'https://example.com/shop', body: [
+  v.write('wiki/glim/source-shop.md', sourcePage({ source: 'https://example.com/shop', body: [
     '## You said',
     `- 2026-10-22 · session ${SID8} · "the cards breathe … feel cramped"`,
     `- 2026-10-22 · session ${SID8} · "the tabs look tight"`,
@@ -134,8 +134,8 @@ test('lint warns on a quote under You said that the user did not type in its ses
   ] }));
   const found = await lintFound(v, /typed|form/);
   assert.deepEqual(found.map(f => [f.level, f.file, f.msg]), [
-    ['warn', 'wiki/demo/source-shop.md', `"the tabs look tight" isn't in what the user typed in session ${SID8}. Quote their exact words, with … where you leave some out`],
-    ['warn', 'wiki/demo/source-shop.md', `a line under ## You said isn't in the form - <date> · session <id> · "<their exact words>", so lint can't check it: - 2026-10-22 · the cards breathe`],
+    ['warn', 'wiki/glim/source-shop.md', `"the tabs look tight" isn't in what the user typed in session ${SID8}. Quote their exact words, with … where you leave some out`],
+    ['warn', 'wiki/glim/source-shop.md', `a line under ## You said isn't in the form - <date> · session <id> · "<their exact words>", so lint can't check it: - 2026-10-22 · the cards breathe`],
   ]);
 });
 
@@ -145,9 +145,9 @@ test('lint re-checks Evidence quotes against the session and the source, and ski
   v.write('raw/refs/notes.md', 'The solver is on by default.\n');
   v.write('raw/refs/grid.html', '<p>The <b>grid</b> is 8&nbsp;px.</p>\n');
   v.write('raw/refs/guide.md', 'Use **strict mode** in the [shop](https://example.com/shop) scripts.\n');
-  v.write('raw/picks/2026-09-01.jsonl', `${JSON.stringify({ id: 'q-1234abcd', at: '2026-09-01T10:00:00.000Z', source: 'pick', domain: 'demo', subject: 'cards', text: 'a comment on the cards', status: 'user' })}\n`);
+  v.write('raw/picks/2026-09-01.jsonl', `${JSON.stringify({ id: 'q-1234abcd', at: '2026-09-01T10:00:00.000Z', source: 'pick', domain: 'glim', subject: 'cards', text: 'a comment on the cards', status: 'user' })}\n`);
   const line = (kind, rest, id = '(a-00000001)') => `- 2026-10-22 · ${kind} · session ${SID8} · ${rest} ${id}`.trimEnd();
-  v.write('wiki/demo/cards.md', ruleNote({ keywords: ['cards'], evidence: [
+  v.write('wiki/glim/cards.md', ruleNote({ keywords: ['cards'], evidence: [
     line('stated', '"the cards breathe … feel cramped"'),
     line('stated', '"the tabs feel cramped"', ''),
     line('correction', '"the tabs look tight"'),
@@ -164,8 +164,8 @@ test('lint re-checks Evidence quotes against the session and the source, and ski
   ] }));
   const found = await lintFound(v, /isn't in/);
   assert.deepEqual(found.map(f => [f.level, f.file, f.msg]), [
-    ['warn', 'wiki/demo/cards.md', `"the tabs look tight" isn't in what the user typed in session ${SID8}. Quote their exact words, with … where you leave some out`],
-    ['warn', 'wiki/demo/cards.md', `"The solver is off" isn't in raw/refs/notes.md. Quote the file's own words, with … where you leave some out`],
+    ['warn', 'wiki/glim/cards.md', `"the tabs look tight" isn't in what the user typed in session ${SID8}. Quote their exact words, with … where you leave some out`],
+    ['warn', 'wiki/glim/cards.md', `"The solver is off" isn't in raw/refs/notes.md. Quote the file's own words, with … where you leave some out`],
   ]);
 });
 
@@ -182,7 +182,7 @@ test('lint warns on an Evidence line it can\'t read, and on one whose source is 
     `- 2026-10-22 · stated · session ${SID8} · "never typed" (a-00000001; edited)`,
     `- 2026-10-22 · source · session ${SID8} · raw/refs/notes.md, dated 2026-10-01 · "anything"`,
   ];
-  v.write('wiki/demo/cards.md', ruleNote({ keywords: ['cards'], evidence: [
+  v.write('wiki/glim/cards.md', ruleNote({ keywords: ['cards'], evidence: [
     ...lines,
     `- 2026-10-22 · source · session ${SID8} · raw/refs/notse.md · dated 2026-10-01 · "anything" (a-00000001)`,
     `- 2026-10-22 · choice · session ${SID8} · "B, Grid", picked over "A" for "Which grid?" (q-1234abcd; proposed as a-00000001)`,
@@ -198,9 +198,9 @@ test('lint warns on an Evidence line it can\'t read, and on one whose source is 
 
 test('lint checks an Evidence line from a recorded row against the row\'s words', async t => {
   const v = makeVault(t);
-  v.write('raw/picks/2026-09-01.jsonl', `${JSON.stringify({ id: 'q-1234abcd', at: '2026-09-01T10:00:00.000Z', source: 'pick', domain: 'demo', subject: 'cards', text: 'keep the cards roomy please', status: 'user' })}\n`);
+  v.write('raw/picks/2026-09-01.jsonl', `${JSON.stringify({ id: 'q-1234abcd', at: '2026-09-01T10:00:00.000Z', source: 'pick', domain: 'glim', subject: 'cards', text: 'keep the cards roomy please', status: 'user' })}\n`);
   const pick = (quote, id) => `- 2026-09-01 · stated · session ${SID8} · "${quote}" (${id}; proposed as a-00000001)`;
-  v.write('wiki/demo/cards.md', ruleNote({ keywords: ['cards'], evidence: [
+  v.write('wiki/glim/cards.md', ruleNote({ keywords: ['cards'], evidence: [
     pick('keep the cards roomy', 'q-1234abcd'),
     pick('keep the tabs roomy', 'q-1234abcd'),
     pick('anything', 'q-99999999'),
@@ -215,7 +215,7 @@ test('lint checks an Evidence line from a recorded row against the row\'s words'
 test('lint passes an Evidence line over a raw/ file it can\'t read', { skip: process.platform !== 'win32' && 'needs a share-none lock, which only Windows has' }, async t => {
   const v = makeVault(t);
   const file = v.write('raw/refs/notes.md', 'The solver is on by default.\n');
-  v.write('wiki/demo/cards.md', ruleNote({ keywords: ['cards'], evidence: [
+  v.write('wiki/glim/cards.md', ruleNote({ keywords: ['cards'], evidence: [
     `- 2026-10-22 · source · session ${SID8} · raw/refs/notes.md · dated 2026-10-01 · "The solver is off" (a-00000001)`,
   ] }));
   // libuv's UV_FS_O_EXLOCK, which node doesn't export: no other handle can read the file until this one closes.
@@ -230,10 +230,10 @@ test('lint skips a session whose transcript it can\'t read', async t => {
   const transcript = v.at('.transcripts', 'unreadable');
   fs.mkdirSync(transcript, { recursive: true });
   v.startSession(SID, { cwd: v.root, transcript });
-  v.write('wiki/demo/source-shop.md', sourcePage({ source: 'https://example.com/shop', body: [
+  v.write('wiki/glim/source-shop.md', sourcePage({ source: 'https://example.com/shop', body: [
     '## You said', `- 2026-10-22 · session ${SID8} · "the tabs look tight"`, '', "## Agent's reading", '', '## Rules',
   ] }));
-  v.write('wiki/demo/cards.md', ruleNote({ keywords: ['cards'], evidence: [`- 2026-10-22 · stated · session ${SID8} · "the tabs look tight" (a-00000001)`] }));
+  v.write('wiki/glim/cards.md', ruleNote({ keywords: ['cards'], evidence: [`- 2026-10-22 · stated · session ${SID8} · "the tabs look tight" (a-00000001)`] }));
   assert.deepEqual(await lintFound(v, /isn't in/), []);
 });
 
@@ -241,9 +241,9 @@ test('a source page stales the pages that link it, and not those that link anoth
   const v = makeVault(t, { domains: { other: { title: 'Other', vaultOnly: true, topics: ['code'] } } });
   const saved = new Date(2026, 8, 1);
   v.write('raw/refs/shop.md', 'The shop.\n');
-  v.write('wiki/demo/source-shop.md', sourcePage({ source: 'raw/refs/shop.md' }));
-  v.write('wiki/demo/roact.md', page({ kind: 'entity', body: ['See [[wiki/demo/source-shop|source-shop]].'] }));
-  for (const f of ['wiki/demo/source-shop.md', 'wiki/demo/roact.md']) fs.utimesSync(v.at(...f.split('/')), saved, saved);
+  v.write('wiki/glim/source-shop.md', sourcePage({ source: 'raw/refs/shop.md' }));
+  v.write('wiki/glim/roact.md', page({ kind: 'entity', body: ['See [[wiki/glim/source-shop|source-shop]].'] }));
+  for (const f of ['wiki/glim/source-shop.md', 'wiki/glim/roact.md']) fs.utimesSync(v.at(...f.split('/')), saved, saved);
   v.write('wiki/other/source-shop-notes.md', sourcePage({ domain: 'other', source: 'raw/refs/shop.md' }));
   assert.deepEqual(await lintFound(v, /after this page/), []);
 });
@@ -252,14 +252,14 @@ test('a URL footnote is the source page of the file saved from that URL, for sta
   const v = makeVault(t);
   const saved = new Date(2026, 8, 1);
   v.write('raw/refs/post.md', '---\nurl: https://example.com/post/\nfetched: 2026-10-01\n---\n\nThe post.\n');
-  v.write('wiki/demo/luau-types.md', page({ kind: 'concept', body: ['Typed.[^1]', '', '[^1]: https://Example.com/post#intro · dated 2026-09-30'] }));
-  v.write('wiki/demo/roact.md', page({ kind: 'entity', body: ['Typed.[^1] See [[source-post]].', '', '[^1]: https://example.com/post'] }));
-  for (const f of ['wiki/demo/luau-types.md', 'wiki/demo/roact.md']) fs.utimesSync(v.at(...f.split('/')), saved, saved);
-  v.write('wiki/demo/source-post.md', sourcePage({ source: 'raw/refs/post.md' }));
+  v.write('wiki/glim/luau-types.md', page({ kind: 'concept', body: ['Typed.[^1]', '', '[^1]: https://Example.com/post#intro · dated 2026-09-30'] }));
+  v.write('wiki/glim/roact.md', page({ kind: 'entity', body: ['Typed.[^1] See [[source-post]].', '', '[^1]: https://example.com/post'] }));
+  for (const f of ['wiki/glim/luau-types.md', 'wiki/glim/roact.md']) fs.utimesSync(v.at(...f.split('/')), saved, saved);
+  v.write('wiki/glim/source-post.md', sourcePage({ source: 'raw/refs/post.md' }));
   const found = await lintFound(v, /after this page/);
-  assert.deepEqual(found.map(f => f.file), ['wiki/demo/luau-types.md', 'wiki/demo/roact.md']);
+  assert.deepEqual(found.map(f => f.file), ['wiki/glim/luau-types.md', 'wiki/glim/roact.md']);
   const rules = await v.import('lib/rules.mjs');
-  assert.match(rules.renderIndex(rules.loadNotes()), /\[\[wiki\/demo\/roact\|roact\]\] · entity page · 1 source ·/);
+  assert.match(rules.renderIndex(rules.loadNotes()), /\[\[wiki\/glim\/roact\|roact\]\] · entity page · 1 source ·/);
 });
 
 const logged = v => v.read('log.md').trim().split('\n').map(l => l.replace(/^- \d{4}-\d\d-\d\d \d\d:\d\d · /, ''));
@@ -267,23 +267,23 @@ const logged = v => v.read('log.md').trim().split('\n').map(l => l.replace(/^- \
 test('log.mjs logs a page, an ingest, a batch ingest and a filed-back query as one line each', t => {
   const v = makeVault(t);
   v.write('raw/refs/shop.png', 'png');
-  v.write('wiki/demo/source-shop.md', sourcePage({ source: 'raw/refs/shop.png' }));
-  v.write('wiki/demo/code.md', page({ kind: 'topic', body: ['## Rules'] }));
+  v.write('wiki/glim/source-shop.md', sourcePage({ source: 'raw/refs/shop.png' }));
+  v.write('wiki/glim/code.md', page({ kind: 'topic', body: ['## Rules'] }));
   const env = { CLAUDE_CODE_SESSION_ID: SID };
   for (const args of [
-    ['wiki/demo/code.md'],
-    ['ingest', 'raw/refs/shop.png', 'wiki/demo/source-shop.md', v.at('wiki', 'demo', 'code.md')],
-    ['ingest', '--batch', 'https://example.com/notes', 'wiki/demo/code.md'],
-    ['query', 'How should tab bars space their tabs?', 'wiki/demo/code.md'],
+    ['wiki/glim/code.md'],
+    ['ingest', 'raw/refs/shop.png', 'wiki/glim/source-shop.md', v.at('wiki', 'glim', 'code.md')],
+    ['ingest', '--batch', 'https://example.com/notes', 'wiki/glim/code.md'],
+    ['query', 'How should tab bars space their tabs?', 'wiki/glim/code.md'],
   ]) {
     const r = v.run('log.mjs', args, { env });
     assert.equal(r.code, 0, `${args.join(' ')}: ${r.stderr}`);
   }
   assert.deepEqual(logged(v), [
-    `wrote page demo/code · session ${SID8}`,
-    `ingest raw/refs/shop.png · pages demo/source-shop, demo/code · session ${SID8}`,
-    `ingest https://example.com/notes · batch · pages demo/code · session ${SID8}`,
-    `query "How should tab bars space their tabs?" · filed in demo/code · session ${SID8}`,
+    `wrote page glim/code · session ${SID8}`,
+    `ingest raw/refs/shop.png · pages glim/source-shop, glim/code · session ${SID8}`,
+    `ingest https://example.com/notes · batch · pages glim/code · session ${SID8}`,
+    `query "How should tab bars space their tabs?" · filed in glim/code · session ${SID8}`,
   ]);
   assert.ok(v.exists('index.md'));
 });
@@ -291,25 +291,25 @@ test('log.mjs logs a page, an ingest, a batch ingest and a filed-back query as o
 test('log.mjs logs nothing when the source or a page is wrong, or no page is named', t => {
   const v = makeVault(t);
   v.write('raw/refs/shop.png', 'png');
-  v.write('wiki/demo/code.md', page({ kind: 'topic', body: ['## Rules'] }));
-  v.write('wiki/demo/some-rule.md', ruleNote({ keywords: ['x'] }));
+  v.write('wiki/glim/code.md', page({ kind: 'topic', body: ['## Rules'] }));
+  v.write('wiki/glim/some-rule.md', ruleNote({ keywords: ['x'] }));
   for (const [args, code] of [
-    [['ingest', 'raw/refs/missing.png', 'wiki/demo/code.md'], 1],
-    [['ingest', 'notes.md', 'wiki/demo/code.md'], 1],
-    [['ingest', 'raw/refs/shop.png', 'wiki/demo/code.md', 'wiki/demo/nope.md'], 1],
-    [['ingest', 'raw/refs/shop.png', 'wiki/demo/some-rule.md'], 1],
-    [['query', '  ', 'wiki/demo/code.md'], 2],
+    [['ingest', 'raw/refs/missing.png', 'wiki/glim/code.md'], 1],
+    [['ingest', 'notes.md', 'wiki/glim/code.md'], 1],
+    [['ingest', 'raw/refs/shop.png', 'wiki/glim/code.md', 'wiki/glim/nope.md'], 1],
+    [['ingest', 'raw/refs/shop.png', 'wiki/glim/some-rule.md'], 1],
+    [['query', '  ', 'wiki/glim/code.md'], 2],
     [['query', 'How?'], 2],
     [['ingest', '--batch', 'raw/refs/shop.png'], 2],
   ]) assert.equal(v.run('log.mjs', args).code, code, args.join(' '));
   assert.equal(v.exists('log.md'), false);
-  assert.equal(v.run('log.mjs', ['ingest', 'raw/refs/shop.png', 'wiki/demo/code.md']).code, 0);
-  assert.deepEqual(logged(v), ['ingest raw/refs/shop.png · pages demo/code']);
+  assert.equal(v.run('log.mjs', ['ingest', 'raw/refs/shop.png', 'wiki/glim/code.md']).code, 0);
+  assert.deepEqual(logged(v), ['ingest raw/refs/shop.png · pages glim/code']);
 });
 
 test('review status logs its lint tally', t => {
   const v = makeVault(t);
-  v.write('wiki/demo/code.md', page({ kind: 'topic', body: ['## Rules'] }));
+  v.write('wiki/glim/code.md', page({ kind: 'topic', body: ['## Rules'] }));
   const tally = v.run('review.mjs', ['status']).stdout.match(/^Lint: (.*)$/m)[1];
   assert.match(tally, /^\d+ errors?, \d+ warnings?$/);
   assert.deepEqual(logged(v), [`lint · ${tally}`]);

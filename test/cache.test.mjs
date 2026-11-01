@@ -19,10 +19,10 @@ function hookIn(root, name, input, env = {}) {
 
 test('on a fresh clone with an empty .state/, every committed note applies at once', t => {
   const v = makeVault(t);
-  v.write('wiki/demo/rules/brief.md', ruleNote({ always: true, doLine: 'Be brief.', notLine: 'Ramble.' }));
-  v.write('wiki/demo/rules/gate.md', ruleNote({ applies_to: ['src/**/*.txt'], doLine: 'Gate it.' }));
-  v.write('wiki/demo/rules/word.md', ruleNote({ keywords: ['zebra'], doLine: 'Mind the zebra.' }));
-  v.write('wiki/demo/topics/code.md', pageNote({ keywords: ['quartz'] }));
+  v.write('wiki/glim/rules/brief.md', ruleNote({ always: true, doLine: 'Be brief.', notLine: 'Ramble.' }));
+  v.write('wiki/glim/rules/gate.md', ruleNote({ applies_to: ['src/**/*.txt'], doLine: 'Gate it.' }));
+  v.write('wiki/glim/rules/word.md', ruleNote({ keywords: ['zebra'], doLine: 'Mind the zebra.' }));
+  v.write('wiki/glim/topics/code.md', pageNote({ keywords: ['quartz'] }));
   v.checkout();
   const clone = fs.mkdtempSync(path.join(os.tmpdir(), 'vault-clone-'));
   t.after(() => fs.rmSync(clone, { recursive: true, force: true }));
@@ -31,28 +31,28 @@ test('on a fresh clone with an empty .state/, every committed note applies at on
 
   const sid = sessionId();
   const start = hookIn(clone, 'session-start', { session_id: sid, cwd: v.project, hook_event_name: 'SessionStart', source: 'startup' });
-  assert.match(context(start), /demo\/brief: Do: Be brief\./);
+  assert.match(context(start), /glim\/brief: Do: Be brief\./);
   const gated = hookIn(clone, 'edit', { session_id: sid, cwd: v.project, hook_event_name: 'PreToolUse', tool_name: 'Edit', tool_input: { file_path: path.join(v.project, 'src', 'a.txt'), old_string: 'a', new_string: 'b' } });
-  assert.match(denied(gated), /demo\/gate: Do: Gate it\./);
+  assert.match(denied(gated), /glim\/gate: Do: Gate it\./);
   const said = context(hookIn(clone, 'prompt', { session_id: sid, cwd: v.project, hook_event_name: 'UserPromptSubmit', prompt: 'the zebra and the quartz' }));
-  assert.match(said, /demo\/word: Do: Mind the zebra\./);
-  assert.match(said, /demo\/code \(topic page\)/);
+  assert.match(said, /glim\/word: Do: Mind the zebra\./);
+  assert.match(said, /glim\/code \(topic page\)/);
 });
 
 test('a note dated in the future is delivered once its text has held for settleSeconds, and lint warns on it', async t => {
   const v = makeVault(t, { config: { delivery: { settleSeconds: 1 } } });
-  v.write('wiki/demo/rules/word.md', ruleNote({ keywords: ['zebra'], doLine: 'Mind the zebra.' }), { saved: new Date(Date.now() + 86400e3) });
+  v.write('wiki/glim/rules/word.md', ruleNote({ keywords: ['zebra'], doLine: 'Mind the zebra.' }), { saved: new Date(Date.now() + 86400e3) });
   assert.equal(prompt(v, sessionId(), 'the zebra'), null, 'its text has only just been seen');
   await sleep(1500);
-  assert.match(context(prompt(v, sessionId(), 'the zebra')), /demo\/word: Do: Mind the zebra\./);
+  assert.match(context(prompt(v, sessionId(), 'the zebra')), /glim\/word: Do: Mind the zebra\./);
   assert.equal((await lintFound(v, /in the future, so the hooks wait until its text has gone 1 second unchanged/)).length, 1);
 });
 
 test('a note saved again with new text waits for settleSeconds, however old its last text was', async t => {
   const v = makeVault(t, { config: { delivery: { settleSeconds: 1 } } });
-  v.write('wiki/demo/rules/word.md', ruleNote({ keywords: ['zebra'], doLine: 'Mind the zebra.' }));
+  v.write('wiki/glim/rules/word.md', ruleNote({ keywords: ['zebra'], doLine: 'Mind the zebra.' }));
   assert.match(context(prompt(v, sessionId(), 'the zebra')), /Mind the zebra\./);
-  v.write('wiki/demo/rules/word.md', ruleNote({ keywords: ['zebra'], doLine: 'Feed the zebra.' }), { settled: false });
+  v.write('wiki/glim/rules/word.md', ruleNote({ keywords: ['zebra'], doLine: 'Feed the zebra.' }), { settled: false });
   assert.equal(prompt(v, sessionId(), 'the zebra'), null);
   await sleep(1500);
   assert.match(context(prompt(v, sessionId(), 'the zebra')), /Feed the zebra\./);
@@ -60,41 +60,41 @@ test('a note saved again with new text waits for settleSeconds, however old its 
 
 test("the hooks walk only the session's domains and wiki/global/", t => {
   const v = makeVault(t, { domains: { other: { title: 'Other', markers: ['other.project'] } } });
-  v.write('wiki/demo/rules/gate.md', ruleNote({ applies_to: ['src/**'] }));
+  v.write('wiki/glim/rules/gate.md', ruleNote({ applies_to: ['src/**'] }));
   v.write('wiki/global/rules/word.md', ruleNote({ domain: 'global', keywords: ['zebra'] }));
   v.write('wiki/other/rules/far.md', ruleNote({ domain: 'other', applies_to: ['**'] }));
   const cached = () => (fs.existsSync(v.at('.state', 'cache')) ? fs.readdirSync(v.at('.state', 'cache')).sort() : []);
   assert.ok(denied(edit(v, sessionId(), 'src/a.txt')));
   const sid = sessionId();
   prompt(v, sid, 'the zebra');
-  assert.deepEqual(cached(), ['demo.json', 'global.json']);
+  assert.deepEqual(cached(), ['glim.json', 'global.json']);
   // The first session start builds, which reads every note; the next, with nothing changed, walks its own domains.
   v.startSession(sessionId());
   fs.rmSync(v.at('.state', 'cache', 'other.json'));
   v.startSession(sessionId());
-  assert.deepEqual(cached(), ['.built.json', 'demo.json', 'global.json']);
+  assert.deepEqual(cached(), ['.built.json', 'glim.json', 'global.json']);
 });
 
 test('session start builds only when a note changed since the last build', t => {
   const v = makeVault(t);
-  v.write('wiki/demo/rules/word.md', ruleNote({ keywords: ['zebra'], doLine: 'Mind the zebra.' }));
+  v.write('wiki/glim/rules/word.md', ruleNote({ keywords: ['zebra'], doLine: 'Mind the zebra.' }));
   v.startSession(sessionId());
-  assert.match(v.read('index.md'), /Mind the zebra|demo\/word|word/);
+  assert.match(v.read('index.md'), /Mind the zebra|glim\/word|word/);
   fs.rmSync(v.at('index.md'));
   v.startSession(sessionId());
   assert.ok(!v.exists('index.md'), 'nothing changed, so nothing was built');
-  v.write('wiki/demo/rules/word.md', ruleNote({ keywords: ['zebra'], doLine: 'Feed the zebra.' }));
+  v.write('wiki/glim/rules/word.md', ruleNote({ keywords: ['zebra'], doLine: 'Feed the zebra.' }));
   v.startSession(sessionId());
   assert.ok(v.exists('index.md'), 'a changed note builds again');
   fs.rmSync(v.at('index.md'));
-  fs.rmSync(v.at('wiki', 'demo', 'rules', 'word.md'));
+  fs.rmSync(v.at('wiki', 'glim', 'rules', 'word.md'));
   v.startSession(sessionId());
   assert.ok(v.exists('index.md'), 'a deleted note builds again');
 });
 
 test('a hook past its deadline stops and logs why', t => {
   const v = makeVault(t);
-  v.write('wiki/demo/rules/gate.md', ruleNote({ applies_to: ['src/**'] }));
+  v.write('wiki/glim/rules/gate.md', ruleNote({ applies_to: ['src/**'] }));
   const r = v.run('hooks/edit.mjs', [], {
     input: { session_id: sessionId(), cwd: v.project, hook_event_name: 'PreToolUse', tool_name: 'Edit', tool_input: { file_path: path.join(v.project, 'src', 'a.txt'), old_string: 'a', new_string: 'b' } },
     cwd: v.project, env: { VAULT_HOOK_TIMEOUT: '0.001' },
@@ -153,38 +153,38 @@ test('a domain folder stored NFD is walked by its NFC name in vault.config.json'
 
 test('a note dated in the future is read once, not on every call', async t => {
   const v = makeVault(t);
-  v.write('wiki/demo/rules/word.md', ruleNote({ keywords: ['zebra'] }), { saved: new Date(Date.now() + 3600e3) });
+  v.write('wiki/glim/rules/word.md', ruleNote({ keywords: ['zebra'] }), { saved: new Date(Date.now() + 3600e3) });
   const { loadNotes } = await v.import('lib/rules.mjs');
   loadNotes();
-  const before = v.read('.state/cache/demo.json');
+  const before = v.read('.state/cache/glim.json');
   await sleep(20);
   loadNotes();
-  assert.equal(v.read('.state/cache/demo.json'), before);
+  assert.equal(v.read('.state/cache/glim.json'), before);
 });
 
 test('a cache that cannot be written leaves the hooks working, and is logged once', t => {
   const v = makeVault(t);
-  v.write('wiki/demo/rules/gate.md', ruleNote({ applies_to: ['src/**'], doLine: 'Gate it.' }));
+  v.write('wiki/glim/rules/gate.md', ruleNote({ applies_to: ['src/**'], doLine: 'Gate it.' }));
   v.write('wiki/global/rules/word.md', ruleNote({ domain: 'global', keywords: ['zebra'] }));
-  for (const b of ['demo', 'global']) fs.mkdirSync(v.at('.state', 'cache', `${b}.json`), { recursive: true });
+  for (const b of ['glim', 'global']) fs.mkdirSync(v.at('.state', 'cache', `${b}.json`), { recursive: true });
   const r = v.run('hooks/edit.mjs', [], {
     input: { session_id: sessionId(), cwd: v.project, hook_event_name: 'PreToolUse', tool_name: 'Edit', tool_input: { file_path: path.join(v.project, 'src', 'a.txt'), old_string: 'a', new_string: 'b' } },
     cwd: v.project,
   });
   assert.equal(r.code, 0, r.stderr);
-  assert.match(denied(JSON.parse(r.stdout)), /demo\/gate: Do: Gate it\./);
+  assert.match(denied(JSON.parse(r.stdout)), /glim\/gate: Do: Gate it\./);
   assert.equal(v.read('.state/errors.log').match(/^\S+ note cache: /gm).length, 1);
 });
 
 test('a note that cannot be read for a moment keeps its last entry, and a note never read fails the call', async t => {
   const v = makeVault(t);
-  v.write('wiki/demo/rules/a.md', ruleNote({ keywords: ['x'], doLine: 'Do a.' }));
-  v.write('wiki/demo/rules/b.md', ruleNote({ keywords: ['y'], doLine: 'Do b.' }));
+  v.write('wiki/glim/rules/a.md', ruleNote({ keywords: ['x'], doLine: 'Do a.' }));
+  v.write('wiki/glim/rules/b.md', ruleNote({ keywords: ['y'], doLine: 'Do b.' }));
   const { loadNotes } = await v.import('lib/rules.mjs');
-  const seen = loadNotes().find(n => n.key === 'demo/b').seen;
+  const seen = loadNotes().find(n => n.key === 'glim/b').seen;
   const halfHourAgo = new Date(Date.now() - 1800e3);
-  fs.utimesSync(v.at('wiki', 'demo', 'rules', 'b.md'), halfHourAgo, halfHourAgo);
-  v.write('wiki/demo/rules/c.md', ruleNote({ keywords: ['z'], doLine: 'Do c.' }));
+  fs.utimesSync(v.at('wiki', 'glim', 'rules', 'b.md'), halfHourAgo, halfHourAgo);
+  v.write('wiki/glim/rules/c.md', ruleNote({ keywords: ['z'], doLine: 'Do c.' }));
   const read = fs.readFileSync;
   const busy = new Set(['b.md', 'c.md']);
   t.mock.method(fs, 'readFileSync', function (p, ...rest) {
@@ -194,13 +194,13 @@ test('a note that cannot be read for a moment keeps its last entry, and a note n
   assert.throws(() => loadNotes(), { code: 'EBUSY' });
   busy.delete('c.md');
   const notes = loadNotes();
-  assert.deepEqual(notes.map(n => n.key), ['demo/a', 'demo/b', 'demo/c']);
-  assert.equal(notes.find(n => n.key === 'demo/b').seen, seen);
+  assert.deepEqual(notes.map(n => n.key), ['glim/a', 'glim/b', 'glim/c']);
+  assert.equal(notes.find(n => n.key === 'glim/b').seen, seen);
 });
 
 test('a walk stopped at the deadline keeps the notes it read', async t => {
   const v = makeVault(t);
-  for (let i = 0; i < 5; i++) v.write(`wiki/demo/rules/r${i}.md`, ruleNote({ keywords: [`k${i}`], doLine: `Do ${i}.` }));
+  for (let i = 0; i < 5; i++) v.write(`wiki/glim/rules/r${i}.md`, ruleNote({ keywords: [`k${i}`], doLine: `Do ${i}.` }));
   const { cachedNotes } = await v.import('lib/cache.mjs');
   const { armDeadline } = await v.import('lib/deadline.mjs');
   const given = process.env.VAULT_HOOK_TIMEOUT;
@@ -209,14 +209,14 @@ test('a walk stopped at the deadline keeps the notes it read', async t => {
   let reads = 0;
   // The third read arms the deadline, which has long passed, so the walk stops at the fourth note.
   const read = () => { if (++reads === 3) armDeadline(); return {}; };
-  assert.throws(() => cachedNotes(['demo'], read, 'stamp'), /stopped at its deadline/);
-  assert.equal(Object.keys(JSON.parse(v.read('.state/cache/demo.json')).notes).length, 3);
+  assert.throws(() => cachedNotes(['glim'], read, 'stamp'), /stopped at its deadline/);
+  assert.equal(Object.keys(JSON.parse(v.read('.state/cache/glim.json')).notes).length, 3);
 });
 
 test('a change to cache.mjs reads every note again', t => {
   const v = makeVault(t);
-  v.write('wiki/demo/rules/word.md', ruleNote({ keywords: ['zebra'] }));
-  const stamp = () => JSON.parse(v.read('.state/cache/demo.json')).stamp;
+  v.write('wiki/glim/rules/word.md', ruleNote({ keywords: ['zebra'] }));
+  const stamp = () => JSON.parse(v.read('.state/cache/glim.json')).stamp;
   prompt(v, sessionId(), 'the zebra');
   const before = stamp();
   fs.appendFileSync(v.at('tools', 'lib', 'cache.mjs'), '\n// another shape\n');
@@ -226,17 +226,17 @@ test('a change to cache.mjs reads every note again', t => {
 
 test('session start builds when vault.config.json changed, and not after another tool built', t => {
   const v = makeVault(t);
-  v.write('wiki/demo/rules/word.md', ruleNote({ keywords: ['zebra'] }));
+  v.write('wiki/glim/rules/word.md', ruleNote({ keywords: ['zebra'] }));
   v.startSession(sessionId());
   const cfg = JSON.parse(v.read('vault.config.json'));
-  cfg.domains.demo.title = 'Renamed';
+  cfg.domains.glim.title = 'Renamed';
   cfg.domains.more = { title: 'More', topics: ['x'] };
   v.write('vault.config.json', JSON.stringify(cfg, null, 2));
   v.startSession(sessionId());
   const check = v.run('build.mjs', ['--check']);
   assert.equal(check.code, 0, check.stdout + check.stderr);
 
-  v.write('wiki/demo/rules/other.md', ruleNote({ keywords: ['okapi'], doLine: 'Mind the okapi.' }));
+  v.write('wiki/glim/rules/other.md', ruleNote({ keywords: ['okapi'], doLine: 'Mind the okapi.' }));
   assert.equal(v.run('build.mjs').code, 0);
   fs.rmSync(v.at('index.md'));
   v.startSession(sessionId());
@@ -245,7 +245,7 @@ test('session start builds when vault.config.json changed, and not after another
 
 test('a build waits for one already running, and session start skips its build rather than wait long', async t => {
   const v = makeVault(t);
-  v.write('wiki/demo/rules/word.md', ruleNote({ keywords: ['zebra'] }));
+  v.write('wiki/glim/rules/word.md', ruleNote({ keywords: ['zebra'] }));
   fs.mkdirSync(v.at('.state'), { recursive: true });
   fs.writeFileSync(v.at('.state', 'build.lock'), `${process.pid}:0123456789ab`);
   const { build } = await v.import('lib/build.mjs');
