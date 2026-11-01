@@ -1,4 +1,9 @@
-const ESCAPES = { n: '\n', r: '\r', t: '\t', '"': '"', '\\': '\\' };
+// YAML's escapes in double quotes. \x, \u and \U take 2, 4 and 8 hex digits, a code point.
+const ESCAPES = {
+  0: '\0', a: '\x07', b: '\b', t: '\t', '\t': '\t', n: '\n', v: '\v', f: '\f', r: '\r', e: '\x1b', ' ': ' ', '"': '"', '/': '/', '\\': '\\',
+  N: '\x85', _: '\xa0', L: String.fromCharCode(0x2028), P: String.fromCharCode(0x2029),
+};
+const HEX_DIGITS = { x: 2, u: 4, U: 8 };
 
 function quoted(s) {
   const q = s[0];
@@ -11,8 +16,15 @@ function quoted(s) {
     } else if (ch === q) {
       return out;
     } else if (q === '"' && ch === '\\' && i + 1 < s.length) {
-      i++;
-      out += ESCAPES[s[i]] ?? `\\${s[i]}`;
+      const n = HEX_DIGITS[s[++i]];
+      const hex = n && s.slice(i + 1, i + 1 + n);
+      const cp = hex && /^[\da-f]+$/i.test(hex) && hex.length === n ? parseInt(hex, 16) : NaN;
+      if (cp <= 0x10ffff) {
+        out += String.fromCodePoint(cp);
+        i += n;
+      } else {
+        out += ESCAPES[s[i]] ?? `\\${s[i]}`;
+      }
     } else {
       out += ch;
     }
@@ -23,7 +35,8 @@ function quoted(s) {
 function scalar(raw) {
   const s = raw.trim();
   if (s[0] === "'" || s[0] === '"') return quoted(s);
-  const v = s.replace(/\s+#.*$/, '');
+  // The lookbehind starts a match only at the first space of a run, so a long run is read once.
+  const v = s.includes('#') ? s.replace(/(?<!\s)\s+#.*$/, '') : s;
   if (v === 'true' || v === 'false') return v === 'true';
   return v === '' || v === '~' || v === 'null' ? null : v;
 }
@@ -78,63 +91,184 @@ function value(raw) {
 }
 
 const closing = lines => (lines[0].trim() === '---' ? lines.findIndex((l, i) => i > 0 && /^---\s*$/.test(l)) : -1);
-const KV = /^([^\s#'"-][^:]*?)\s*:(?:\s+([^]*))?$/;
+// The white space before the colon starts only after a character that isn't white space, so a long run of spaces is
+// read once.
+const KV = /^([^\s#'"-][^:]*?)(?<!\s)\s*:(?:\s+([^]*))?$/;
 const ITEM = /^-(?:[ \t]+([^]*))?$/;
 
-// Where a quote opened at the start of a value closes: the index just past it, or -1 when the text ends first.
-function closeAt(s, q, from) {
+// Reads s on from from, keeping a value's state in st: the quote open in it, how deep it is in [ and {, and its last
+// character outside quotes. Returns the index just past where the value closes, or -1 when s ends first. As in
+// splitFlow, a quote opens only where an item, key or value starts, so the apostrophe in don't is text.
+function advance(s, st, from = 0) {
   for (let i = from; i < s.length; i++) {
-    if (q === '"' && s[i] === '\\') i++;
-    else if (q === "'" && s[i] === q && s[i + 1] === q) i++;
-    else if (s[i] === q) return i + 1;
+    const ch = s[i];
+    if (st.q) {
+      if (st.q === '"' && ch === '\\') i++;
+      else if (st.q === "'" && ch === "'" && s[i + 1] === "'") i++;
+      else if (ch === st.q) {
+        st.q = null;
+        st.prev = ch;
+        if (!st.depth) return i + 1;
+      }
+    } else if (ch !== ' ' && ch !== '\t') {
+      if ((ch === "'" || ch === '"') && '[{,:'.includes(st.prev)) st.q = ch;
+      else if (ch === '[' || ch === '{') st.depth++;
+      else if ((ch === ']' || ch === '}') && st.depth && !--st.depth) return i + 1;
+      st.prev = ch;
+    }
   }
   return -1;
 }
 
-// A line that opens a quote after `key: ` or `- `, with the text before the quote.
-const OPEN = /^(\s*(?:-\s+)*(?:[^\s#'"[{-][^:]*?\s*:\s+)?)(['"])/;
-const escapesBreak = s => (/\\+$/.exec(s)?.[0].length ?? 0) % 2 === 1;
+// Where a quote opened at the start of a value closes: the index just past it, or -1 when the text ends first.
+const closeAt = (s, q, from) => advance(s, { q, depth: 0, prev: '' }, from);
 
-// A quoted scalar that runs over several lines, folded as YAML does: each break is a space, an empty line is a newline,
-// the white space around a break goes, and in double quotes a backslash at a line end drops the break. Returns the one
-// line that holds the folded text and how many lines it took, or null when the quote never closes.
-function fold(lines, i, to, line, q) {
-  let esc = q === '"' && escapesBreak(line);
-  let text = esc ? line.slice(0, -1) : line.trimEnd();
+// A line's indent, the dashes of the list items it starts and its key, each part matching characters no other part
+// can, so a long run of spaces is read once. col is the key's column, or the last dash's when there is no key.
+const HEAD = /^([ \t]*)((?:-(?:[ \t]+|$))*)(?:([^\s#'"[{-][^:]*):(?:[ \t]+|$))?/;
+function head(s) {
+  const [all, sp, dashes, key] = s.match(HEAD);
+  const dash = dashes ? sp.length + dashes.trimEnd().lastIndexOf('-') : -1;
+  return { indent: sp.length, dash, key: key?.trimEnd(), col: key === undefined ? dash : sp.length + dashes.length, rest: s.slice(all.length) };
+}
+function indentOf(s) {
+  let i = 0;
+  while (s[i] === ' ' || s[i] === '\t') i++;
+  return i;
+}
+const isComment = s => /^\s*#/.test(s);
+
+// A line of a quoted value without the white space before its break. Inside double quotes, a backslash before the
+// break drops the break too.
+function lineEnd(s, q) {
+  const t = s.trimEnd();
+  return q === '"' && (/\\+$/.exec(t)?.[0].length ?? 0) % 2 === 1 ? { text: t.slice(0, -1), esc: true } : { text: t, esc: false };
+}
+
+// A quoted or flow value that runs on from line i, folded as YAML does: each break is a space, and inside quotes an
+// empty line is a newline and the white space around a break goes. Outside quotes a comment line is skipped. Returns
+// the one line that holds the folded text, how many lines it took, and its last line with where the value closes in
+// it, or null when a quote or bracket is still open at the first line not indented past parent.
+function fold(line, i, to, parent, st) {
+  let { text, esc } = lineEnd(line(i), st.q);
   let blanks = 0;
   for (let j = i + 1; j < to; j++) {
-    const t = lines[j].trim();
-    if (!t) {
-      blanks++;
-      continue;
+    const s = line(j);
+    const t = s.trim();
+    if (!t) blanks++;
+    else if (!st.q && t[0] === '#') continue;
+    else if (indentOf(s) <= parent) return null;
+    else {
+      const sep = st.q && blanks ? '\n'.repeat(blanks) : esc ? '' : ' ';
+      const end = advance(t, st);
+      if (end >= 0) return { text: text + sep + t, n: j - i + 1, last: t, end };
+      const piece = lineEnd(t, st.q);
+      text += sep + piece.text;
+      esc = piece.esc;
+      blanks = 0;
     }
-    text += (blanks ? '\n'.repeat(blanks) : esc ? '' : ' ') + t;
-    if (closeAt(t, q, 0) >= 0) return { text, n: j - i + 1 };
-    esc = q === '"' && escapesBreak(t);
-    if (esc) text = text.slice(0, -1);
-    blanks = 0;
   }
   return null;
 }
 
-// The logical lines from..to: blank and comment lines skipped, a quoted scalar over several lines as one. A quote that
-// never closes leaves its first line as it is and adds a message to errors.
-function scan(lines, from, to, errors = []) {
-  const out = [];
-  for (let i = from; i < to; i++) {
-    const line = lines[i].replace(/\r$/, '');
-    if (!line.trim() || /^\s*#/.test(line)) continue;
-    const open = line.match(OPEN);
-    let one = { text: line, n: 1 };
-    if (open && closeAt(line, open[2], open[1].length + 1) < 0) {
-      one = fold(lines, i, to, line, open[2]) ?? one;
-      if (one.n === 1) {
-        const key = open[1].replace(/^[\s-]+/, '').replace(/\s*:\s*$/, '') || 'a list item';
-        errors.push(`${key}: the ${open[2]} quote opened on line ${i + 1} never closes. Close it with a matching ${open[2]}`);
-      }
+// A plain value takes the lines below it indented past parent that are not keys, list items or comments, each break a
+// space and each empty line a newline, as YAML does. A comment ends it.
+function plainFold(line, i, to, parent, first, value) {
+  let text = first.trimEnd();
+  let last = value;
+  let n = 1;
+  let blanks = 0;
+  for (let j = i + 1; j < to; j++) {
+    const s = line(j);
+    const indent = indentOf(s);
+    // Most values are one line under a key at the margin, so the line below ends them here, before any other test.
+    if (indent <= parent && indent < s.length && s.trim()) break;
+    const t = s.trim();
+    if (!t) {
+      blanks++;
+      continue;
     }
-    out.push({ i, ...one });
-    i += one.n - 1;
+    if (indent <= parent || t[0] === '#' || /\s#/.test(last)) break;
+    const h = head(s);
+    if (h.key !== undefined || h.dash >= 0) break;
+    text += (blanks ? '\n'.repeat(blanks) : ' ') + t;
+    last = t;
+    n = j - i + 1;
+    blanks = 0;
+  }
+  return { i, text, n };
+}
+
+// The key a message about the value on line i names: its own, or for a list item or a value on its own line, the key
+// above that it is under.
+function owner(line, from, i, h) {
+  for (let j = i; h.key === undefined && j-- > from;) {
+    const k = head(line(j));
+    if (k.key !== undefined && (h.col < 0 ? k.col < h.indent : k.col <= h.dash)) return k.key;
+  }
+  return h.key ?? (h.col < 0 ? 'a value' : 'a list item');
+}
+
+// The logical lines from..to: blank and comment lines skipped, and a value that runs onto the lines below as one line.
+// As in YAML, a value runs on only onto lines indented past its parent's column: its key's, its last dash's when it has
+// no key, or for a value on its own line, the key's above it. A quote, [ or { open in it runs it on; a plain value runs
+// on onto lines that are not keys or list items. A quote or bracket still open at the first line that isn't leaves the
+// value's first line as it is and adds a message to errors, as does text after a closing quote. The body of a | or >
+// block is passed through line by line, never read for quotes.
+function scan(lines, from, to, errors = []) {
+  const line = j => (lines[j].endsWith('\r') ? lines[j].slice(0, -1) : lines[j]);
+  const out = [];
+  let under = -1;
+  for (let i = from; i < to; i++) {
+    const s = line(i);
+    if (!s.trim() || isComment(s)) continue;
+    const h = head(s);
+    const v = h.rest;
+    const own = h.col < 0;
+    const parent = !own ? h.col : under >= 0 && h.indent > under ? under : h.indent;
+    if (!own && (!v.trim() || v[0] === '#')) {
+      under = h.col;
+      out.push({ i, text: s, n: 1 });
+      continue;
+    }
+    under = -1;
+    if (!own && BLOCK_SCALAR.test(v)) {
+      out.push({ i, text: s, n: 1 });
+      let j = i + 1;
+      for (; j < to; j++) {
+        const b = line(j);
+        if (!b.trim() || isComment(b)) continue;
+        if (indentOf(b) <= h.col) break;
+        out.push({ i: j, text: b, n: 1 });
+      }
+      i = j - 1;
+      continue;
+    }
+    let row = { i, text: s, n: 1 };
+    if (/^['"[{]/.test(v)) {
+      const st = { q: null, depth: 0, prev: '' };
+      let end = advance(s, st, s.length - v.length);
+      let last = { at: i, text: s };
+      if (end < 0) {
+        const f = fold(line, i, to, parent, st);
+        if (f) {
+          row = { i, text: f.text, n: f.n };
+          last = { at: i + f.n - 1, text: f.last };
+          end = f.end;
+        } else if (v[0] === "'" || v[0] === '"') {
+          errors.push(`${owner(line, from, i, h)}: the ${v[0]} quote opened on line ${i + 1} never closes. Close it with a matching ${v[0]}`);
+        } else {
+          errors.push(`${owner(line, from, i, h)}: the ${v[0]} opened on line ${i + 1} never closes. Close it with a matching ${v[0] === '[' ? ']' : '}'}`);
+        }
+      }
+      if (end >= 0 && (v[0] === "'" || v[0] === '"') && !/^(?:\s*$|\s+#)/.test(last.text.slice(end))) {
+        errors.push(`${owner(line, from, i, h)}: text follows the closing quote on line ${last.at + 1}. Put it inside the quotes, or after a #`);
+      }
+    } else {
+      row = plainFold(line, i, to, parent, s, v);
+    }
+    out.push(row);
+    i += row.n - 1;
   }
   return out;
 }
@@ -146,7 +280,9 @@ const childrenEnd = (rows, i, level) => {
   return j;
 };
 
-const block = rows => (ITEM.test(rows[0].text) ? sequence(rows) : mapping(rows, rows[0].indent));
+// A lone line below a key that is no key or list item is the key's value, as in YAML.
+const block = rows => (ITEM.test(rows[0].text) ? sequence(rows)
+  : rows.length === 1 && (/^['"[{]/.test(rows[0].text) || !KV.test(rows[0].text)) ? value(rows[0].text) : mapping(rows, rows[0].indent));
 
 // A | or > after the key. The lines below are its text, folded with spaces or kept with newlines. Blank lines are
 // already gone, so a paragraph break folds to a space. Lines starting with # are gone too, where YAML would keep them.
@@ -221,13 +357,9 @@ export const yamlQuote = s => (/[\r\n]/.test(s)
 // Where a value written after `key: ` ends: after its closing quote, or where a comment starts in a plain one.
 function valueEnd(rest) {
   const q = rest[0];
-  if (q !== "'" && q !== '"') return rest.search(/[ \t]+#|$/);
-  for (let i = 1; i < rest.length; i++) {
-    if (q === '"' && rest[i] === '\\') i++;
-    else if (q === "'" && rest[i] === "'" && rest[i + 1] === "'") i++;
-    else if (rest[i] === q) return i + 1;
-  }
-  return rest.length;
+  if (q !== "'" && q !== '"') return rest.search(/(?<![ \t])[ \t]+#|$/);
+  const end = closeAt(rest, q, 1);
+  return end < 0 ? rest.length : end;
 }
 
 // Sets a scalar on the line parse reads it from, the last one with its key, keeping the line's ending and a trailing
