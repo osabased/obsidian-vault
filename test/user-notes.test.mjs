@@ -208,3 +208,36 @@ test('the inbox row of a rule quoting a page names the page, for a new rule and 
   assert.deepEqual(rows.map(r => r.page), [REL, REL]);
   assert.deepEqual(rows.map(r => r.text), ['Cards need room to breathe', 'Tabs should never feel cramped']);
 });
+
+test('a # heading ends ## Agent notes, so lines under it stay the user\'s', async t => {
+  const v = vault(t, { text: mine(['My words.', '', '## Agent notes', '- n', '', '# Later', 'User later words.']) });
+  assert.ok(denied(edit(v, 'Edit', change('User later words.', 'User later words.\n- slipped into the user section'))));
+  assert.equal(denied(edit(v, 'Edit', change('- n', '- n\n- added'))), null);
+  const { userWords } = await v.import('lib/rules.mjs');
+  assert.match(userWords(v.read(REL)), /# Later\nUser later words\./);
+});
+
+test('a ### heading may be added under ## Agent notes', t => {
+  const v = vault(t);
+  assert.equal(denied(edit(v, 'Edit', change(SEEN, `${SEEN}\n### Shop\n- the grid is 12px`))), null);
+});
+
+test('an added line that moves the end of ## Agent notes, such as an unclosed fence, is denied', t => {
+  const v = vault(t, { text: mine(['Mine.', '', '## Agent notes', '- n', '', '## Mine too', 'theirs']) });
+  assert.ok(denied(edit(v, 'Edit', change('- n', '- n\n```'))));
+  assert.ok(denied(edit(v, 'Edit', change('- n', '- n\n~~~~'))));
+  assert.equal(denied(edit(v, 'Edit', change('- n', '- n\n```\ncode\n```'))), null);
+  const fenced = vault(t, { text: mine(['Mine.', '```', 'code']) });
+  assert.ok(denied(edit(fenced, 'Edit', change('code', `code\n\n## Agent notes\n${SEEN}`))));
+});
+
+test('a Write that only drops or adds a byte order mark, or adds a note too, is compared without it', t => {
+  const text = mine();
+  const v = vault(t, { text: `\uFEFF${text}` });
+  assert.equal(denied(edit(v, 'Write', { content: text })), null);
+  assert.equal(denied(edit(v, 'Write', { content: `${text.trimEnd()}\n- added\n` })), null);
+  assert.equal(denied(edit(v, 'Write', { content: `\uFEFF${text.trimEnd()}\n- added\n` })), null);
+  const plain = vault(t);
+  assert.equal(denied(edit(plain, 'Write', { content: `\uFEFF${text}` })), null);
+  assert.ok(denied(edit(plain, 'Write', { content: `\uFEFF${text.replace('Cards need', 'Cards want')}` })));
+});
