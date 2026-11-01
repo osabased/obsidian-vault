@@ -86,7 +86,16 @@ export function events(hook, input) {
   }
 }
 
-const EVENT_NAMES = { 'session-start': 'SessionStart', prompt: 'UserPromptSubmit', edit: 'PreToolUse', stop: 'Stop', 'subagent-start': 'SubagentStart' };
+// Codex's event, the vault's hook and whether Codex takes additionalContext from it, for each hook this adapter registers.
+const HOOKS = [
+  ['SessionStart', 'session-start', true],
+  ['UserPromptSubmit', 'prompt', true],
+  ['PreToolUse', 'edit', false],
+  ['SubagentStart', 'subagent-start', true],
+  ['Stop', 'stop', false],
+];
+export const hookNames = HOOKS.map(([, hook]) => hook);
+const EVENT_NAMES = Object.fromEntries(HOOKS.map(([event, hook]) => [hook, event]));
 
 // Stop's decision block continues the turn with the reason as the next prompt. Its hash is marked, so the prompt hook and
 // the transcript provider can tell the vault's text from the user's. No objection gives no output, never an allow.
@@ -101,14 +110,6 @@ export function output(hook, results) {
   }
   return { hookSpecificOutput: { hookEventName: EVENT_NAMES[hook], additionalContext: context } };
 }
-
-const HOOKS = [
-  ['SessionStart', 'session-start', true],
-  ['UserPromptSubmit', 'prompt', true],
-  ['PreToolUse', 'edit', false],
-  ['SubagentStart', 'subagent-start', true],
-  ['Stop', 'stop', false],
-];
 
 // The command names .live, whose content changes with each commit while the definition stays the same, so the trust the
 // user gives in /hooks holds across vault commits. The path is quoted, so cmd.exe keeps one with spaces whole.

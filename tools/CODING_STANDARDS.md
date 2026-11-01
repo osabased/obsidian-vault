@@ -4,7 +4,7 @@ These keep the hooks safe to run in every session. Follow them when you change a
 
 ## Runtime
 
-- Node 22 ES modules (`.mjs`), built-in modules only. No npm packages, no build step.
+- Node 22.12 or later, ES modules (`.mjs`), built-in modules only; the hooks load modules with `require`, which reads an ES module only from 22.12 on. No npm packages, no build step.
 - Scripts find the vault through `vaultPath()`, never the working directory. Hooks run from whatever project the session is in, and from `.live/tools/`, a copy of `tools/` as of the last commit, so `vaultPath()` starts at the nearest folder above the code that holds `vault.config.json`. A script a hook tells a session to run comes from `toolsPath()`, the copy the hook runs from.
 - Accept Windows and Git Bash paths and compare them case-insensitively. Use `toPosix`, `inside` and `domainsFor` from `lib/vault.mjs`.
 
@@ -25,7 +25,7 @@ These keep the hooks safe to run in every session. Follow them when you change a
 ## Code
 
 - Code that two entry points share goes in `tools/lib/`; the rest stays in its entry point.
-- Nothing outside `adapters/` names an agent, its tools or its hook fields. An adapter maps its agent's hook input to the core's events and the results back to its output, and holds no delivery logic. `test/neutral-core.test.mjs` checks the first half against the names each adapter lists in `identifiers`.
+- Nothing outside `adapters/` names an agent, its tools or its hook fields. An adapter maps its agent's hook input to the core's events and the results back to its output, and holds no delivery logic. `test/neutral-core.test.mjs` checks the first half against the names each adapter lists in `identifiers`, its folder name and its `sessionVar`. It accepts three kinds of line: `FIRST_AGENT` in `lib/agents.mjs`, the `agents` default in `config()` in `lib/vault.mjs`, and the one-line `hooks/<hook>.mjs` shims that import an adapter's hook.
 - Command-line scripts: usage errors and runs that can't finish exit 2, failures exit 1.
 - Comments only for a non-obvious why. No docstrings, banner comments or TODOs.
 - No test-only code. Tests change behavior through `vault.config.json`.

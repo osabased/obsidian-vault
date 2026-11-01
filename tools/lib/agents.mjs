@@ -1,23 +1,18 @@
 import fs from 'node:fs';
-import { createRequire } from 'node:module';
 import { config, toolsPath } from './vault.mjs';
+import { byName, EXTENSION_NAME } from './ext.mjs';
 
 // Everything one agent does its own way, its hook input and output, tool names and transcripts, lives in
 // tools/adapters/<agent>/adapter.mjs, so the core names no agent. A session registered before any entry named its agent
 // was the first adapter's.
-export const AGENT_NAME = /^[a-z0-9][a-z0-9_-]*$/;
+export const AGENT_NAME = EXTENSION_NAME;
 export const FIRST_AGENT = 'claude-code';
-const fileOf = name => toolsPath('adapters', name, 'adapter.mjs');
-export const hasAgent = name => typeof name === 'string' && AGENT_NAME.test(name) && fs.existsSync(fileOf(name));
-
-// Hooks run synchronously, and require loads an ES module synchronously from Node 22.12 on.
-const load = createRequire(import.meta.url);
-const loaded = new Map();
+const adapters = byName(name => toolsPath('adapters', name, 'adapter.mjs'));
+export const hasAgent = adapters.has;
 
 export function agent(name) {
   if (!hasAgent(name)) throw new Error(`no agent ${name}: tools/adapters/${name}/adapter.mjs doesn't exist`);
-  if (!loaded.has(name)) loaded.set(name, load(fileOf(name)));
-  return loaded.get(name);
+  return adapters.load(name);
 }
 
 // The adapters config lists, for lint's tool-name checks and for finding the session a script runs in. A name with no
