@@ -47,18 +47,18 @@ test('notes in their kind folders are delivered, and the index and the hooks giv
   const v = makeVault(t);
   const sid = sessionId();
   v.write('wiki/glim/rules/strict.md', ruleNote({ keywords: ['strict'] }));
-  v.write('wiki/glim/concepts/luau-types.md', page({ kind: 'concept', keywords: ['checker'] }));
+  v.write('wiki/glim/concepts/lit-types.md', page({ kind: 'concept', keywords: ['checker'] }));
   v.write('wiki/glim/topics/code.md', page({
-    kind: 'topic', body: ['See [[wiki/glim/concepts/luau-types|luau-types]].', '', '## Rules', '- [[wiki/glim/rules/strict|strict]]'],
+    kind: 'topic', body: ['See [[wiki/glim/concepts/lit-types|lit-types]].', '', '## Rules', '- [[wiki/glim/rules/strict|strict]]'],
   }));
   v.startSession(sid);
   const out = context(prompt(v, sid, 'make it strict for the checker'));
   assert.match(out, /- glim\/strict: Do: Do the thing\. Not: Skip the thing\./);
-  assert.ok(out.includes(`- glim/luau-types (concept page): What we know. ${pathOf(v, 'wiki/glim/concepts/luau-types.md')}`), out);
+  assert.ok(out.includes(`- glim/lit-types (concept page): What we know. ${pathOf(v, 'wiki/glim/concepts/lit-types.md')}`), out);
   assert.equal(v.run('build.mjs').code, 0);
   const index = v.read('index.md');
   assert.match(index, /^- \[\[wiki\/glim\/topics\/code\|code\]\] · topic page/m);
-  assert.match(index, /^- \[\[wiki\/glim\/concepts\/luau-types\|luau-types\]\] · concept page/m);
+  assert.match(index, /^- \[\[wiki\/glim\/concepts\/lit-types\|lit-types\]\] · concept page/m);
   assert.match(index, /^- \[\[wiki\/glim\/rules\/strict\|strict\]\] · Do: Do the thing\. · from \[\[wiki\/glim\/topics\/code\|code\]\]$/m);
 });
 
@@ -67,13 +67,13 @@ test('a note outside its kind folder is delivered as its frontmatter says, and l
   const sid = sessionId();
   v.write('wiki/glim/concepts/strict.md', ruleNote({ keywords: ['strict'] }));
   v.write('wiki/glim/source-shop.md', sourcePage({ source: 'https://example.com/shop' }));
-  v.write('wiki/glim/rules/roblox.md', page({ kind: 'entity' }));
-  v.write('wiki/glim/topics/code.md', page({ kind: 'topic', body: ['[[wiki/glim/source-shop|source-shop]] [[wiki/glim/rules/roblox|roblox]]', '', '## Rules'] }));
+  v.write('wiki/glim/rules/runner.md', page({ kind: 'entity' }));
+  v.write('wiki/glim/topics/code.md', page({ kind: 'topic', body: ['[[wiki/glim/source-shop|source-shop]] [[wiki/glim/rules/runner|runner]]', '', '## Rules'] }));
   assert.match(context(prompt(v, sid, 'strict please')), /- glim\/strict: Do: Do the thing\./);
   const found = await lintFound(v, /goes in/);
   assert.deepEqual(found.map(f => [f.level, f.file, f.msg]).sort(), [
     ['warn', 'wiki/glim/concepts/strict.md', 'a rule goes in wiki/glim/rules/'],
-    ['warn', 'wiki/glim/rules/roblox.md', 'an entity page goes in wiki/glim/entities/'],
+    ['warn', 'wiki/glim/rules/runner.md', 'an entity page goes in wiki/glim/entities/'],
     ['warn', 'wiki/glim/source-shop.md', 'a source page goes in wiki/glim/sources/'],
   ]);
 });
@@ -94,13 +94,13 @@ test('two notes with one name in a domain are both errors, and neither is delive
 test('lint takes a link by its path from the vault root, its path from the note, or a name one note has, and gives the path for any other', async t => {
   const v = makeVault(t);
   v.write('wiki/glim/rules/strict.md', ruleNote({ keywords: ['x'] }));
-  v.write('wiki/glim/concepts/luau-types.md', page({ kind: 'concept' }));
-  v.write('wiki/global/concepts/luau-types.md', page({ kind: 'concept', domain: 'global' }));
+  v.write('wiki/glim/concepts/lit-types.md', page({ kind: 'concept' }));
+  v.write('wiki/global/concepts/lit-types.md', page({ kind: 'concept', domain: 'global' }));
   v.write('wiki/glim/topics/code.md', page({
     kind: 'topic',
     body: [
-      '[[wiki/glim/rules/strict|strict]] [[strict]] [x](../rules/strict.md) [y](wiki/glim/rules/strict.md) [[wiki/glim/concepts/luau-types]] [[index]]',
-      '[[glim/strict]] [[wiki/glim/strict|strict]] [[luau-types]] [[gone]]', '', '## Rules',
+      '[[wiki/glim/rules/strict|strict]] [[strict]] [x](../rules/strict.md) [y](wiki/glim/rules/strict.md) [[wiki/glim/concepts/lit-types]] [[index]]',
+      '[[glim/strict]] [[wiki/glim/strict|strict]] [[lit-types]] [[gone]]', '', '## Rules',
     ],
   }));
   v.run('build.mjs');
@@ -108,7 +108,7 @@ test('lint takes a link by its path from the vault root, its path from the note,
   assert.deepEqual(found.map(f => [f.file, f.msg]).sort(), [
     ['wiki/glim/topics/code.md', 'links [[glim/strict]], a note at wiki/glim/rules/strict.md. Link it by that path, as [[wiki/glim/rules/strict|strict]]'],
     ['wiki/glim/topics/code.md', 'links [[gone]], which has no note'],
-    ['wiki/glim/topics/code.md', 'links [[luau-types]], which names more than one note. Write its path from the vault root: [[wiki/glim/concepts/luau-types]] or [[wiki/global/concepts/luau-types]]'],
+    ['wiki/glim/topics/code.md', 'links [[lit-types]], which names more than one note. Write its path from the vault root: [[wiki/glim/concepts/lit-types]] or [[wiki/global/concepts/lit-types]]'],
     ['wiki/glim/topics/code.md', 'links [[wiki/glim/strict]], a note at wiki/glim/rules/strict.md. Link it by that path, as [[wiki/glim/rules/strict|strict]]'],
   ]);
 });
@@ -125,10 +125,10 @@ test('superseded_by names a note in its folder by its link or its key', async t 
 
 test('log takes a page by its path in its folder', t => {
   const v = makeVault(t);
-  v.write('wiki/glim/concepts/luau-types.md', page({ kind: 'concept' }));
-  const r = v.run('log.mjs', ['wiki/glim/concepts/luau-types.md']);
+  v.write('wiki/glim/concepts/lit-types.md', page({ kind: 'concept' }));
+  const r = v.run('log.mjs', ['wiki/glim/concepts/lit-types.md']);
   assert.equal(r.code, 0, r.stderr);
-  assert.match(v.read('log.md'), /wrote page glim\/luau-types/);
+  assert.match(v.read('log.md'), /wrote page glim\/lit-types/);
 });
 
 test('propose refuses a trigger with a lookahead and names the linear-engine reason', t => {

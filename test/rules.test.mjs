@@ -11,7 +11,7 @@ const without = (text, re) => text.split('\n').filter(l => !re.test(l)).join('\n
 
 test('valid taste rule parses and has no errors', async t => {
   const { rules } = await vault(t);
-  const n = rules.parseNote(ruleNote({ applies_to: ['src/**/*.luau'], keywords: ['strict'], because: 'Fewer bugs.' }), 'wiki/glim/some-rule.md');
+  const n = rules.parseNote(ruleNote({ applies_to: ['src/**/*.zq'], keywords: ['strict'], because: 'Fewer bugs.' }), 'wiki/glim/some-rule.md');
   assert.equal(n.key, 'glim/some-rule');
   assert.equal(n.domain, 'glim');
   assert.equal(n.slug, 'some-rule');
@@ -21,7 +21,7 @@ test('valid taste rule parses and has no errors', async t => {
   assert.equal(n.do, 'Do the thing.');
   assert.equal(n.not, 'Skip the thing.');
   assert.equal(n.because, 'Fewer bugs.');
-  assert.deepEqual(n.applies_to, ['src/**/*.luau']);
+  assert.deepEqual(n.applies_to, ['src/**/*.zq']);
   assert.deepEqual(n.keywords, ['strict']);
   assert.deepEqual(n.triggers, []);
   assert.equal(n.always, false);
@@ -168,23 +168,23 @@ test('a folded summary reads as its text, or lint refuses it', async t => {
 test('a list item that reads as key: value is an error naming the field and the item, and the reader never sees it as text', async t => {
   const { rules } = await vault(t);
   const hint = item => `reads as a key and value, not text. Single-quote an item that holds ": ", as in '${item}'`;
-  const narrow = ruleNote({ applies_to: ['**/*.luau'] }).replace('triggers: []', 'triggers:\n  - TextSize: 1[0-9]');
+  const narrow = ruleNote({ applies_to: ['**/*.zq'] }).replace('triggers: []', 'triggers:\n  - Glow: 1[0-9]');
   const n = rules.parseNote(narrow, 'wiki/glim/narrow.md');
   assert.deepEqual(n.triggers, []);
-  assert.deepEqual(rules.noteErrors(n), [`triggers item TextSize: 1[0-9] ${hint('TextSize: 1[0-9]')}`]);
+  assert.deepEqual(rules.noteErrors(n), [`triggers item Glow: 1[0-9] ${hint('Glow: 1[0-9]')}`]);
   const keyed = ruleNote({ keywords: ['x'] }).replace('keywords:', 'keywords:\n  - shop: tabs');
   assert.deepEqual(check(rules, keyed), [`keywords item shop: tabs ${hint('shop: tabs')}`]);
   assert.deepEqual(check(rules, ruleNote({ keywords: ['x'], extra: ['superseded_by:', '  - glim: new-one'] })), [`superseded_by item glim: new-one ${hint('glim: new-one')}`]);
   assert.deepEqual(check(rules, ruleNote({ keywords: ['x'], extra: ['tools:', '  - true'] })), ["tools item true isn't text. Single-quote it, as in 'true'"]);
   const pageText = pageNote({ kind: 'concept', extra: ['applies_to:', '  - src: ui'] });
   assert.deepEqual(check(rules, pageText, 'wiki/glim/some-page.md'), [`applies_to item src: ui ${hint('src: ui')}`]);
-  assert.deepEqual(check(rules, ruleNote({ applies_to: ['**/*.luau'] }).replace('triggers: []', "triggers:\n  - 'TextSize: 1[0-9]'")), []);
+  assert.deepEqual(check(rules, ruleNote({ applies_to: ['**/*.zq'] }).replace('triggers: []', "triggers:\n  - 'Glow: 1[0-9]'")), []);
 });
 
 test('an edit is not gated by a rule whose trigger item reads as key: value', t => {
   const v = makeVault(t);
-  v.write('wiki/glim/narrow.md', ruleNote({ applies_to: ['**/*.luau'] }).replace('triggers: []', 'triggers:\n  - TextSize: 1[0-9]'));
-  assert.equal(denied(editFile(v, sessionId(), 'src/a.luau', { tool: 'Write', text: 'local x = 1' })), null);
+  v.write('wiki/glim/narrow.md', ruleNote({ applies_to: ['**/*.zq'] }).replace('triggers: []', 'triggers:\n  - Glow: 1[0-9]'));
+  assert.equal(denied(editFile(v, sessionId(), 'src/a.zq', { tool: 'Write', text: 'set x to 1' })), null);
 });
 
 test('slugs and domains take modifier letters, as in サーバー, 人々 and ʻokina', async t => {
