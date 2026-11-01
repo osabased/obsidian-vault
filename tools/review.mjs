@@ -1,6 +1,6 @@
 import { config, plural, toPosix, guarded, hookErrors, errorsLog, localDay, appendLog, isVaultOnly } from './lib/vault.mjs';
 import {
-  clip, normTopic, topicNotes, loadNotes, liveRules, evidenceSessions, validDay, byKey, cmp, sharedFiles, rawFile, resolver, linkedKeys, evidenceSources, isSourcePage, joinList,
+  clip, normTopic, topicNotes, loadNotes, liveRules, evidenceSessions, validDay, byKey, cmp, sharedFiles, resolver, linkedKeys, evidenceSources, isSourcePage, joinList,
   rankPair, sourceItem,
 } from './lib/rules.mjs';
 import { lint, tally } from './lib/lint.mjs';
@@ -100,6 +100,9 @@ function globPairs() {
 const sourcePages = once(() => notes().filter(isSourcePage));
 const resolve = once(() => resolver(notes()));
 
+// A file in a bundle is cited as part of the bundle, the one source a source page names.
+const sourceKey = x => sourceItem(x).rel ?? x;
+
 // A knowledge rule states a fact as of a day, so a source page on its topic dated after it, that the rule neither
 // cites in its Evidence nor links, may say the fact has changed.
 function newerSources() {
@@ -109,8 +112,8 @@ function newerSources() {
     const after = dated.filter(s => s.domain === r.domain && s.topic === r.topic && s.data.source_date > n.as_of);
     if (!after.length) return [];
     const linked = new Set(linkedKeys(n, resolve()));
-    const cited = new Set(evidenceSources(n));
-    const newer = after.filter(s => !linked.has(s.key) && !cited.has(rawFile(s.data.source) ?? s.data.source));
+    const cited = new Set(evidenceSources(n).map(sourceKey));
+    const newer = after.filter(s => !linked.has(s.key) && !cited.has(sourceKey(s.data.source)));
     return newer.length ? [`- ${k}, as of ${n.as_of}: ${joinList(newer.map(s => `${s.key} (dated ${s.data.source_date})`), 'and')}`] : [];
   });
 }

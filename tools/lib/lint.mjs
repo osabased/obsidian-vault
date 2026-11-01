@@ -7,7 +7,7 @@ import {
 import {
   vaultFile, loadNotes, noteErrors, ruleText, ruleTextParts, liveRules, knownDomain, alwaysSize, isUrl, validDay, normTopic, topicNotes, rawFile, toKey, resolver, linksUnder, noteLinks, byTopic, isTopicPage, isSourcePage, PAGE_KINDS, joinList,
   hasSection, footnotes, youSaid, linkedKeys, clip, citedSources, evidenceQuotes, keyOf, kindFolder, kindLabel, linkTo, parseNote, noteLinkSpans, maxChars, bundleOf, locate,
-  filled, isMap, sourceItem, authoredByUser, parsedFile,
+  filled, isMap, sourceItem, authoredByUser, isUserPage, parsedFile, notTextError,
 } from './rules.mjs';
 import { setField } from './frontmatter.mjs';
 import { NAMESPACE_NAME } from './glob.mjs';
@@ -53,6 +53,7 @@ export function lint(notes = loadNotes()) {
     try { return sourceTexts(rel); } catch { return null; }
   });
   const pageTextsOf = memo(userPageTexts);
+  // Likewise a file that can't be hashed for now is skipped, not reported as changed.
   const hashOf = memo(rel => { try { return hashFile(rel); } catch { return null; } });
   const lines = memo(lineCount);
   const anchors = memo(rel => { const hash = hashOf(rel); return hash && derivedAnchors(hash); });
@@ -313,10 +314,14 @@ function lintBundles(add, hashOf) {
     else if (data.commit != null && data.url == null && data.repo == null) add('warn', rel, 'a commit needs a url or repo. Say where the folder came from');
     if (data.sha256 != null && !Array.isArray(data.sha256)) add('warn', rel, "sha256 must be a list of '<64 hex>  <path>' lines, as sha256sum writes them");
     for (const line of Array.isArray(data.sha256) ? data.sha256 : []) {
+      if (typeof line !== 'string') {
+        add('warn', rel, notTextError('sha256', line));
+        continue;
+      }
       const entry = manifestLine(line);
       if (!entry) add('warn', rel, `sha256 line "${clip(line, 100)}" isn't '<64 hex>  <path in the folder>', as sha256sum writes it`);
       else if (!rawFile(`${dir}/${entry.file}`)) add('warn', rel, `sha256 lists ${entry.file}, which isn't a file in the folder`);
-      else if (hashOf(`${dir}/${entry.file}`) !== entry.hash) add('warn', rel, `${entry.file} doesn't match its sha256 line in source.md`);
+      else if (![null, entry.hash].includes(hashOf(`${dir}/${entry.file}`))) add('warn', rel, `${entry.file} doesn't match its sha256 line in source.md`);
     }
   }
 }
@@ -342,7 +347,7 @@ function lintDerived(add, hashOf) {
     if (!filled(source)) add('warn', f, 'no source. Give the path under raw/ of the file the text was taken from');
     else if (!source.startsWith('raw/')) add('warn', f, 'source must be a file under raw/');
     else if (!rawFile(source)) add('warn', f, `source ${source} is gone, so the text can't be checked against it`);
-    else if (hash && hashOf(rawFile(source)) !== hash) add('warn', f, `source ${rawFile(source)} has changed: its SHA-256 isn't ${hash}. Extract the text again for the new file`);
+    else if (hash && ![null, hash].includes(hashOf(rawFile(source)))) add('warn', f, `source ${rawFile(source)} has changed: its SHA-256 isn't ${hash}. Extract the text again for the new file`);
     for (const anchor of anchorsIn(body).bad) add('warn', f, `anchor ${anchor} isn't [p. N] or [t=hh:mm:ss]`);
   }
 }
@@ -434,8 +439,8 @@ function lintPage(n, watched, add) {
     if (dated != null && !validDay(dated)) add('error', n.rel, 'source_date must be a date as YYYY-MM-DD');
     else if (dated > today()) add('error', n.rel, `source_date ${dated} is in the future`);
   }
-  if (!n.topic && n.author !== 'user') add('warn', n.rel, 'no topic. Give it one, so the index lists it with the rules on its topic');
-  if (!n.summary && n.author !== 'user') add('warn', n.rel, 'no summary. Give it one line, so the index says what the page holds');
+  if (!n.topic && !isUserPage(n)) add('warn', n.rel, 'no topic. Give it one, so the index lists it with the rules on its topic');
+  if (!n.summary && !isUserPage(n)) add('warn', n.rel, 'no summary. Give it one line, so the index says what the page holds');
   if (!PAGE_KINDS.includes(n.kind)) add('warn', n.rel, `a page needs kind: ${joinList(PAGE_KINDS, 'or')}`);
   if (isSourcePage(n) && source == null) add('warn', n.rel, 'no source. A source page names the file under raw/ or the URL it is about');
   const needs = SECTIONS[n.kind] ?? [];

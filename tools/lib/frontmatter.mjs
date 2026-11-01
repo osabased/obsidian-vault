@@ -29,7 +29,8 @@ function scalar(raw) {
 }
 
 // Splits flow text at the commas outside quotes and outside the brackets in nest. A flow list nests only braces, so an
-// unquoted [[link]] in one still reads as the string [link], as it always has.
+// unquoted [[link]] in one still reads as the string [link], as it always has. As in YAML, a quote opens only where an
+// item, key or value starts, so an apostrophe inside a word, as in don't, is text.
 function splitFlow(inner, nest, at = ',') {
   const parts = [];
   let cur = '';
@@ -47,7 +48,7 @@ function splitFlow(inner, nest, at = ',') {
       if (at !== ',') return [...parts, inner.slice(i + 1)];
       cur = '';
     } else {
-      if (ch === "'" || ch === '"') q = ch;
+      if ((ch === "'" || ch === '"') && /^$|[[{,:]$/.test(cur.trimEnd())) q = ch;
       else if (nest.includes(ch)) depth = Math.max(0, depth + ('{['.includes(ch) ? 1 : -1));
       cur += ch;
     }
@@ -142,7 +143,7 @@ export function parse(text) {
 // YAML reads these plain as something other than the text: a number, a boolean or null in the YAML other tools use,
 // or an indicator character at the start.
 const PLAIN_NOT_TEXT = /^(?:[-+]?(?:\d[\d_]*(?:\.\d*)?|\.\d+)(?:e[-+]?\d+)?|[-+]?\.(?:inf|nan)|0x[\da-f]+|0o[0-7]+|y|n|yes|no|on|off|true|false|null|~)$/i;
-const plainSafe = s => s !== '' && s === s.trim() && !/[\r\n\t]/.test(s) && !/^[-?:,[\]{}#&*!|>'"%@`]/.test(s)
+export const plainSafe = s => s !== '' && s === s.trim() && !/[\r\n\t]/.test(s) && !/^[-?:,[\]{}#&*!|>'"%@`]/.test(s)
   && !/: | #|:$/.test(s) && !PLAIN_NOT_TEXT.test(s) && value(s) === s;
 
 export const yamlQuote = s => `'${String(s).replace(/'/g, "''")}'`;

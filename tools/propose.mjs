@@ -1,8 +1,8 @@
 import fs from 'node:fs';
 import crypto from 'node:crypto';
 import {
-  vaultPath, proposeDomains, writeSettled, appendJsonl, appendLog, inboxFile, proposalRows, pickRows, statePath, withLock, today, localDay, toPosix, guarded,
-  shortHash,
+  vaultPath, writeSettled, appendJsonl, appendLog, inboxFile, proposalRows, pickRows, statePath, withLock, today, localDay, toPosix, guarded,
+  shortHash, isVaultOnly,
 } from './lib/vault.mjs';
 import {
   KEY_RE, BASES, wrongBasis, parseNote, noteErrors, ruleText, ruleTextParts, loadNotes, readNote, liveRules, mentions, isUrl, validDay, byKey, normTopic, domainTopics, vaultFile, joinList,
@@ -11,8 +11,8 @@ import {
 import { build } from './lib/build.mjs';
 import { entryKey } from './lib/glob.mjs';
 import { typedMessages, saidIn, normText, sourceTexts, userPageTexts } from './lib/quotes.mjs';
-import { ownEntry, marked, mark, wasShown, carryMarkers } from './lib/sessions.mjs';
-import { setField, yamlQuote } from './lib/frontmatter.mjs';
+import { ownEntry, marked, mark, wasShown, carryMarkers, proposeDomains } from './lib/sessions.mjs';
+import { setField, yamlQuote, plainSafe } from './lib/frontmatter.mjs';
 import { subjectRows, laterRows, endedBy, otherLabels } from './lib/picks.mjs';
 import { UsageError, readInput, refuse, failure, line } from './lib/input.mjs';
 
@@ -277,7 +277,7 @@ function checkReadBack(n, f) {
   if (bad) refuse(`${bad[0]} doesn't survive as YAML. Rephrase it.`);
 }
 
-const yaml = s => (/^[a-z0-9-]+$/i.test(s) ? s : yamlQuote(s));
+const yaml = s => (plainSafe(s) ? s : yamlQuote(s));
 const yamlList = (name, xs) => (xs.length ? [`${name}:`, ...xs.map(x => `  - ${yamlQuote(x)}`)] : [`${name}: []`]);
 
 // A pick is cited from the day and session it was recorded in, and a page of the user's by its path.
@@ -343,7 +343,8 @@ function propose(sid, p) {
   const domains = [...session.domains, 'global'];
   // Slugs compare in NFC, so a slug typed with combining accents names the same note as its composed spelling.
   const f = { sid, domain: line(p, 'domain').normalize('NFC'), slug: line(p, 'slug').normalize('NFC') };
-  if (!domains.includes(f.domain)) refuse(`domain must be ${joinList(domains, 'or')}.`);
+  // A vault-only domain isn't offered, and the note's own check says why it takes no rule.
+  if (!domains.includes(f.domain) && !isVaultOnly(f.domain)) refuse(`domain must be ${joinList(domains, 'or')}.`);
   const key = `${f.domain}/${f.slug}`;
   if (!KEY_RE.test(key)) refuse('slug must be lowercase-kebab-case.');
   f.kind = line(p, 'kind', false) || 'taste';

@@ -105,7 +105,7 @@ export function parseNote(text, rel) {
     kind: single(data.kind) ?? (data.type === 'page' ? null : 'taste'),
     as_of: data.as_of ?? null,
     always: data.always === true,
-    author: data.author ?? (data.type === 'page' ? 'agent' : null),
+    author: single(data.author) ?? (data.type === 'page' ? 'agent' : null),
     requires: data.requires ?? null,
     topic: typeof data.topic === 'string' ? normTopic(data.topic) : '',
     summary: typeof data.summary === 'string' ? data.summary.trim() : '',
@@ -147,15 +147,17 @@ function targetError(entry, namespaces) {
 const shownItem = x => (isMap(x) ? Object.entries(x).map(([k, v]) => `${k}: ${typeof v === 'string' ? v : JSON.stringify(v)}`).join(', ')
   : typeof x === 'string' ? x : JSON.stringify(x));
 
+export function notTextError(f, x) {
+  const item = shownItem(x);
+  const quoted = yamlQuote(item);
+  return isMap(x) ? `${f} item ${item} reads as a key and value, not text. Single-quote an item that holds ": ", as in ${quoted}`
+    : `${f} item ${item} isn't text. Single-quote it, as in ${quoted}`;
+}
+
 // YAML reads an unquoted `- TextSize: 1[0-9]` as a map, as Obsidian does, so a list item is checked for text before
 // anything reads it.
 function itemErrors(data) {
-  return [...LIST_FIELDS, 'superseded_by'].flatMap(f => (Array.isArray(data[f]) ? data[f] : []).filter(x => typeof x !== 'string').map(x => {
-    const item = shownItem(x);
-    const quoted = yamlQuote(item);
-    return isMap(x) ? `${f} item ${item} reads as a key and value, not text. Single-quote an item that holds ": ", as in ${quoted}`
-      : `${f} item ${item} isn't text. Single-quote it, as in ${quoted}`;
-  }));
+  return [...LIST_FIELDS, 'superseded_by'].flatMap(f => (Array.isArray(data[f]) ? data[f] : []).filter(x => typeof x !== 'string').map(x => notTextError(f, x)));
 }
 
 function listErrors(n) {
@@ -488,9 +490,10 @@ export const linksUnder = (n, title) => targets(sections(n).slice(1).find(s => h
 const sectionNamed = (n, title) => sections(n).slice(1).find(s => heading(s).toLowerCase() === title.toLowerCase()) ?? '';
 export const hasSection = (n, title) => sectionNamed(n, title) !== '';
 
-export const isUserPage = n => n.type === 'page' && n.author === 'user';
+const byUser = a => typeof a === 'string' && a.trim().toLowerCase() === 'user';
+export const isUserPage = n => n.type === 'page' && byUser(n.author);
 // The edit guard and lint --fix read the file as it is, so any note marked author: user counts, a malformed one too.
-export const authoredByUser = text => parse(text).data.author === 'user';
+export const authoredByUser = text => byUser(single(parse(text).data.author));
 
 export const AGENT_NOTES = /^## agent notes\s*$/i;
 export const TOP_HEADING = /^#{1,2}(?:\s|$)/;

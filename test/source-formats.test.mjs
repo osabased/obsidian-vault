@@ -1,3 +1,5 @@
+import fs from 'node:fs';
+import { execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import test from 'node:test';
 import assert from 'node:assert/strict';
@@ -246,4 +248,38 @@ test('a footnote with a locator, or inside a bundle, cites the source page of it
   const notes = loadNotes();
   const { pages } = citedSources(notes, resolver(notes))(notes.find(n => n.key === 'demo/guide'));
   assert.deepEqual([...pages].sort(), ['demo/source-doc', 'demo/source-lib']);
+});
+
+test('a sha256 line YAML reads as a key and value is warned about, and lint checks the rest', async t => {
+  const v = makeVault(t);
+  const line = `${sha('a')}  Notes: draft.txt`;
+  v.write('raw/refs/lib/a.txt', 'a');
+  v.write('raw/refs/lib/source.md', `---\nurl: https://example.com/demo/lib\nsha256:\n  - ${line}\n  - true\n---\n`);
+  assert.deepEqual(await msgsFor(v, 'raw/refs/lib/'), [
+    `sha256 item ${line} reads as a key and value, not text. Single-quote an item that holds ": ", as in '${line}'`,
+    "sha256 item true isn't text. Single-quote it, as in 'true'",
+  ]);
+});
+
+// Denies reading the file's bytes while its name and size still show, as a file another program holds open does.
+function unreadable(t, file) {
+  if (process.platform === 'win32') {
+    t.after(() => { try { execFileSync('icacls', [file, '/remove:d', process.env.USERNAME]); } catch {} });
+    execFileSync('icacls', [file, '/deny', `${process.env.USERNAME}:(RD)`]);
+  } else {
+    t.after(() => { try { fs.chmodSync(file, 0o644); } catch {} });
+    fs.chmodSync(file, 0);
+  }
+}
+
+test("a source lint can't read is skipped, not reported as changed", async t => {
+  if (process.getuid?.() === 0) return t.skip('root reads any file');
+  const v = makeVault(t);
+  v.write('raw/refs/doc.txt', 'hello source');
+  v.write(`derived/${sha('hello source')}.md`, derived({ kind: 'pdf', extractor: 'x', extractor_version: "'1'", source: 'raw/refs/doc.txt' }, '[p. 1] hi\n'));
+  v.write('raw/refs/lib/a.txt', 'a');
+  v.write('raw/refs/lib/source.md', `---\nurl: https://example.com/demo/lib\nsha256:\n  - '${sha('a')}  a.txt'\n---\n`);
+  unreadable(t, v.at('raw', 'refs', 'doc.txt'));
+  unreadable(t, v.at('raw', 'refs', 'lib', 'a.txt'));
+  assert.deepEqual((await found(v)).filter(f => /has changed|doesn't match/.test(f.msg)), []);
 });

@@ -7,8 +7,8 @@ import { pathToFileURL } from 'node:url';
 const TOOLS = path.resolve(import.meta.dirname, '..', 'tools');
 
 // The tools find the vault from their own location, so each test runs a copy of tools/ inside a vault of its own.
-export function makeVault(t, { config = {}, domain = 'demo', topics = ['layout', 'code'], domains = {}, local = {} } = {}) {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'vault-test-'));
+export function makeVault(t, { config = {}, domain = 'demo', topics = ['layout', 'code'], domains = {}, local = {}, under = os.tmpdir() } = {}) {
+  const root = fs.mkdtempSync(path.join(under, 'vault-test-'));
   const project = fs.mkdtempSync(path.join(os.tmpdir(), 'vault-project-'));
   t.after(() => {
     fs.rmSync(root, { recursive: true, force: true });
