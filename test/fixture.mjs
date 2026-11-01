@@ -224,6 +224,23 @@ const FIXTURE_ALIAS = [
   '',
 ].join('\n');
 
+const FIXTURE_READER = [
+  "import fs from 'node:fs';",
+  "import path from 'node:path';",
+  "export const ecosystem = 'fixture';",
+  "export const lockfiles = ['almanac.lock'];",
+  "export const scheme = 'SEMVER';",
+  'export function read(dir) {',
+  '  const out = {};',
+  "  for (const line of fs.readFileSync(path.join(dir, 'almanac.lock'), 'utf8').split(/\\r?\\n/)) {",
+  '    const m = line.match(/^(\\S+) (\\S+)$/);',
+  '    if (m) out[m[1]] = m[2];',
+  '  }',
+  '  return out;',
+  '}',
+  '',
+].join('\n');
+
 // The five shapes a domain can take (design §8 item 3). Each writes its notes and files into v and returns its share of
 // vault.config.json and vault.local.json. Tests address their keys, slugs and ids, so those stay as they are.
 export const PRESETS = {
@@ -255,7 +272,7 @@ export const PRESETS = {
     };
   },
 
-  // Knowledge, reached by its marker in a project of its own, whose lockfile nothing reads yet.
+  // Knowledge, reached by its marker in a project of its own, whose lockfile the fixture reader reads.
   almanac(v, { newProject, asOf }) {
     const dir = newProject();
     v.projects.almanac = dir;
@@ -284,7 +301,8 @@ export const PRESETS = {
     notes['wiki/almanac/sources/source-ledger-repo.md'] = source('raw/refs/ledger-repo.md');
     notes['wiki/almanac/topics/ledger.md'] = topicPage({ domain: 'almanac', topic: 'ledger', summary: "'Facts about the pkg ledger API.'", links: Object.keys(notes) });
     for (const [rel, text] of Object.entries(notes)) v.write(rel, text);
-    return { domains: { almanac: { title: 'Almanac', topics: ['ledger'], markers: ['almanac.project'] } } };
+    v.write('tools/ext/readers/fixture.mjs', FIXTURE_READER);
+    return { domains: { almanac: { title: 'Almanac', topics: ['ledger'], markers: ['almanac.project'], readers: ['fixture'] } } };
   },
 
   // Research: pages only, read in the vault, over a binary source with derived text and one without.

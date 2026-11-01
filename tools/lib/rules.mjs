@@ -3,8 +3,9 @@ import path from 'node:path';
 import v8 from 'node:v8';
 import { parse, yamlQuote } from './frontmatter.mjs';
 import { validGlob, overlapping, entryParts, globListProblems } from './glob.mjs';
-import { config, vaultPath, shortHash, toPosix, today, inside, plural, isVaultOnly, memo } from './vault.mjs';
+import { config, vaultPath, shortHash, toPosix, today, inside, plural, isVaultOnly, memo, readJson, statePath } from './vault.mjs';
 import { cachedNotes, cleanFromGit } from './cache.mjs';
+import { SEMVER, fitOf, projectVersions } from './versions.mjs';
 
 export const LIST_FIELDS = ['applies_to', 'triggers', 'keywords', 'tools'];
 // Slugs and domains take lowercase letters, modifier letters (ー, 々, ʻ), letters of scripts with no case (CJK and the
@@ -195,7 +196,6 @@ function listErrors(n) {
 // tools counts though nothing delivers on it yet, so a rule written for it now needs no change when that lands.
 export const hasChannel = n => n.always === true || ['applies_to', 'keywords', 'tools'].some(f => n[f]?.length);
 
-const SEMVER = /^(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)(?:-[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?(?:\+[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?$/;
 const EVENTS = ['introduced', 'fixed', 'last_affected', 'limit'];
 export const isMap = x => x !== null && typeof x === 'object' && !Array.isArray(x);
 export const filled = x => typeof x === 'string' && x.trim() !== '';
@@ -272,7 +272,7 @@ const stamp = () => (parserStamp ??= shortHash([
 // The notes under wiki/<domain>/ for each domain given, or every note in wiki/.
 export function loadNotes(domains) {
   const notes = cachedNotes(domains ?? null, parsed, stamp())
-    .map(e => ({ ...noteFrom(e.note, e.rel), saved: e.m, seen: e.seen, clean: e.clean, contentHash: e.h }));
+    .map(e => ({ ...noteFrom(e.note, e.rel), saved: e.m, size: e.s, seen: e.seen, clean: e.clean, contentHash: e.h }));
   // A key names one note, so two notes in two folders of a domain with one name would each answer for the other.
   const rels = new Map();
   for (const n of notes) rels.set(n.key, [...(rels.get(n.key) ?? []), n.rel]);
@@ -334,6 +334,7 @@ export function liveRules(notes = loadNotes()) {
       // Only the delivered wording counts, so an edit to a rule's evidence or globs doesn't deliver it again.
       hash: shortHash(text),
       kind: n.kind, always: n.always, applies_to: n.applies_to, triggers: n.triggers, keywords: n.keywords,
+      requires: n.requires, mtime: n.saved, size: n.size,
     };
   }
   return rules;
@@ -358,7 +359,10 @@ export function livePages(notes = loadNotes()) {
   const pages = {};
   for (const n of notes) {
     if (n.type !== 'page' || !(n.keywords?.length || n.applies_to?.length) || undelivered(n)) continue;
-    pages[n.key] = { rel: n.rel, domain: n.domain, kind: n.kind, summary: n.summary, keywords: n.keywords, applies_to: n.applies_to, triggers: n.triggers };
+    pages[n.key] = {
+      rel: n.rel, domain: n.domain, kind: n.kind, summary: n.summary, keywords: n.keywords, applies_to: n.applies_to, triggers: n.triggers,
+      requires: n.requires, mtime: n.saved, size: n.size,
+    };
   }
   return pages;
 }
@@ -366,7 +370,49 @@ export function livePages(notes = loadNotes()) {
 export const kindLabel = kind => (PAGE_KINDS.includes(kind) ? `${kind} page` : 'page');
 
 // A bare line leaves out the summary, for the pages past what a refusal describes.
-export const pageLine = (k, p, bare = false) => `- ${k} (${kindLabel(p.kind)}): ${p.summary && !bare ? `${clip(sentence(p.summary), 150)} ` : ''}${toPosix(vaultPath(...p.rel.split('/')))}`;
+export const pageLine = (k, p, bare = false) => `- ${k} (${kindLabel(p.kind)}): ${p.summary && !bare ? `${clip(sentence(p.summary), 150)} ` : ''}${toPosix(vaultPath(...p.rel.split('/')))}${labelled(p)}`;
+
+// What a project's lockfiles and .state/derived.json say of the notes a hook matched, read only when a note asks.
+// Refresh and build write derived.json; a missing one means nothing is unverified, and a corrupt one throws.
+export function deliveryFor(hits) {
+  let versions;
+  let derived;
+  return {
+    get versions() { return (versions ??= projectVersions(hits)); },
+    get derived() { return (derived ??= readJson(statePath('derived.json'), {})); },
+  };
+}
+
+// The notes a project gets, as [key, note] entries, { key, note } items or a map of notes by key: those its lockfile
+// rules out are dropped, and the rest carry labels for a version the lockfile can't settle and for a source that changed
+// since the note's copy. A label changes a rule's hash, which the markers hold, so a rule shown before is shown again.
+// An unverified entry holds only while the note's file has the mtime and size derived.json recorded.
+export function deliverable(items, ctx = deliveryFor([])) {
+  const one = (key, note) => {
+    const fit = note.requires ? fitOf(note.requires, note.domain, ctx.versions) : null;
+    if (fit?.fit === 'mismatch') return null;
+    const unverified = ctx.derived?.unverified;
+    const u = isMap(unverified) && Object.hasOwn(unverified, key) ? unverified[key] : null;
+    const labels = [
+      ...(fit?.fit === 'unknown' ? ['version unknown'] : []),
+      ...(isMap(u) && u.mtime === note.mtime && u.size === note.size && filled(u.since) ? [`source changed on ${u.since}`] : []),
+    ];
+    if (!fit && !labels.length) return note;
+    const hash = labels.length ? { hash: shortHash(`${note.text ?? note.rel}\0${labels.join(' · ')}`) } : {};
+    return { ...note, fit: fit?.fit ?? null, labels, ...hash };
+  };
+  if (!Array.isArray(items)) {
+    return Object.fromEntries(Object.entries(items).flatMap(([k, n]) => { const x = one(k, n); return x ? [[k, x]] : []; }));
+  }
+  return items.flatMap(it => {
+    const [key, note] = Array.isArray(it) ? it : [it.key, it.note];
+    const x = one(key, note);
+    return !x ? [] : Array.isArray(it) ? [[key, x]] : [{ ...it, note: x }];
+  });
+}
+
+// Within a rank, a note its project's version settles comes before one it can't.
+export const byFit = (a, b) => Number(a?.fit === 'unknown') - Number(b?.fit === 'unknown');
 
 // For each pair of two domains' paths where one holds the other, the folder each domain's globs sit under when both
 // are read from the outer one, since the gate matches a domain's globs from its own folder. Two domains with markers
@@ -399,10 +445,13 @@ export function sharedFiles(a, b) {
 
 export const maxChars = kind => (kind === 'knowledge' ? config().delivery.maxKnowledgeRuleChars : config().delivery.maxRuleChars);
 
-export const ruleLine = (k, r) => `- ${k}: ${clip(r.text, maxChars(r.kind))}`;
+// The labels deliverable gave a note, after its clipped text, so a cut never drops one.
+const labelled = x => (x.labels ?? []).map(l => ` · ${l}`).join('');
+
+export const ruleLine = (k, r) => `- ${k}: ${clip(r.text, maxChars(r.kind))}${labelled(r)}`;
 
 // For a rule a refusal has no room to show in full: enough to tell whether to open the note.
-export const rulePointer = (k, r) => `- ${k}: ${clip(r.text, 70)} ${toPosix(vaultPath(...r.rel.split('/')))}`;
+export const rulePointer = (k, r) => `- ${k}: ${clip(r.text, 70)}${labelled(r)} ${toPosix(vaultPath(...r.rel.split('/')))}`;
 
 // Fits a hook's output to delivery.maxContextChars, since Claude Code replaces anything over 10,000 with a file path and
 // a preview. Sections come in rank order; a plain string is one item. A section is { noun, items, head?, render? }: its
@@ -445,7 +494,7 @@ export function domainOrder(domains) {
 export const domainTitle = d => (d === 'global' ? 'Every project' : config().domains[d]?.title ?? 'not in vault.config.json');
 
 const isRule = line => line.startsWith('- ');
-const alwaysEntries = rules => Object.entries(rules).filter(([, r]) => r.always).sort(byKey);
+const alwaysEntries = rules => Object.entries(rules).filter(([, r]) => r.always).sort((a, b) => byFit(a[1], b[1]) || byKey(a, b));
 export const alwaysIn = (rules, scope) => alwaysEntries(rules).filter(([, r]) => scope.includes(r.domain));
 
 // The keys go in the order their rule lines do.
@@ -605,6 +654,12 @@ const evidenceLines = n => [...sectionNamed(n, 'evidence').matchAll(/^- .*$/gm)]
 });
 
 // The session prefixes the Evidence lines give, first seen first.
+// The fit of each note for the projects given, for rankPair.
+export function fitIn(hits) {
+  const versions = projectVersions(hits);
+  return n => fitOf(n.requires, n.domain, versions);
+}
+
 export const evidenceSessions = n => [...new Set(evidenceLines(n).flatMap(e => e.session ?? []))];
 export const evidenceSources = n => evidenceLines(n).filter(e => e.kind === 'source').flatMap(e => e.cite.match(/^(.+?) · dated /)?.[1] ?? []);
 
@@ -624,12 +679,20 @@ const RANKS = {
   knowledge: { tests: [[n => n.as_of, (w, l) => `as_of ${w.as_of} over ${l.as_of}`]], tie: 'same as_of' },
 };
 
+// A note with no requires holds for any version, so it ranks with a match.
+const FIT_RANK = { match: 2, none: 2, unknown: 1, mismatch: 0 };
+const fitName = f => f?.fit ?? 'none';
+const fitWins = f => ({ match: `version match (${f?.why})`, none: 'no version requirement', unknown: 'version unknown' })[fitName(f)];
+const fitLoses = f => ({ unknown: 'version unknown', mismatch: 'mismatch' })[fitName(f)];
+
 // Which of two rules that may contradict to recommend first, or null for a taste rule and a knowledge rule, which
-// aren't ranked against each other.
-export function rankPair(a, b) {
+// aren't ranked against each other. fit gives a note's fit for the project the ranking is for; without it, versions
+// tie and as_of decides.
+export function rankPair(a, b, { fit } = {}) {
   const rank = a.kind === b.kind ? RANKS[a.kind] : null;
   if (!rank) return null;
-  for (const [value, why] of rank.tests) {
+  const tests = a.kind === 'knowledge' && fit ? [[n => FIT_RANK[fitName(fit(n))], (w, l) => `${fitWins(fit(w))} over ${fitLoses(fit(l))}`], ...rank.tests] : rank.tests;
+  for (const [value, why] of tests) {
     const [x, y] = [value(a), value(b)];
     if (x !== y) return x > y ? { first: a, last: b, why: why(a, b) } : { first: b, last: a, why: why(b, a) };
   }
