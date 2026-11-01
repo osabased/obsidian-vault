@@ -7,7 +7,7 @@ import { matchTarget, targetNames, specificity, bySpecificity } from '../lib/glo
 import { matcher, fileScope, fires, dueRules, gatedFile } from '../lib/scope.mjs';
 import { parse } from '../lib/frontmatter.mjs';
 import { extension } from '../lib/ext.mjs';
-import { mark, marked, markMany, markShown, markPages, duePages, agentKey, sessionHits, turnStart } from '../lib/sessions.mjs';
+import { mark, marked, markMany, markShown, markPages, duePages, agentKey, keyHash, sessionHits, turnStart } from '../lib/sessions.mjs';
 
 function vaultGuard(file, cwd) {
   const rel = vaultRel(file, cwd);
@@ -290,7 +290,7 @@ runHook('edit', input => {
   // budget left out of a refusal doesn't refuse the retry.
   const pages = duePages(input, deliverable(matching(livePages(notes), true), ctx).filter(m => fires(m.note, text))
     .sort((a, b) => bySpecificity(a.spec, b.spec) || byFit(a.note, b.note) || cmp(a.key, b.key)), Infinity)
-    .map(m => ({ ...m, id: agentKey(input, `page|${m.key}${m.note.hash ? `|${m.note.hash}` : ''}|${m.place}`) }))
+    .map(m => ({ ...m, id: agentKey(input, `page|${keyHash(m.key, m.note.hash)}|${m.place}`) }))
     .filter(m => !marked('gate', input.session_id, m.id));
   // Only a file some rule covers can matter to the Stop hook, which checks a turn only once the prompt hook has stamped
   // it, so the others cost no write.

@@ -2,7 +2,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { config, statePath, readJsonSafe, writeJson, logError, toPosix } from './vault.mjs';
 import { extension } from './ext.mjs';
-import { RACY_MS } from './cache.mjs';
+import { isRacy } from './cache.mjs';
 
 export const SEMVER = /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-([0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*))?(?:\+[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?$/;
 export const SCHEMES = ['SEMVER', 'ECOSYSTEM'];
@@ -32,12 +32,16 @@ export function compareSemver(a, b) {
   return sign(x.pre.length, y.pre.length);
 }
 
-// OSV's range evaluation (https://ossf.github.io/osv-schema/): events apply in order; introduced opens the range, '0'
-// from the start, fixed and limit close it before their version, and last_affected closes it after its own.
+// OSV's range evaluation (https://ossf.github.io/osv-schema/): events apply sorted by version, '0' first; introduced
+// opens the range, fixed closes it before its version and last_affected after its own. A limit isn't one of those
+// events but a cap apart from them: the version must come before one of the limits.
 export function inRange(version, events, compare) {
+  const pairs = events.map(e => Object.entries(e)[0]);
+  const limits = pairs.filter(([kind, at]) => kind === 'limit' && at !== '*').map(([, at]) => at);
+  if (limits.length && !limits.some(at => compare(version, at) < 0)) return false;
+  const order = ([, a], [, b]) => (a === b ? 0 : a === '0' ? -1 : b === '0' ? 1 : compare(a, b));
   let open = false;
-  for (const e of events) {
-    const [[kind, at]] = Object.entries(e);
+  for (const [kind, at] of pairs.filter(([kind]) => kind !== 'limit').sort(order)) {
     if (kind === 'introduced') {
       if (at === '0' || compare(version, at) >= 0) open = true;
     } else if (kind === 'last_affected' ? compare(version, at) > 0 : compare(version, at) >= 0) {
@@ -104,7 +108,7 @@ function versionsAt(root, name, r) {
   const lockfile = toPosix(found.file);
   const e = cached()[key];
   const same = e && e.lockfile === lockfile && e.mtimeMs === found.st.mtimeMs && e.size === found.st.size;
-  if (same && Math.abs(e.at - e.mtimeMs) >= RACY_MS) return e.versions ?? null;
+  if (same && !isRacy(e.at, e.mtimeMs)) return e.versions ?? null;
   const entry = { lockfile, mtimeMs: found.st.mtimeMs, size: found.st.size, at: Date.now() };
   try {
     entry.versions = asVersions(r.read(path.dirname(found.file)));
@@ -117,6 +121,28 @@ function versionsAt(root, name, r) {
   return entry.versions ?? null;
 }
 
+// A reader that won't load, missing or with no read function, is skipped, so its ecosystem reads as unknown. Its error
+// is logged once, until the error changes or the reader loads.
+function loaded(name) {
+  const key = `reader ${name}`;
+  try {
+    const r = reader(name);
+    if (Object.hasOwn(cached(), key)) {
+      delete cache[key];
+      dirty = true;
+    }
+    return r;
+  } catch (err) {
+    const message = String(err?.message ?? err);
+    if (cached()[key] !== message) {
+      logError(key, err);
+      cache[key] = message;
+      dirty = true;
+    }
+    return null;
+  }
+}
+
 function save() {
   if (!dirty) return;
   dirty = false;
@@ -127,18 +153,18 @@ function save() {
 }
 
 // For each domain with readers, one entry per project root: each reader's ecosystem with the versions it read there,
-// or null where it read none.
+// or null where it read none. Global reaches every project, so its readers read at each root the hits reach.
 export function projectVersions(hits) {
   const out = new Map();
   const seen = new Set();
-  for (const { domain, root } of hits) {
+  for (const { domain, root } of [...hits, ...hits.map(h => ({ domain: 'global', root: h.root }))]) {
     const names = readerNames(domain);
     if (!names.length || typeof root !== 'string' || seen.has(`${domain}|${toPosix(root).toLowerCase()}`)) continue;
     seen.add(`${domain}|${toPosix(root).toLowerCase()}`);
     const byEcosystem = new Map();
     for (const name of names) {
-      const r = reader(name);
-      byEcosystem.set(r.ecosystem, { versions: versionsAt(root, name, r), compare: r.scheme === 'ECOSYSTEM' ? r.compare : compareSemver });
+      const r = loaded(name);
+      if (r) byEcosystem.set(r.ecosystem, { versions: versionsAt(root, name, r), compare: r.scheme === 'ECOSYSTEM' ? r.compare : compareSemver });
     }
     out.set(domain, [...(out.get(domain) ?? []), byEcosystem]);
   }
@@ -153,8 +179,8 @@ function entryFit(entry, byEcosystem) {
   const got = byEcosystem.get(entry.package.ecosystem);
   if (!got?.versions) return { fit: 'unknown' };
   const { name } = entry.package;
+  if (!Object.hasOwn(got.versions, name)) return { fit: 'mismatch', why: `no ${name}` };
   const version = got.versions[name];
-  if (version === undefined) return { fit: 'mismatch', why: `no ${name}` };
   try {
     const hit = entry.ranges.some(r => inRange(version, r.events, r.type === 'SEMVER' ? compareSemver : got.compare));
     return { fit: hit ? 'match' : 'mismatch', why: `${name} ${version}` };

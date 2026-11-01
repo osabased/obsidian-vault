@@ -146,7 +146,8 @@ export const agentKey = (input, key) => (input.agent_id ? `${input.agent_id}|${k
 
 // Both hooks mark a page under one kind, so an agent hears of each page once, whichever hook brings it up.
 // Only a labelled page has a hash, the one deliverable gave it, so a page comes up again when its labels change.
-const pageMark = (input, h) => agentKey(input, h.note?.hash ? `${h.key}|${h.note.hash}` : h.key);
+export const keyHash = (key, hash) => (hash ? `${key}|${hash}` : key);
+const pageMark = (input, h) => agentKey(input, keyHash(h.key, h.note?.hash));
 export const markPages = (input, ranked, max = config().delivery.maxPages) => markFirst('pages', input.session_id, ranked, max, h => pageMark(input, h));
 
 // The first `max` items not yet marked, left unmarked, for a hook that marks only what its output budget keeps.

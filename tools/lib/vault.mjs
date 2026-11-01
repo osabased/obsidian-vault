@@ -237,6 +237,9 @@ export function writeText(file, text) {
   }
 }
 
+// Only for a folder the tools keep for themselves, such as a clone in .sources/.
+export const removeDir = dir => fs.rmSync(dir, { recursive: true, force: true, maxRetries: 3, retryDelay: 50 });
+
 export const lf = s => String(s ?? '').replace(/\r\n/g, '\n');
 // A BOM is the editor's, not the text's, so the guards and triggers read text without it.
 export const plainText = s => lf(s).replace(/^\uFEFF/, '');
@@ -301,6 +304,8 @@ export const memo = f => {
 const pad = n => String(n).padStart(2, '0');
 export const today = (d = new Date()) => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
 // Rows stamp `at` in UTC and files are named for the local day, so a row's day is read as a local day too.
+// Whole days from one YYYY-MM-DD day to another, today by default.
+export const daysBetween = (from, to = today()) => Math.round((Date.parse(to) - Date.parse(from)) / 864e5);
 export const localDay = at => (Number.isNaN(Date.parse(at)) ? '' : today(new Date(at)));
 export const clock = (d = new Date()) => `${today(d)} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
 

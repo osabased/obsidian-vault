@@ -42,9 +42,10 @@ runHook('stop', input => {
   const rules = liveRules(settledNotes(loadNotes([...new Set(scoped.flatMap(s => s.domains))])));
   const listed = new Set();
   const sections = [];
+  const shared = deliveryFor([]);
   for (const { file, size, matching, hits: reach } of scoped) {
     checkDeadline();
-    const hits = dueRules(input, deliverable(matching(rules), deliveryFor(reach)), () => textOf(file, size));
+    const hits = dueRules(input, deliverable(matching(rules), deliveryFor(reach, shared)), () => textOf(file, size));
     if (!hits.length) continue;
     sections.push({
       noun: 'rule', head: `${hits[0].rel}:`, hits,
