@@ -328,8 +328,8 @@ test('6.6e: session start in the vault folder with 10 domains stays under the ou
   const ctx = v.startSession(sessionId(), { cwd: v.root }).hookSpecificOutput.additionalContext;
   assert.ok(ctx.length <= LIMIT, `${ctx.length} characters`);
   assert.match(ctx, /^Taste vault: when the task touches layout, code, ledger, papers, days, words, topic-0-0-padding, /);
-  // The presets' notes bring the lint reminder, which ranks below the topics.
-  assert.match(ctx, /\(Left out to stay within 8000 characters: \d+ topics and 1 note\. `[^`]*index\.md` lists the rest\.\)$/);
+  // The presets' notes bring the lint reminder and the stale-sources line, which rank below the topics.
+  assert.match(ctx, /\(Left out to stay within 8000 characters: \d+ topics, 1 note and 1 note\. `[^`]*index\.md` lists the rest\.\)$/);
 });
 
 test('the output budget is delivery.maxContextChars, and the topics are the first to go', t => {
