@@ -1,13 +1,10 @@
-import fs from 'node:fs';
 import path from 'node:path';
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { makeVault, sessionId, editFile, denied, ruleNote, sha256, sectionOf, serve, gitRepo, LEDGER_GUIDE, LEDGER_REPO } from './fixture.mjs';
+import { makeVault, sessionId, denied, ledgerEdit, filesUnder, ruleNote, sha256, sectionOf, serve, gitRepo, LEDGER_GUIDE, LEDGER_REPO } from './fixture.mjs';
 import { today } from '../tools/lib/vault.mjs';
 
 // The design checks that need phase 4 or 5 code, each run on the preset it names (design §8 item 3).
-
-const ledgerEdit = (v, sid) => denied(editFile(v, sid, 'src/ledger.txt', { abs: path.join(v.projects.almanac, 'src', 'ledger.txt'), cwd: v.projects.almanac })) ?? '';
 
 test('a project whose lockfile pins pkg 2 delivers only the v2 rule, and review status ranks it first', t => {
   const v = makeVault(t, { presets: ['almanac'] });
@@ -23,19 +20,16 @@ test('a project whose lockfile pins pkg 2 delivers only the v2 rule, and review 
   assert.match(pairs.join('\n'), /almanac\/ledger-v2 and almanac\/ledger-v3, .* · almanac\/ledger-v2 ranks first: /);
 });
 
-const rawFiles = v => Object.fromEntries(fs.readdirSync(v.at('raw'), { recursive: true, withFileTypes: true })
-  .filter(e => e.isFile()).map(e => [path.relative(v.root, path.join(e.parentPath, e.name)).replace(/\\/g, '/'), sha256(fs.readFileSync(path.join(e.parentPath, e.name)))]));
-
 test('refresh labels a rule unverified once the URL source it cites has changed', async t => {
   const server = await serve(t, { '/ledger': { body: LEDGER_GUIDE, etag: '"ledger-1"' } });
   const repo = gitRepo(t, { 'docs/ledger.md': LEDGER_REPO });
   const v = makeVault(t, { presets: ['almanac'], sources: { url: server.url('/ledger'), repo: repo.dir, commit: repo.commit } });
   const cwd = v.projects.almanac;
-  const before = rawFiles(v);
+  const before = filesUnder(v, 'raw');
   let r = await v.runAsync('refresh.mjs');
   assert.equal(r.code, 0, r.stderr);
   assert.match(r.stdout, /^unchanged http:\/\/127\.0\.0\.1:\d+\/ledger \(304\)$/m);
-  assert.deepEqual(rawFiles(v), before, 'an unchanged source wrote a file under raw/');
+  assert.deepEqual(filesUnder(v, 'raw'), before, 'an unchanged source wrote a file under raw/');
   const first = sessionId();
   v.startSession(first, { cwd });
   assert.doesNotMatch(ledgerEdit(v, first), /source changed on/);

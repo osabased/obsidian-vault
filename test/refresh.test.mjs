@@ -5,14 +5,12 @@ import path from 'node:path';
 import { execFileSync } from 'node:child_process';
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { makeVault, sessionId, ruleNote, sourcePage, sha256, sectionOf, withFields, serve, gitRepo, cleanEnv, LEDGER_GUIDE } from './fixture.mjs';
+import { makeVault, sessionId, filesUnder, ruleNote, sourcePage, sha256, sectionOf, withFields, serve, gitRepo, cleanEnv, LEDGER_GUIDE } from './fixture.mjs';
 import { today } from '../tools/lib/vault.mjs';
 
 // What refresh does to raw/refs/ and .state/derived.json (design §8 item 4). Every server is one the test starts on
 // 127.0.0.1, and every git source a repository in a temp folder.
 
-const filesUnder = (v, dir) => Object.fromEntries(fs.readdirSync(v.at(...dir.split('/')), { recursive: true, withFileTypes: true })
-  .filter(e => e.isFile()).map(e => [path.relative(v.root, path.join(e.parentPath, e.name)).replace(/\\/g, '/'), sha256(fs.readFileSync(path.join(e.parentPath, e.name)))]));
 const derived = v => JSON.parse(v.read('.state/derived.json'));
 const lines = r => r.stdout.trimEnd().split('\n');
 const refresh = async (v, opts) => {
