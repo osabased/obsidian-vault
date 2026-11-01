@@ -1158,7 +1158,7 @@ The phases build mechanism only. Adding real knowledge and taste is the user's c
        - `proposeShell` names no tool: "from a POSIX shell with a quoted heredoc, since PowerShell turns curly quotes and dashes into ?".
        - `disabled` is always false. Codex has no safe-mode variable: the user turns hooks off in `/hooks` or with `features.hooks = false`.
        - `identifiers`: `CODEX_`, `apply_patch`, `*** Begin Patch`, `content_item_kinds`, `send_user_message` and `Codex`.
-     - **Skills.** Codex reads `.agents/skills`, and the skills live in `.claude/skills/`. `.agents/skills/` keeps a byte copy of each file under `.claude/skills/`. Lint errors when a copy differs, and `lint --fix` writes it (open question). Codex ignores the Claude-only frontmatter key `disable-model-invocation` (§11).
+     - **Skills.** Codex reads `.agents/skills`, and the skills live in `.claude/skills/`. `.agents/skills/` keeps a copy of each file under `.claude/skills/`. Lint errors when a copy differs other than in line endings, and `lint --fix` writes it (open question); a checkout made before the copies existed can hold the skills with CRLF. Lint also errors on a folder in `.agents/skills/` whose skill folder is gone, naming it to delete, and `lint --fix` leaves it. Codex ignores the Claude-only frontmatter key `disable-model-invocation` (§11).
      - **AGENTS.md.** Codex reads the vault's AGENTS.md natively in the vault folder, so the vault's own instructions need nothing compiled.
    - **Compiled files (6.7f, decision 4).**
      - **Opt-in.** `domains.<d>.compile` in `vault.config.json` lists the adapters whose format that domain's projects get, for example `["codex"]`. It is unset by default. Lint errors on a name whose adapter has no `compile.mjs`.
@@ -1170,7 +1170,7 @@ The phases build mechanism only. Adding real knowledge and taste is the user's c
        - `file` namespace glob rules, grouped by their `applies_to`;
        - keyword rules, grouped by their `keywords`.
 
-       Within each group, rules go in key order (`cmp`), so the bytes are fixed. A rule with `triggers` is listed under its globs, and its triggers are dropped.
+       Within each group, rules go in key order (`cmp`), so the bytes are fixed. A rule with `triggers` is listed under its globs, and its triggers are dropped. The section depends only on committed files, the vault's notes and config and the project's own files such as its lockfile, so every machine compiles the same bytes: a label from `.state/`, such as "source changed on", stays out of its lines.
 
        What doesn't compile:
        - namespace globs, since the formats know only files;
@@ -1199,17 +1199,19 @@ The phases build mechanism only. Adding real knowledge and taste is the user's c
 
        - The hash is `shortHash` of the text between the two markers.
        - The rest of the file is kept byte for byte. A new file holds the section alone.
-       - The section takes the file's line endings: CRLF when the file already has any.
-       - It fits `compile.maxBytes` (16,384 by default, half of Codex's 32 KiB for all AGENTS.md files together) through `fitContext`, whose overflow line names what it left out. The cap counts bytes, so the format cuts again until the section fits. The line names no file, since other machines and repos read the section without the vault: `(Left out to stay within 16384 bytes: 3 rules.)`.
-       - A glob of a domain whose project root sits below the folder compiled into starts with that path. A `!` entry reads as "except" in the heading. A rule with globs and keywords is listed under both.
-       - Markers it can't pair (a begin with no end, two begins, an end before a begin) and a file that isn't UTF-8 text are `refused`, with nothing written.
+       - A new section takes the file's line endings: CRLF when the file already has any. An existing one keeps the line endings and trailing spaces of its own marker lines, so a section that differs from what compile would write only there is `current`.
+       - It fits `compile.maxBytes` (16,384 by default, half of Codex's 32 KiB for all AGENTS.md files together) through `fitContext`, whose overflow line counts the rules it left out. The cap counts the bytes of the section as written, its markers and line endings included, so the format cuts again until the section fits. A cap below the heading, intro and overflow line leaves just those. A value that isn't a whole number above 0 is a lint error, and compile uses the default. The line names no file, since other machines and repos read the section without the vault: `(Left out to stay within 16384 bytes: 3 rules.)`.
+       - A glob of a domain whose project root sits below the folder compiled into starts with that path. A worktree's folder is read as its main checkout's, as project roots are. A folder below a domain's project root is `refused`, naming the root to compile instead, since its globs would start in the wrong place. A `!` entry reads as "except" in the heading. A rule with globs and keywords is listed under both.
+       - Markers it can't pair (a begin with no end, two begins, an end before a begin) and a file that isn't UTF-8 text are `refused`, with nothing written. Lines inside a fence that closes are the file's own text, so markers there don't count.
        - A section edited by hand since it was compiled is `edited` and refused too, so compile never loses the user's words. The begin marker says so.
-     - **Output.** One line per file, then exit 0, or 1 when any line is `refused`:
+     - **Output.** One line per file, then exit 0, or 1 when any line is `refused`. A file that can't be written is `refused` too, and the projects after it still compile:
 
        ```
        wrote <root>/AGENTS.md: 12 rules
        unchanged <root>/AGENTS.md
        refused <root>/AGENTS.md: the taste-vault section was edited by hand since it was compiled. Move those edits out of the section, or delete it, then compile again.
+       refused <root>/AGENTS.md: the file can't be written (EPERM). Make it writable, then compile again.
+       refused <root>/sub: the glim rules' globs start at <root>, which holds this folder. Run node tools/compile.mjs <root> instead.
        ```
 
      - **Rebuilds.** A section is rebuilt only when the user runs the command. No hook, build or git hook writes one (decision 4).
@@ -1409,6 +1411,7 @@ The design changes these parts of AGENTS.md. Each change lands with the phase th
   - Line 3: "so Claude Code can apply and look them up" becomes "so an agent can apply and look them up", and the hooks are in `tools/adapters/<agent>/hooks/`.
   - Line 16 (`tools/`): `tools/adapters/<agent>/` holds what is one agent's, its hooks included; the rest of `tools/` is the core and the scripts. A new line after it: `.agents/skills/` holds copies of `.claude/skills/` for Codex, which lint checks and `lint --fix` writes; edit the skill in `.claude/skills/`.
   - Line 44: "since Claude Code turns a longer one into a file path" becomes "since the agent turns a longer one into a file path".
+  - The domain keys (after `vaultOnly`): a `compile` bullet. It is a list of adapter names, unset by default; the user runs `node tools/compile.mjs <project>` to write the domain's live `always`, file-glob and keyword rules, and global's, into a marked section of the project's `AGENTS.md`, for an agent with no hooks to deliver them. `compile.maxBytes` caps the section, and lint errors on a name with no `tools/adapters/<name>/compile.mjs`.
   - Line 91 (`tools`): names are each agent's own, and lint checks them against every adapter that `agents` in `vault.config.json` lists.
   - Line 195 (rules): "the project's CLAUDE.md or `.claude/rules/`" becomes "the project's own agent instructions, such as CLAUDE.md, AGENTS.md or `.claude/rules/`". A compiled taste-vault section doesn't count as the project's own.
   - Line 207 (Lint): lint also warns on a compiled section that is missing, stale or edited by hand, and names the `node tools/compile.mjs` command to run.
