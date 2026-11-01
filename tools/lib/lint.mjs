@@ -2,7 +2,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { isBuiltin } from 'node:module';
 import {
-  config, vaultPath, plural, today, daysBetween, datedFiles, filesIn, pickRows, proposalRows, rewriteText, lf, readJson, readJsonSafe, toPosix, memo, statePath, isVaultOnly, isMarkerName, clock,
+  config, vaultPath, plural, today, daysBetween, datedFiles, filesIn, pickRows, proposalRows, rewriteText, writeText, lf, readJson, readJsonSafe, toPosix, memo, statePath, isVaultOnly, isMarkerName, clock,
 } from './vault.mjs';
 import { editsFile, sentToHook, hookMatchers, typedFor, hasAgent, AGENT_NAME } from './agents.mjs';
 import {
@@ -151,14 +151,18 @@ export function lint(notes = loadNotes(), chains = sourceChains()) {
   }
   for (const f of build({ check: true, notes })) add('error', f, 'stale; run node tools/build.mjs');
   lintCode(add);
+  lintSkillCopies(found);
   return found.sort((a, b) => (a.level === b.level ? 0 : a.level === 'error' ? -1 : 1));
 }
 
 // Applies the fixes lint gives whole, then rebuilds the generated files, which a fixed note can change too. The fixes
 // read a note with \n line ends, as parseNote does, and a file saved with \r\n gets them back.
 export function fix(found, chains, refs) {
-  const fixable = found.filter(f => f.fix);
+  // A skill's copy is written byte for byte from the skill, so it skips the text fixes below.
+  const copied = found.filter(f => f.copyFrom);
+  for (const f of copied) writeText(vaultPath(f.file), fs.readFileSync(vaultPath(f.copyFrom)));
   const written = [];
+  const fixable = found.filter(f => f.fix);
   for (const rel of new Set(fixable.map(f => f.file))) {
     const file = vaultPath(rel);
     const text = fs.readFileSync(file, 'utf8');
@@ -170,7 +174,7 @@ export function fix(found, chains, refs) {
     rewriteText(file, text.includes('\r\n') ? out.replace(/\n/g, '\r\n') : out);
     written.push(rel);
   }
-  return { fixed: fixable.filter(f => written.includes(f.file)), written, rebuilt: build({ chains, refs }) };
+  return { fixed: [...copied, ...fixable.filter(f => written.includes(f.file))], written, rebuilt: build({ chains, refs }) };
 }
 
 // Each fix parses the text it's given afresh, so the fixes to one file apply one after another, and a fix for a link
@@ -845,6 +849,17 @@ function lintCode(add) {
   const root = vaultPath('tools');
   for (const rel of filesIn(root, '.mjs').sort()) {
     for (const msg of codeErrors(rel, fs.readFileSync(path.join(root, rel), 'utf8'))) add('error', `tools/${rel}`, msg);
+  }
+}
+
+// Some agents read skills from .agents/skills/ rather than .claude/skills/, so each skill file has a byte copy there.
+function lintSkillCopies(found) {
+  for (const rel of filesIn(vaultPath('.claude', 'skills')).sort()) {
+    const [from, to] = [`.claude/skills/${rel}`, `.agents/skills/${rel}`];
+    const copy = fs.existsSync(vaultPath(to)) ? fs.readFileSync(vaultPath(to)) : null;
+    if (copy?.equals(fs.readFileSync(vaultPath(from)))) continue;
+    const msg = copy ? `differs from ${from}; edit the skill there, then run node tools/lint.mjs --fix to copy it` : `missing; run node tools/lint.mjs --fix to copy ${from}`;
+    found.push({ level: 'error', file: to, msg, copyFrom: from });
   }
 }
 
