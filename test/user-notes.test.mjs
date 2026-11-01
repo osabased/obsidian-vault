@@ -1,3 +1,4 @@
+import fs from 'node:fs';
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { makeVault, pageNote, denied, lintFound } from './fixture.mjs';
@@ -196,4 +197,14 @@ test('lint warns when the cited page is gone or is no longer the user\'s', async
   assert.match((await lintFound(v, /Evidence/))[0]?.msg ?? '', /cites wiki\/demo\/concepts\/journal\.md, which isn't an author: user page/);
   v.write(REL, 'nothing');
   assert.equal((await lintFound(v, /Evidence/)).length, 1);
+});
+
+test('the inbox row of a rule quoting a page names the page, for a new rule and for a repeat', t => {
+  const v = proposer(t);
+  assert.equal(v.propose(SID, rule()).code, 0);
+  assert.equal(v.propose(SID, rule({ slug: 'again', quote: 'Tabs should never feel cramped', repeats: 'demo/roomy-cards' })).code, 0);
+  const rows = fs.readdirSync(v.at('raw', 'inbox')).flatMap(f => v.read(`raw/inbox/${f}`).trim().split(/\r?\n/).map(l => JSON.parse(l)));
+  assert.equal(rows.length, 2);
+  assert.deepEqual(rows.map(r => r.page), [REL, REL]);
+  assert.deepEqual(rows.map(r => r.text), ['Cards need room to breathe', 'Tabs should never feel cramped']);
 });

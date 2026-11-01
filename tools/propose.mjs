@@ -381,7 +381,7 @@ function propose(sid, p) {
     const rules = liveRules(notes);
     const row = note => ({
       id: f.id, at, source: 'agent', kind: e.kind, text: e.said, ...(e.fix ? { fix: e.fix } : {}),
-      note, session: sid, transcript: session.transcript ?? null, cwd: session.cwd ?? null, domain: rules[note]?.domain ?? f.domain, ...(e.pick ? { pick: e.pick } : {}),
+      note, session: sid, transcript: session.transcript ?? null, cwd: session.cwd ?? null, domain: rules[note]?.domain ?? f.domain, ...(e.pick ? { pick: e.pick } : {}), ...(e.page ? { page: e.page } : {}),
     });
     if (f.repeats) return addEvidence(f, e, scope, rules, same, row, notes);
     const taken = readNote(key, notes);
