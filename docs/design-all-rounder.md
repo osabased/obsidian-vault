@@ -757,7 +757,7 @@ The phases build mechanism only. Adding real knowledge and taste is the user's c
      - The `almanac` tests that exist hold: `format.test.mjs:80-87` gets the v2 rule, which matches 2.4.0, and `reach.test.mjs:48-68`'s package with no lockfile gets it labelled `version unknown`. The preset's sources were fetched 30 days before the run, past `checkAfterDays`, so `almanac` sessions hear the start line. A test that pins a whole start output adds it.
    - **Windows.** Verified on this machine (§11): `git show` needs forward slashes in `<commit>:<path>`, so refresh joins paths with `/`. A clone from a `C:/…` path works. `git show` returns the committed bytes, CRLF kept, and refresh splits on `\r?\n` as frontmatter does. Removing a test vault that holds a clone works.
    - **Done** when the phase 4 check in §9 passes: the suite passes with 2 `todo` tests (6.3c, 6.4a), each red for its reason, lint reports 0 errors, and the grep finds nothing. The perf group still passes.
-5. **Media and tool triggers.** Designed, not built. Phase 5 builds the extractor interface with one fixture extractor, quotes checked against derived text, the unverifiable-evidence warnings, a bundle manifest tool, the privacy scan and tool triggers (6.4a–c, 6.4e, 6.3c). 6.4d needs no change. Every real extractor (PDF text, transcription, OCR) is build-or-reuse: the user chooses before one is written, and phase 5 ships none. Phase 4's interfaces are cited by their bullets in item 4, since its code isn't on this branch. Five §6 lines are settled here: an extractor returns parts and the core writes the anchors (6.4a), the refusal names the tool to run rather than "add derived text" (6.4a), lint tallies URL and gone-session quotes rather than warning on each (6.4c), the privacy check also runs in the edit hook and the pre-commit hook (6.4e), and lint also refuses a `tools` name that edits a file (6.3c).
+5. **Media and tool triggers.** Designed, not built. Phase 5 builds the extractor interface with one fixture extractor, quotes checked against derived text, the unverifiable-evidence warnings, a bundle manifest tool, the privacy scan and tool triggers (6.4a–c, 6.4e, 6.3c). 6.4d needs no change. Every real extractor (PDF text, transcription, OCR) is build-or-reuse: the user chooses before one is written, and phase 5 ships none. Phase 4's interfaces are cited by their bullets in item 4, since its code isn't on this branch. Four §6 lines are settled here: an extractor returns parts and the core writes the anchors (6.4a), the refusal names the tool to run rather than "add derived text" (6.4a), lint tallies URL and gone-session quotes rather than warning on each (6.4c), and lint also refuses a `tools` name that edits a file (6.3c).
    - **What phases 1 to 3 built.**
      - 6.4a: the `derived/<sha256>.md` format and its lint (`lint.mjs:354-378`): name, frontmatter, the binary's hash, and bad anchors. Footnote locators and their anchor check (`lint.mjs:277-306`, `sources.mjs:69`, `:87-103`). `KINDS` (`sources.mjs:7`). The guard on `derived/` (`edit.mjs:12-27`). Missing: an extractor, a tool that writes derived text, quotes against it, and sheets.
      - 6.4b: the bundle format, its lint (`lint.mjs:325-351`), quotes against files in a bundle, and `bundleOf` and `sourceItem` (`rules.mjs:707-725`). Missing: only a tool that writes `source.md`.
@@ -864,7 +864,7 @@ The phases build mechanism only. Adding real knowledge and taste is the user's c
        The patterns are bounded, so they use the default engine. A 1.86 MB line scans in about 25 ms (§11).
      - **Output.** `masked` is the value's first 2 and last 2 characters around `…`, and a private key shows as its kind alone. `allow` is the first 16 hex digits of the value's SHA-256, which identifies it without repeating it.
      - **Override.** `privacy.allow` in `vault.config.json`, a list of `allow` ids, which the user sets. `DEFAULTS` gains `privacy: { allow: [] }`. A listed value is never reported. Lint checks each id is 16 lowercase hex digits.
-     - **`tools/scan.mjs`.** `node tools/scan.mjs <file>...`, or `--stdin` for a NUL-separated list, as `git diff -z` writes it. A file that isn't UTF-8 is scanned through its derived text, under the binary's name, and skipped when it has none. Output, then exit 1 when anything was found, 0 when nothing was, 2 on no file given, a bad flag or a file that can't be read. `--stdin` with an empty list prints nothing and exits 0, so a commit that adds no source passes the pre-commit line:
+     - **`tools/scan.mjs`.** `node tools/scan.mjs <file>...`. A file that isn't UTF-8 is scanned through its derived text, under the binary's name, and skipped when it has none. Output, then exit 1 when anything was found, 0 when nothing was, 2 on no file given, a bad flag or a file that can't be read:
 
        ```
        raw/refs/notes.md:12 assignment api_key=ab…9f · allow 3f9c01ab77e0d2c1
@@ -874,9 +874,8 @@ The phases build mechanism only. Adding real knowledge and taste is the user's c
 
      - **Where it runs.**
        - `/ingest` step 2 runs `node tools/scan.mjs <file>` after saving or copying a source, and on exit 1 shows the user the lines and stops until they remove the values or allow them. This is 6.4e's refusal.
-       - The edit hook denies a `Write`, `Edit`, `MultiEdit` or `NotebookEdit` under `raw/` whose new text holds a value. The check sits between the guard's deny and the `vaultOwn` return (`edit.mjs:250-252`), since `raw/` is in `VAULT_OWN` (`vault.mjs:74`) and returns before any scope step. It marks no gate, so a retry with the same text is denied again. Copy (open question): "raw/refs/notes.md would hold what looks like a key or token, so the taste vault won't save it:", the scan's lines, then "Leave it out. If the user says it isn't a secret, they can add its allow id to privacy.allow in vault.config.json." The scan runs only on writes under `raw/`, which are rare.
        - `extract.mjs` scans the text before writing it (above).
-       - `.githooks/pre-commit` gains, after the append-only check: `git diff --cached --name-only -z --diff-filter=AM -- raw/refs/ derived/ | node tools/scan.mjs --stdin || exit 1`. It catches a source copied in with a shell command. It scans the working tree's copy, which the append-only rule keeps equal to the staged one under `raw/refs/`.
+       - The edit hook and the pre-commit hook don't scan, so a source saved outside `/ingest` isn't checked. §6.4e keeps privacy small: a deny in the edit hook on writes under `raw/`, and a pre-commit scan of added sources, would catch those too, and are left for the user to choose (open question).
      - Rows in `raw/inbox/` and `raw/picks/` are the user's words, written by the tools, and aren't scanned.
    - **Tool triggers (6.3c).**
      - **Hook and matcher.** The edit hook on PreToolUse, through the matcher it already has (`hooks.json:11`). No registration changes.
@@ -890,7 +889,6 @@ The phases build mechanism only. Adding real knowledge and taste is the user's c
      - **Latency.** A tool call with no rule on it costs what an edit outside every glob costs: the notes load from the cache (`cache.mjs`) and the scan is one pass over `liveRules`. The perf group gains `an AskUserQuestion call takes under 300 ms at 3,000 notes`, fastest of 3, with one `tools` rule among the generated notes. That is well inside the 10 s deadline (6.6b). An index of rules by tool is a scale item, left until the perf test says so.
    - **Rules that change.**
      - `.claude/skills/ingest/SKILL.md` step 2: after saving a binary source, run `node tools/extract.mjs <file>`, and stop and tell the user when it fails; then run `node tools/scan.mjs <file>` on every source and handle exit 1 as Privacy says. Step 5 quotes a binary source from its derived text. `/ingest batch` does the same, and leaves a source that fails either for the user.
-     - `.githooks/pre-commit` gains the scan line.
      - AGENTS.md changes as §10 says.
    - **Tests.** Each new test is written before its code and seen red for its reason.
      - `later-phases.test.mjs`: 6.3c and 6.4a lose `todo` and are otherwise unchanged.
@@ -904,8 +902,7 @@ The phases build mechanism only. Adding real knowledge and taste is the user's c
        - lint on an unknown extractor, a missing `extract`, a module with top-level `await`, bad `kinds`, `extensions` and `version`.
      - `test/privacy.test.mjs`:
        - `secretsIn` catches the cases under Patterns and passes the cases listed as passing, plus a PEM public key, data URIs, integrity hashes, sha256 hex, commit ids, UUIDs, slugs and long camelCase words;
-       - `scan.mjs`'s output, exit codes, `--stdin` with NUL-separated paths and with none, a binary scanned through its derived text, and `privacy.allow`;
-       - the edit hook denies a Write under `raw/refs/` holding a token, denies the retry, and passes it once its id is allowed. A Write elsewhere is not scanned.
+       - `scan.mjs`'s output, exit codes, a binary scanned through its derived text, and `privacy.allow`.
      - `test/tool-triggers.test.mjs`:
        - an everywhere domain's `tools` rule reaches a session outside its projects, and a session in the vault folder gets every domain's;
        - a second agent of the session is refused once too, and a reworded rule is refused again;
@@ -1003,7 +1000,6 @@ The design changes these parts of AGENTS.md. Each change lands with the phase th
   - Line 189 (sheets): a file with derived text can be a sheet too. `pick.mjs` refuses `notes` and comments the user didn't type in the session.
   - Line 204 (Ingest): `/ingest` extracts a binary source's text and scans every source for key- or token-shaped text before going through it, and stops on either until the user decides.
   - Line 212 (quotes): `propose.mjs` also refuses a quote a binary's derived text doesn't hold, a quote against a binary with none, and a source quote against an image, which backs `basis: reading` only. Lint warns on each such quote in a note, checks a quote whose transcript is gone against its `raw/inbox/` row, and counts in one line the quotes it can't check.
-  - Line 222 (what the hooks refuse): add a write under `raw/` whose text holds something shaped like a key or token, until it is removed or the user adds its allow id to `privacy.allow`.
 
 ## 11. Unverified claims the design leans on
 
