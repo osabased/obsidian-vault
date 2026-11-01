@@ -1,0 +1,171 @@
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import { makeVault, ruleNote, pageNote, sessionId, denied, editFile as edit, prompt } from './fixture.mjs';
+
+const ALPHA = { title: 'Alpha', markers: ['alpha.project'], topics: ['code', 'naming'] };
+const BETA = { title: 'Beta', markers: ['beta.project'], topics: ['code'] };
+
+// A folder outside every configured path, with the files given, so only markers can put it in a domain.
+function folder(t, files = []) {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'vault-reach-'));
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  for (const rel of files) {
+    const file = path.join(dir, ...rel.split('/'));
+    fs.mkdirSync(path.dirname(file), { recursive: true });
+    fs.writeFileSync(file, '');
+  }
+  return dir;
+}
+
+const context = out => out?.hookSpecificOutput?.additionalContext ?? '';
+const writeLocal = (v, domains) => v.write('vault.local.json', `${JSON.stringify({ domains }, null, 2)}\n`);
+const reachFound = async v => (await v.import('lib/lint.mjs')).lint()
+  .filter(f => /^vault\.(?:config|local)\.json$/.test(f.file)).map(f => [f.level, f.file, f.msg]);
+
+test('a session in an unlisted folder holding a domain\'s marker gets its rules and can propose', t => {
+  const v = makeVault(t, { domains: { alpha: ALPHA } });
+  v.write('wiki/alpha/rules/always-a.md', ruleNote({ domain: 'alpha', always: true, doLine: 'Alpha always.' }));
+  v.write('wiki/alpha/rules/gate-a.md', ruleNote({ domain: 'alpha', applies_to: ['src/**'], doLine: 'Alpha gate.' }));
+  const dir = folder(t, ['alpha.project', 'src/x.txt']);
+  const sid = sessionId();
+  const start = context(v.startSession(sid, { cwd: dir }));
+  assert.match(start, /alpha\/always-a: Do: Alpha always\./);
+  assert.match(start, /propose\.mjs/);
+  assert.match(denied(edit(v, sid, '', { abs: path.join(dir, 'src', 'x.txt'), cwd: dir })) ?? '', /alpha\/gate-a/);
+  const r = v.propose(sid, {
+    domain: 'alpha', slug: 'name-widgets', topic: 'naming', basis: 'reading', reading: 'The user renamed the widgets.',
+    do: 'Name widgets after their screen.', not: 'Leave widget names bare.', applies_to: ['src/**/*.txt'],
+  });
+  assert.equal(r.code, 0, r.stderr);
+  assert.ok(v.exists('wiki/alpha/rules/name-widgets.md'));
+});
+
+test('in a monorepo each package\'s edits get its own domain, and a session at the root hears both', t => {
+  const v = makeVault(t, { domains: { alpha: ALPHA, beta: BETA } });
+  v.write('wiki/alpha/rules/gate-a.md', ruleNote({ domain: 'alpha', applies_to: ['src/**'], doLine: 'Alpha gate.' }));
+  v.write('wiki/beta/rules/gate-b.md', ruleNote({ domain: 'beta', applies_to: ['src/**'], doLine: 'Beta gate.' }));
+  v.write('wiki/alpha/rules/always-a.md', ruleNote({ domain: 'alpha', always: true, doLine: 'Alpha always.' }));
+  v.write('wiki/beta/rules/always-b.md', ruleNote({ domain: 'beta', always: true, doLine: 'Beta always.' }));
+  v.write('wiki/alpha/rules/word-a.md', ruleNote({ domain: 'alpha', keywords: ['spacing'], doLine: 'Alpha word.' }));
+  v.write('wiki/beta/rules/word-b.md', ruleNote({ domain: 'beta', keywords: ['spacing'], doLine: 'Beta word.' }));
+  const root = folder(t, ['packages/a/alpha.project', 'packages/b/beta.project']);
+  const sid = sessionId();
+  const start = context(v.startSession(sid, { cwd: root }));
+  assert.match(start, /alpha\/always-a/);
+  assert.match(start, /beta\/always-b/);
+  const said = context(prompt(v, sid, 'fix the spacing', { cwd: root }));
+  assert.match(said, /alpha\/word-a/);
+  assert.match(said, /beta\/word-b/);
+  const a = denied(edit(v, sid, '', { abs: path.join(root, 'packages', 'a', 'src', 'x.txt'), cwd: root })) ?? '';
+  assert.match(a, /alpha\/gate-a/);
+  assert.doesNotMatch(a, /beta\//);
+  const b = denied(edit(v, sid, '', { abs: path.join(root, 'packages', 'b', 'src', 'x.txt'), cwd: root })) ?? '';
+  assert.match(b, /beta\/gate-b/);
+  assert.doesNotMatch(b, /alpha\//);
+});
+
+test('session start looks below its folder only to reach.markerDepth, past dot-folders and ignored folders', t => {
+  const v = makeVault(t, { domains: { alpha: ALPHA, beta: BETA, gamma: { title: 'Gamma', markers: ['gamma.project'], topics: [] } } });
+  for (const d of ['alpha', 'beta', 'gamma']) v.write(`wiki/${d}/rules/always.md`, ruleNote({ domain: d, always: true }));
+  const root = folder(t, ['one/two/three/alpha.project', 'one/two/three/four/gamma.project', '.hidden/beta.project', 'deps/beta.project', 'out/x/gamma.project']);
+  fs.writeFileSync(path.join(root, '.gitignore'), '# built\n/deps/\nout\n');
+  const start = context(v.startSession(sessionId(), { cwd: root }));
+  assert.match(start, /alpha\/always/);
+  assert.doesNotMatch(start, /beta\/always/);
+  assert.doesNotMatch(start, /gamma\/always/);
+});
+
+test('a domain\'s paths in vault.local.json put a folder in it, and edits there get its rules', t => {
+  const v = makeVault(t, { domains: { alpha: { title: 'Alpha', topics: ['code'] } } });
+  const dir = folder(t, ['src/x.txt']);
+  writeLocal(v, { demo: { paths: [v.project.replace(/\\/g, '/')] }, alpha: { paths: [dir.replace(/\\/g, '/')] } });
+  v.write('wiki/alpha/rules/gate-a.md', ruleNote({ domain: 'alpha', applies_to: ['src/**'] }));
+  assert.match(denied(edit(v, sessionId(), '', { abs: path.join(dir, 'src', 'x.txt'), cwd: dir })) ?? '', /alpha\/gate-a/);
+});
+
+test('an everywhere domain\'s pages and keyword rules reach any folder, and its glob and always rules do not', t => {
+  const v = makeVault(t, { domains: { notes: { title: 'Notes', everywhere: true, topics: ['code'] } } });
+  v.write('wiki/notes/concepts/solvers.md', pageNote({ domain: 'notes', kind: 'concept', keywords: ['solver'] }));
+  v.write('wiki/notes/concepts/files.md', pageNote({ domain: 'notes', kind: 'concept', applies_to: ['**/*.txt'] }));
+  v.write('wiki/notes/rules/word.md', ruleNote({ domain: 'notes', keywords: ['solver'], doLine: 'Word rule.' }));
+  v.write('wiki/notes/rules/gate.md', ruleNote({ domain: 'notes', applies_to: ['**/*.txt'], doLine: 'Gate rule.' }));
+  v.write('wiki/notes/rules/always.md', ruleNote({ domain: 'notes', always: true, doLine: 'Always rule.' }));
+  const dir = folder(t);
+  const sid = sessionId();
+  assert.doesNotMatch(context(v.startSession(sid, { cwd: dir })), /notes\/always/);
+  const said = context(prompt(v, sid, 'which solver?', { cwd: dir }));
+  assert.match(said, /notes\/solvers/);
+  assert.match(said, /notes\/word/);
+  assert.doesNotMatch(said, /notes\/always/);
+  const out = edit(v, sid, '', { abs: path.join(dir, 'a.txt'), cwd: dir });
+  assert.equal(denied(out), null);
+  assert.match(context(out), /notes\/files/);
+});
+
+test('lint reports a missing path as an error and a domain that reaches no project as a warning', async t => {
+  const v = makeVault(t, { domains: { alpha: { title: 'Alpha', topics: [] }, beta: { title: 'Beta', topics: [] } } });
+  writeLocal(v, { demo: { paths: [v.project.replace(/\\/g, '/')] }, beta: { paths: ['C:/nowhere/beta'] } });
+  assert.deepEqual(await reachFound(v), [
+    ['error', 'vault.local.json', "beta's path C:/nowhere/beta doesn't exist on this machine. Fix it or remove it"],
+    ['warn', 'vault.config.json', "alpha reaches no project on this machine. Add its folders to vault.local.json as paths, give it markers, or set vaultOnly: true if it holds only pages"],
+  ]);
+});
+
+test('lint checks the shape of markers, everywhere, vaultOnly and vault.local.json', async t => {
+  const v = makeVault(t, {
+    domains: {
+      alpha: { title: 'Alpha', markers: ['', 'sub/alpha.project'], topics: [] },
+      beta: { title: 'Beta', everywhere: 'yes', vaultOnly: 1, topics: [] },
+      gamma: { title: 'Gamma', vaultOnly: true, markers: ['gamma.project'], everywhere: true, topics: [] },
+      delta: { title: 'Delta', vaultOnly: true, topics: [] },
+      old: { title: 'Old', projects: ['C:/old'], markers: ['old.project'], topics: [] },
+    },
+  });
+  writeLocal(v, { demo: { paths: [v.project.replace(/\\/g, '/')] }, alpha: { paths: 'x' }, delta: { paths: [v.project.replace(/\\/g, '/')] }, nobody: { paths: [] } });
+  assert.deepEqual(await reachFound(v), [
+    ['error', 'vault.config.json', 'alpha: markers must be a list of file names, with no folders in them'],
+    ['error', 'vault.config.json', 'beta: everywhere must be true or false'],
+    ['error', 'vault.config.json', 'beta: vaultOnly must be true or false'],
+    ['error', 'vault.config.json', 'gamma is vaultOnly, so it holds only pages and takes no markers or everywhere'],
+    ['error', 'vault.local.json', 'alpha: paths must be a list of absolute folder paths'],
+    ['error', 'vault.local.json', 'delta is vaultOnly in vault.config.json, so it takes no paths'],
+    ['error', 'vault.local.json', "nobody isn't a domain in vault.config.json"],
+    ['warn', 'vault.config.json', 'beta reaches no project on this machine. Add its folders to vault.local.json as paths, give it markers, or set vaultOnly: true if it holds only pages'],
+    ['warn', 'vault.config.json', 'old: projects does nothing. Put its folders in vault.local.json as paths, or give it markers'],
+  ]);
+});
+
+test('a missing vault.local.json gives a paths-only domain a warning, not an error', async t => {
+  const v = makeVault(t);
+  fs.rmSync(v.at('vault.local.json'));
+  assert.deepEqual(await reachFound(v), [
+    ['warn', 'vault.config.json', "demo reaches no project on this machine. Add its folders to vault.local.json as paths, give it markers, or set vaultOnly: true if it holds only pages"],
+  ]);
+});
+
+test('a rule in a vaultOnly domain is an error', async t => {
+  const v = makeVault(t, { domains: { reading: { title: 'Reading', vaultOnly: true, topics: ['solvers'] } } });
+  const rules = await v.import('lib/rules.mjs');
+  const rule = rules.parseNote(ruleNote({ domain: 'reading', keywords: ['solver'] }), 'wiki/reading/x.md');
+  assert.deepEqual(rules.noteErrors(rule), ['reading is vault-only, so it holds pages only. Put the rule in a domain that reaches projects, or in global']);
+});
+
+test('the edit hook refuses an edit to vault.local.json', t => {
+  const v = makeVault(t);
+  assert.match(denied(v.edit(sessionId(), 'Edit', { file_path: v.at('vault.local.json'), old_string: 'a', new_string: 'b' })) ?? '', /vault\.local\.json/);
+});
+
+test('a folder\'s domains are the nearest marker folder\'s and the paths that hold it, each with its project root', async t => {
+  const v = makeVault(t, { domains: { alpha: ALPHA, beta: BETA } });
+  const root = folder(t, ['alpha.project', 'beta.project', 'pkg/beta.project']);
+  const { domainsFor, toPosix } = await v.import('lib/vault.mjs');
+  const at = (...xs) => toPosix(path.join(root, ...xs));
+  assert.deepEqual(domainsFor(path.join(root, 'src', 'new.txt')), [
+    { domain: 'alpha', root: at(), rel: 'src/new.txt' },
+    { domain: 'beta', root: at(), rel: 'src/new.txt' },
+  ]);
+  assert.deepEqual(domainsFor(path.join(root, 'pkg')), [{ domain: 'beta', root: at('pkg'), rel: '' }]);
+});

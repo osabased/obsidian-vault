@@ -1,5 +1,3 @@
-import os from 'node:os';
-import path from 'node:path';
 import { makeVault, ruleNote, pageNote, sourcePage } from '../fixture.mjs';
 
 const TOPICS = ['layout', 'color', 'code', 'tests', 'perf', 'naming', 'errors', 'docs'];
@@ -53,7 +51,7 @@ export function bigVault(t, n) {
   const v = makeVault(t, {
     domain: 'ui',
     topics: TOPICS,
-    domains: Object.fromEntries(OTHERS.map(d => [d, { title: d, projects: [path.join(os.tmpdir(), `vault-perf-nowhere-${d}`).replace(/\\/g, '/')], topics: TOPICS }])),
+    domains: Object.fromEntries(OTHERS.map(d => [d, { title: d, markers: [`${d}.project`], topics: TOPICS }])),
   });
   for (let i = 0; i < 50; i++) v.write(`raw/refs/ref-${i}.md`, `---\nurl: https://example.com/${i}\nfetched: 2026-10-01\n---\nSome text ${i}.\n`);
   addNotes(v, 0, n);
