@@ -108,17 +108,21 @@ test('at most delivery.maxPages come up at a time, and the rest on the next matc
   assert.deepEqual(pointed(edit(v, other, 'src/b.luau')), ['demo/d-grid']);
 });
 
-test('lint checks a page\'s keywords and applies_to as it does a rule\'s, and warns on the fields only rules take', async t => {
+test('lint checks a page\'s scope fields as it does a rule\'s, always and triggers included', async t => {
   const v = makeVault(t, { domains: { reading: { title: 'Reading', vaultOnly: true, topics: ['solvers'] } } });
-  v.write('wiki/demo/code.md', page({ body: ['[[bad-glob]] [[rule-fields]]', '', '## Rules'] }));
+  v.write('wiki/demo/code.md', page({ body: ['[[bad-glob]] [[rule-fields]] [[bad-triggers]] [[bad-regex]]', '', '## Rules'] }));
   v.write('wiki/demo/bad-glob.md', pushed({ applies_to: ['src/{a'] }));
   v.write('wiki/demo/rule-fields.md', pushed({ extra: ['always: true', 'triggers: []'] }));
+  v.write('wiki/demo/bad-triggers.md', pushed({ extra: ['always: maybe', 'triggers: wait'] }));
+  v.write('wiki/demo/bad-regex.md', pushed({ applies_to: ['src/**'], extra: ["triggers: ['(']"] }));
   v.write('wiki/reading/solvers.md', page({ domain: 'reading', topic: 'solvers', body: ['[[solver-history]]', '', '## Rules'] }));
   v.write('wiki/reading/solver-history.md', pushed({ domain: 'reading', topic: 'solvers', applies_to: ['src/**'] }));
-  const found = await lintFound(v, /glob|rules\. A page|no edit/);
+  const found = await lintFound(v, /glob|for rules|no edit|triggers|always/);
   assert.deepEqual(found.map(f => [f.level, f.file, f.msg]).sort(), [
     ['error', 'wiki/demo/bad-glob.md', 'bad glob in applies_to: src/{a'],
-    ['warn', 'wiki/demo/rule-fields.md', 'always and triggers are for rules. A page comes up through keywords and applies_to'],
+    ['error', 'wiki/demo/bad-regex.md', 'bad regex in triggers: ('],
+    ['error', 'wiki/demo/bad-triggers.md', 'always must be true or false'],
+    ['error', 'wiki/demo/bad-triggers.md', 'triggers must be a list'],
     ['warn', 'wiki/reading/solver-history.md', 'reading is vault-only, so no edit brings this page up. Give it keywords instead'],
   ]);
 });
@@ -130,4 +134,12 @@ test('a rule\'s errors keep their order, and a note of another type gets only th
   assert.match(rules.noteErrors(rule)[0], /is vault-only/);
   const memo = rules.parseNote(page({ extra: ['keywords: grid'] }).replace('type: page', 'type: memo'), 'wiki/demo/x.md');
   assert.deepEqual(rules.noteErrors(memo), ['type must be rule or page']);
+});
+
+test('a page\'s triggers narrow it to edits whose new text matches, as a rule\'s do', t => {
+  const v = makeVault(t);
+  const sid = sessionId();
+  v.write('wiki/demo/waits.md', pushed({ applies_to: ['src/**'], extra: ['triggers:', "  - 'wait\\('"] }));
+  assert.equal(edit(v, sid, 'src/a.luau', { text: 'local x = 1' }), null);
+  assert.deepEqual(pointed(edit(v, sid, 'src/a.luau', { text: 'task.wait(1)' })), ['demo/waits']);
 });

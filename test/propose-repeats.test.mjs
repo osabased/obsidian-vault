@@ -164,7 +164,7 @@ test('a repeat that moves as_of rebuilds index.md', t => {
   assert.match(v.read('index.md'), /knowledge as of 2026-09-01/);
 });
 
-test('as_of moves on the frontmatter line the note is read from, keeping its comment, and nowhere else', async t => {
+test('as_of moves on the frontmatter line the note is read from, replacing its old comment, and nowhere else', async t => {
   for (const [extra, examples = []] of [
     [['as_of : 2026-01-01'], ['as_of: 2025-05-05']],
     [['as_of: 2025-01-01', 'as_of: 2026-01-01']],
@@ -179,7 +179,8 @@ test('as_of moves on the frontmatter line the note is read from, keeping its com
     const text = v.read('wiki/demo/old-api.md');
     assert.equal((await v.import('lib/rules.mjs')).parseNote(text, 'wiki/demo/old-api.md').as_of, '2026-09-01', extra.join());
     for (const line of examples) assert.ok(text.includes(`\n${line}\n`), `${extra.join()}: ${line} kept`);
-    if (extra[0].includes('#')) assert.match(text, /^as_of: 2026-09-01 # checked by hand$/m);
+    if (extra[0].includes('#')) assert.match(text, /^as_of: 2026-09-01$/m);
+    if (extra[0].includes("'")) assert.match(text, /^as_of: '2026-09-01'$/m);
   }
 });
 
