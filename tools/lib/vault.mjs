@@ -271,13 +271,18 @@ export const today = (d = new Date()) => `${d.getFullYear()}-${pad(d.getMonth() 
 export const localDay = at => (Number.isNaN(Date.parse(at)) ? '' : today(new Date(at)));
 export const clock = (d = new Date()) => `${today(d)} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
 
-export const inboxFile = () => vaultPath('raw', 'inbox', `${today()}.jsonl`);
-export const picksFile = (day = today()) => vaultPath('raw', 'picks', `${day}.jsonl`);
+// A session writes its own file, so two clones working on one day never append to the same one in git. Rows from before
+// that sit in <date>.jsonl. A sheet beside them is <date>-<subject>.<image extension>, which this never matches.
+const ROW_FILE = /^\d{4}-\d\d-\d\d(?:-[\w-]{1,8})?\.jsonl$/;
+const sessionFile = (folder, sid, day) => vaultPath('raw', folder, `${day}-${safeId(sid).slice(0, 8)}.jsonl`);
+
+export const inboxFile = (sid, day = today()) => sessionFile('inbox', sid, day);
+export const picksFile = (sid, day = today()) => sessionFile('picks', sid, day);
 
 export function datedFiles(folder) {
   const dir = vaultPath('raw', folder);
   let files = [];
-  try { files = fs.readdirSync(dir).filter(f => f.endsWith('.jsonl')).sort(); } catch {}
+  try { files = fs.readdirSync(dir).filter(f => ROW_FILE.test(f)).sort(); } catch {}
   return files.map(f => ({ file: `raw/${folder}/${f}`, rows: readJsonl(path.join(dir, f)) }));
 }
 
@@ -294,7 +299,10 @@ export function filesIn(dir, ext = '', rel = '') {
   });
 }
 
-const datedRows = folder => datedFiles(folder).flatMap(f => f.rows);
+// By `at`, not by file, so rows read the same whichever clone's file holds them.
+const atOf = r => String(r?.at ?? '');
+const byAt = (a, b) => (atOf(a) < atOf(b) ? -1 : atOf(a) > atOf(b) ? 1 : 0);
+const datedRows = folder => datedFiles(folder).flatMap(f => f.rows).sort(byAt);
 
 export const proposalRows = () => datedRows('inbox').filter(r => r.source === 'agent');
 export const pickRows = () => datedRows('picks');

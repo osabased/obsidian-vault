@@ -28,7 +28,7 @@ test('a rule alone goes straight through and lands in the inbox', t => {
   assert.match(v.read('wiki/demo/rules/new-rule.md'), /· agent's reading · session a1b2c3d4 · The user rewrote the screen twice\. \(a-[0-9a-f]{8}\)/);
   const files = fs.readdirSync(v.at('raw', 'inbox'));
   assert.equal(files.length, 1);
-  assert.match(files[0], /^\d{4}-\d\d-\d\d\.jsonl$/);
+  assert.match(files[0], /^\d{4}-\d\d-\d\d-a1b2c3d4\.jsonl$/);
   const [row] = inbox(v);
   assert.match(row.id, /^a-[0-9a-f]{8}$/);
   assert.equal(row.source, 'agent');

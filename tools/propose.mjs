@@ -296,7 +296,7 @@ function addEvidence(f, e, scope, rules, same, row, notes) {
   if (n.kind === 'knowledge' && validDay(n.as_of) && checked > n.as_of) after = setField(after, 'as_of', checked);
   const now = parseNote(after, rel);
   writeSettled(file, after);
-  appendJsonl(inboxFile(), [row(target)]);
+  appendJsonl(inboxFile(f.sid), [row(target)]);
   appendLog([`added evidence to ${target} · session ${f.sid.slice(0, 8)}`]);
   guarded('build', build);
   const [was, is] = [n, now].map(x => shortHash(ruleText(x)));
@@ -368,7 +368,7 @@ function propose(sid, p) {
     const overlaps = checkRepeats(f, ruleText(n), scope, rules, same, notes);
     const file = vaultPath(...rel.split('/'));
     writeSettled(file, text);
-    appendJsonl(inboxFile(), [row(key)]);
+    appendJsonl(inboxFile(sid), [row(key)]);
     appendLog([`wrote ${key} · session ${sid.slice(0, 8)}`]);
     // The note is written by now, so a failed build costs the generated files, not the reply that names the rule.
     guarded('build', build);
