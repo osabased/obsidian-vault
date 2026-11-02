@@ -4,10 +4,11 @@ A taste vault for Claude Code, based on Andrej Karpathy's LLM wiki pattern: a sm
 
 ## Plugin
 
-The repo is also a Claude Code plugin with two skills and the hooks:
+The repo is also a Claude Code plugin with three skills and the hooks:
 
 - `/obsidian-vault:ingest` goes through a source with you, a file or a URL whose text it saves, and turns it and what you say about it into pages and rules. `/obsidian-vault:ingest batch` takes in every file in `raw/refs/` no source page names yet, and asks before adding any rule.
 - `/obsidian-vault:lint` checks the whole wiki and proposes fixes.
+- `/obsidian-vault:vault` sets when agents propose rules: `corrections` (as soon as you correct them), `ask` (they offer each rule and keep it once you agree; the default) or `off` (only when you ask), for every project or one domain, as `/obsidian-vault:vault off` or `/obsidian-vault:vault corrections <domain>`. Saying it in words works too.
 - The hooks deliver the rules and pages to your sessions. `hooks/hooks.json` starts SessionStart, UserPromptSubmit, PreToolUse (edits), Stop and SubagentStart through `hooks/launch.mjs`, which runs the hook from your vault.
 
 ```
@@ -17,7 +18,7 @@ claude plugin install obsidian-vault@obsidian-vault --config "vault=<path to you
 
 The plugin has one option, `vault`, the folder of your vault checkout. To set or change it later, run `claude plugin configure obsidian-vault` to see the option, or save it with `echo '{"vault":"<path>"}' | claude plugin configure obsidian-vault --values-stdin`. An unset option, a relative path, a vault with no `.live/tools/` or a hook that cannot load prints `vault <hook> failed: <why>` as a hook error, and the call goes ahead.
 
-The skills run this vault's `tools/` in the working folder, so open a checkout of the vault before using them. If `settings.json` still holds the vault's hooks from before the plugin, remove them, or each hook runs twice.
+`ingest` and `lint` run this vault's `tools/` in the working folder, so open a checkout of the vault before using them. `vault` works in any session the hooks reach. If `settings.json` still holds the vault's hooks from before the plugin, remove them, or each hook runs twice.
 
 ## Hooks
 

@@ -44,7 +44,7 @@ export function config() {
     const extractors = Array.isArray(c.extractors) ? c.extractors : [];
     // The agents whose tool names lint checks, in the order a script looks for its own session, each a folder in tools/adapters/.
     const agents = Array.isArray(c.agents) ? c.agents : ['claude-code'];
-    loaded = { domains, extractors, agents, ...Object.fromEntries(Object.entries(DEFAULTS).map(([k, d]) => [k, { ...d, ...c[k] }])) };
+    loaded = { domains, extractors, agents, proposals: c.proposals, ...Object.fromEntries(Object.entries(DEFAULTS).map(([k, d]) => [k, { ...d, ...c[k] }])) };
   }
   return loaded;
 }
@@ -202,6 +202,15 @@ export const inVaultFolder = cwd => Boolean(cwd) && vaultRel(cwd) !== null;
 // than read from missing paths, so a domain is vault-only on every machine or none.
 export const isVaultOnly = d => d !== 'global' && config().domains[d]?.vaultOnly === true;
 export const everywhereDomains = () => Object.keys(config().domains).filter(d => config().domains[d].everywhere === true && !isVaultOnly(d));
+
+export const PROPOSAL_MODES = ['corrections', 'ask', 'off'];
+// A value lint reports counts as the one it would fall back to, so a typo keeps the user's say over each rule.
+const modeOr = (x, fallback) => (PROPOSAL_MODES.includes(x) ? x : fallback);
+// global has no entry under domains, so it takes the top-level mode.
+export function proposalMode(d) {
+  const top = modeOr(config().proposals, 'ask');
+  return d === 'global' ? top : modeOr(config().domains[d]?.proposals, top);
+}
 
 // The vault folder is where every domain's pages are read, a vault-only domain's among them; an everywhere domain's
 // pages reach every session.
