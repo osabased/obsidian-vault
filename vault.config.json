@@ -1,11 +1,5 @@
 {
-  "domains": {
-    "roblox-ui": {
-      "title": "Roblox game UI",
-      "topics": ["layout", "color", "typography", "motion", "components", "feedback", "code"],
-      "showSkipTopics": ["code"]
-    }
-  },
+  "domains": {},
   "delivery": {
     "maxRulesPerEdit": 3,
     "maxRuleChars": 300,
