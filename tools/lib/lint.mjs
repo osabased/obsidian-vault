@@ -3,6 +3,7 @@ import path from 'node:path';
 import { isBuiltin } from 'node:module';
 import {
   config, vaultPath, plural, today, daysBetween, datedFiles, filesIn, pickRows, proposalRows, rewriteText, writeText, lf, readJson, readJsonSafe, toPosix, memo, statePath, isVaultOnly, isMarkerName, clock, inVaultFolder,
+  PROPOSAL_MODES,
 } from './vault.mjs';
 import { editsFile, sentToHook, hookMatchers, listedAgents, typedFor, hasAgent, AGENT_NAME } from './agents.mjs';
 import {
@@ -923,8 +924,16 @@ const isFolder = p => typeof p === 'string' && Boolean(p.trim()) && path.isAbsol
 // Reach comes from vault.config.json, which every machine shares, and the paths in vault.local.json, which only this
 // machine has, so each file is read as written rather than through config(), which keeps only what parses.
 function lintReach(add) {
-  const shared = readJsonSafe(vaultPath('vault.config.json'))?.domains ?? {};
+  const sharedFile = readJsonSafe(vaultPath('vault.config.json'));
+  const shared = sharedFile?.domains ?? {};
   const localFile = vaultPath('vault.local.json');
+  const modes = joinList(PROPOSAL_MODES, 'or');
+  const topMode = sharedFile?.proposals;
+  if (topMode !== undefined && !PROPOSAL_MODES.includes(topMode)) add('error', 'vault.config.json', `proposals is ${JSON.stringify(topMode)}; it must be ${modes}`);
+  for (const [d, x] of Object.entries(shared)) {
+    const mode = x?.proposals;
+    if (mode !== undefined && !PROPOSAL_MODES.includes(mode)) add('error', 'vault.config.json', `${d}: proposals is ${JSON.stringify(mode)}; it must be ${modes}`);
+  }
   const local = fs.existsSync(localFile) ? readJsonSafe(localFile) : {};
   const mine = local?.domains ?? {};
   if (!local || typeof mine !== 'object' || Array.isArray(mine)) {

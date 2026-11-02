@@ -99,7 +99,7 @@ export async function start(event, agent) {
   if (registered) {
     touchSession(event, hits, agent.name);
     if (doms.length) {
-      propose = proposeNote(event.session, agent);
+      propose = proposeNote(event.session, agent, doms, vaultFolder);
       pick = pickNote(event.session);
     } else if (!vaultFolder) uncovered = uncoveredNote(event.session, agent);
   }

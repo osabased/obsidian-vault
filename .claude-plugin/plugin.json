@@ -1,6 +1,6 @@
 {
   "name": "obsidian-vault",
-  "description": "The taste vault's skills and hooks: /ingest turns a source and the user's words about it into pages and rules, and with batch takes in every new file in raw/refs/; /lint checks the whole wiki; the hooks deliver the rules and pages to sessions. Set the vault option to a vault checkout.",
+  "description": "The taste vault's skills and hooks: /ingest turns a source and the user's words about it into pages and rules, and with batch takes in every new file in raw/refs/; /lint checks the whole wiki; /vault sets when agents propose rules; the hooks deliver the rules and pages to sessions. Set the vault option to a vault checkout.",
   "author": {
     "name": "osabased"
   },

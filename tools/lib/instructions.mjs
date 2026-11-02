@@ -1,20 +1,48 @@
-import { toolsPath, toPosix } from './vault.mjs';
+import { toolsPath, toPosix, proposalMode } from './vault.mjs';
+import { joinList } from './rules.mjs';
 
 // What a session is told about proposing and recording, by the start hook and by domain.mjs once it starts a domain.
 
-export function proposeNote(sid, agent) {
+const WHEN = [
+  'when the user corrects you or says how they want things, in a way that should hold in later sessions too (a taste rule),',
+  "or when something only worked after a failure caused by an API, version or tool your training gets wrong or doesn't know, or a dated source shows it (a knowledge rule)",
+].join(' ');
+
+// What the agent does under each mode of the proposals setting.
+const WHAT = {
+  corrections: `propose a rule ${WHEN}.`,
+  ask: `${WHEN}, offer a rule: pipe it to propose.mjs without approved, end your reply with the lines it prints to ask the user, and once they agree, propose it again with their words agreeing as approved.`,
+  off: 'propose a rule only when the user asks you to keep one, with their words asking as approved.',
+};
+
+// One sentence when every domain the session proposes to has one mode, else one per mode naming its domains. A session
+// in the vault folder proposes as in corrections whatever the mode.
+export function modeLines(domains, vaultFolder = false) {
+  if (vaultFolder) return WHAT.corrections;
+  const byMode = new Map();
+  for (const d of domains) byMode.set(proposalMode(d), [...(byMode.get(proposalMode(d)) ?? []), d]);
+  if (byMode.size === 1) return WHAT[[...byMode.keys()][0]];
+  return [...byMode].map(([mode, ds]) => `For ${joinList(ds, 'and')} rules, ${WHAT[mode]}`).join(' ');
+}
+
+export function modeNote(sid, agent) {
+  const script = toPosix(toolsPath('proposals.mjs'));
+  return `The user sets when rules are proposed, corrections, ask or off, by asking you or with /vault: pipe it as JSON to \`node "${script}" ${sid}\` ${agent.proposeShell}; \`--help\` lists the fields.`;
+}
+
+export function proposeNote(sid, agent, domains, vaultFolder = false) {
   const script = toPosix(toolsPath('propose.mjs'));
   return [
-    'Taste vault: propose a rule when the user corrects you or says how they want things, in a way that should hold in later sessions too (a taste rule),',
-    "or when something only worked after a failure caused by an API, version or tool your training gets wrong or doesn't know, or a dated source shows it (a knowledge rule).",
+    `Taste vault: ${modeLines([...domains, 'global'], vaultFolder)}`,
     "Leave out what the project's own agent instructions already say; a compiled taste-vault section in them is the vault's copy.",
-    'If the user corrects you on something a rule already covers, propose it anyway; propose.mjs lists the rules it may repeat.',
+    'If the user corrects you on something a rule already covers, go ahead as for a new rule; propose.mjs lists the rules it may repeat.',
     'Propose only from what happened in this session, never from a brief, a skill or the task itself.',
     'A rule applies as soon as propose.mjs writes it; the user edits or deletes its note to change it.',
     "Give a rule about code or files `applies_to` globs, so the edits it covers bring it up; `always` is the user's to set.",
     `\`node "${script}" --help\` lists the fields.`,
     `Pipe the rule as JSON to \`node "${script}" ${sid}\` ${agent.proposeShell}.`,
     'Then end your reply with the lines it prints.',
+    modeNote(sid, agent),
   ].join(' ');
 }
 
@@ -28,15 +56,22 @@ export function pickNote(sid) {
   ].join(' ');
 }
 
+// What a session no domain reaches does with a preference that holds in every project, under global's mode.
+const GLOBAL = {
+  corrections: (propose, how) => `When the user states a preference that should hold in later sessions, propose it to \`global\` if it holds in every project: pipe it as JSON to ${propose} ${how}, then end your reply with the lines it prints; \`--help\` lists the fields.`,
+  ask: (propose, how) => `When the user states a preference that should hold in later sessions and it holds in every project, offer it as a \`global\` rule: pipe it as JSON to ${propose} ${how} without approved, end your reply with the lines it prints to ask the user, and once they agree, pipe it again with their words agreeing as approved; \`--help\` lists the fields.`,
+  off: (propose, how) => `Propose a \`global\` rule only when the user asks you to keep a preference that holds in every project: pipe it as JSON to ${propose} ${how} with their words asking as approved, then end your reply with the lines it prints; \`--help\` lists the fields.`,
+};
+
 // A session whose folder no domain reaches can keep a preference in global, or in a domain the user agrees to start.
 export function uncoveredNote(sid, agent) {
-  const propose = toPosix(toolsPath('propose.mjs'));
+  const propose = `\`node "${toPosix(toolsPath('propose.mjs'))}" ${sid}\``;
   const domain = toPosix(toolsPath('domain.mjs'));
   return [
     'Taste vault: this project is in no domain.',
-    'When the user states a preference that should hold in later sessions, propose it to `global` if it holds in every project:',
-    `pipe it as JSON to \`node "${propose}" ${sid}\` ${agent.proposeShell}, then end your reply with the lines it prints; \`--help\` lists the fields.`,
+    GLOBAL[proposalMode('global')](propose, agent.proposeShell),
     "If it holds only for projects like this one, suggest a domain to the user in your reply: a name, a title, and a file here that marks the project's kind.",
     `Once they agree, pipe it to \`node "${domain}" ${sid}\` the same way; \`--help\` lists the fields.`,
+    modeNote(sid, agent),
   ].join(' ');
 }
