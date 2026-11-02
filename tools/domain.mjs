@@ -7,12 +7,13 @@ import {
 } from './lib/vault.mjs';
 import { build } from './lib/build.mjs';
 import { KEBAB, joinList } from './lib/rules.mjs';
-import { saidIn } from './lib/quotes.mjs';
+import { inLatest } from './lib/quotes.mjs';
 import { ownEntry, addReach } from './lib/sessions.mjs';
 import { mainWorktree } from './lib/git.mjs';
 import { namedIn } from './lib/neutral.mjs';
 import { proposeNote, pickNote } from './lib/instructions.mjs';
-import { agent, hasAgent, FIRST_AGENT, currentSession, typedFor, shortName } from './lib/agents.mjs';
+import { valuesOf, addMember } from './lib/json.mjs';
+import { agent, hasAgent, FIRST_AGENT, currentSession, shortName } from './lib/agents.mjs';
 import { UsageError, readInput, refuse, failure, line } from './lib/input.mjs';
 
 const RUN = 'usage: node tools/domain.mjs [session-id] < domain.json';
@@ -123,69 +124,11 @@ function clashes(f) {
 function approval(entry, p) {
   const approved = line(p, 'approved', false);
   if (!approved) refuse("approved is missing: give the user's words agreeing to start this domain, from their latest message.");
-  const typed = typedFor(entry);
-  if (!typed) refuse("the taste vault has no transcript for this session, so it can't check approved is the user's words. Ask the user to add the domain to vault.config.json.");
-  if (!saidIn(approved, typed.slice(-1))) {
+  const agreed = inLatest(entry, approved);
+  if (agreed === null) refuse("the taste vault has no transcript for this session, so it can't check approved is the user's words. Ask the user to add the domain to vault.config.json.");
+  if (!agreed) {
     refuse("approved isn't in the user's latest message. Suggest the domain in your reply, and once the user agrees, pass their words as approved.");
   }
-}
-
-// Scalars and lists of scalars stay on one line, as the vault's config writes them; an object takes a line per key.
-function jsonText(value, unit, eol, depth) {
-  const scalars = Array.isArray(value) && value.every(x => x === null || typeof x !== 'object');
-  if (value === null || typeof value !== 'object' || scalars) return Array.isArray(value) ? `[${value.map(x => JSON.stringify(x)).join(', ')}]` : JSON.stringify(value);
-  const pad = unit.repeat(depth + 1);
-  const items = Array.isArray(value) ? value.map(x => `${pad}${jsonText(x, unit, eol, depth + 1)}`)
-    : Object.entries(value).map(([k, x]) => `${pad}${JSON.stringify(k)}: ${jsonText(x, unit, eol, depth + 1)}`);
-  const [open, close] = Array.isArray(value) ? ['[', ']'] : ['{', '}'];
-  return items.length ? `${open}${eol}${items.join(`,${eol}`)}${eol}${unit.repeat(depth)}${close}` : `${open}${close}`;
-}
-
-function stringEnd(s, i) {
-  for (let j = i + 1; j < s.length; j++) {
-    if (s[j] === '\\') j++;
-    else if (s[j] === '"') return j + 1;
-  }
-  throw new Error('a string in the JSON never ends');
-}
-
-function closing(s, i) {
-  let depth = 0;
-  for (let j = i; j < s.length; j++) {
-    if (s[j] === '"') j = stringEnd(s, j) - 1;
-    else if (s[j] === '{' || s[j] === '[') depth++;
-    else if ((s[j] === '}' || s[j] === ']') && --depth === 0) return j;
-  }
-  throw new Error('a bracket in the JSON never closes');
-}
-
-// Where the value of each key of the object whose brace is at i starts.
-function valuesOf(s, i) {
-  const at = new Map();
-  const end = closing(s, i);
-  for (let j = i + 1; j < end;) {
-    if (s[j] !== '"') { j++; continue; }
-    const keyEnd = stringEnd(s, j);
-    const key = JSON.parse(s.slice(j, keyEnd));
-    let v = keyEnd;
-    while (/[\s:]/.test(s[v])) v++;
-    at.set(key, v);
-    j = s[v] === '{' || s[v] === '[' ? closing(s, v) + 1 : s[v] === '"' ? stringEnd(s, v) : v + 1;
-  }
-  return at;
-}
-
-// The text with key added as the last member of the object whose brace is at open, in the file's own indent and line
-// ends; every other byte stays as it was, so the user's layout, and a BOM, survive.
-function addMember(text, open, depth, key, value) {
-  const eol = text.includes('\r\n') ? '\r\n' : '\n';
-  const unit = /\n([ \t]+)\S/.exec(text)?.[1] ?? '  ';
-  const close = closing(text, open);
-  let last = close - 1;
-  while (/\s/.test(text[last])) last--;
-  const empty = last === open;
-  const member = `${empty ? '' : ','}${eol}${unit.repeat(depth)}${JSON.stringify(key)}: ${jsonText(value, unit, eol, depth)}${empty ? `${eol}${unit.repeat(depth - 1)}` : ''}`;
-  return text.slice(0, last + 1) + member + text.slice(last + 1);
 }
 
 function withDomain(text, name, entry) {
@@ -231,7 +174,7 @@ function reply(f, entry, { sid, vaultFolder, agentOf }) {
     `\`"${f.name}": ${JSON.stringify(entry)}\`. To change or remove it, edit or delete ${files}.${where}`,
   ];
   // A vault-folder session proposes for every domain already, and /ingest tells it how.
-  const notes = vaultFolder ? [] : [proposeNote(sid, agentOf), pickNote(sid)];
+  const notes = vaultFolder ? [] : [proposeNote(sid, agentOf, [f.name]), pickNote(sid)];
   return [
     `Added ${f.name} to vault.config.json${f.path ? ', and its folder to vault.local.json' : ''}. It reaches the rest of this session.`,
     ...notes,
@@ -249,7 +192,7 @@ function addDomain(sid, input) {
   const f = fields(p, { folder, vaultFolder });
   clashes(f);
   approval(session, p);
-  const entry = withLock(statePath('domain.lock'), () => {
+  const entry = withLock(statePath('config.lock'), () => {
     const written = write(f);
     if (f.root) addReach(sid, { domain: f.name, root: f.root });
     appendLog([`added domain ${f.name} · session ${shortName(sid, session.agent)}`]);

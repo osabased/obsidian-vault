@@ -119,9 +119,11 @@ export function makeVault(t, { config = {}, domain = 'glim', topics = ['layout',
   fs.writeFileSync(path.join(project, marker), '');
   const asOf = localDay(new Date(Date.now() - 30 * 86400e3));
   const shapes = presets.map(name => PRESETS[name](v, { newProject, asOf, sources }));
+  // Most tests propose without the user's approval, so the fixture writes rules at once; proposals.test.mjs sets the
+  // other modes, and drops the key to test the default.
   v.write('vault.config.json', `${JSON.stringify({
     domains: merged([{ [domain]: { title: 'Glim', topics, markers: [marker] } }, ...shapes.map(s => s.domains ?? {}), domains]),
-    ...merged([...shapes.map(s => s.config ?? {}), config]),
+    ...merged([{ proposals: 'corrections' }, ...shapes.map(s => s.config ?? {}), config]),
   }, null, 2)}\n`);
   v.write('vault.local.json', `${JSON.stringify({ domains: merged([...shapes.map(s => s.local ?? {}), local]) }, null, 2)}\n`);
   return v;

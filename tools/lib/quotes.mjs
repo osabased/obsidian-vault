@@ -2,6 +2,7 @@ import fs from 'node:fs';
 import { vaultPath } from './vault.mjs';
 import { escapeRegExp, isUserPage, parseNote, userWords } from './rules.mjs';
 import { fileText, derivedText, hashFile, isAnchor } from './sources.mjs';
+import { typedFor } from './agents.mjs';
 
 // Curly quotes read as straight ones, and dashes of any length as one hyphen. Apostrophes go first so "don't" reads as
 // the stopword dont rather than as don, which every Not line shares.
@@ -96,4 +97,11 @@ export function userPageTexts(rel) {
   if (!isUserPage(parseNote(text, rel))) return null;
   const words = userWords(text);
   return [words, markdownText(words)].flatMap(t => t.split(/\n[ \t]*\n/));
+}
+
+// Whether the user's latest message holds words, or null when the session has no transcript to read it from: the check
+// that the user agreed to what the agent asked, rather than the agent agreeing for them.
+export function inLatest(entry, words) {
+  const typed = typedFor(entry);
+  return typed ? saidIn(words, typed.slice(-1)) : null;
 }
