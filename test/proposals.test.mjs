@@ -203,3 +203,11 @@ test('lint reports a bad proposals value even when vault.local.json is broken', 
   v.write('vault.local.json', '{ broken');
   assert.ok(lintErrors(v).some(l => /sometimes/.test(l)), lintErrors(v).join('\n'));
 });
+
+test('/vault off as a slash command passes off as approved, since its arguments are in the typed line', t => {
+  const v = vaultIn(t, 'ask');
+  const { sid } = started(v, ['<command-message>vault</command-message>\n<command-name>/vault</command-name>\n<command-args>off</command-args>']);
+  const r = v.run('proposals.mjs', [sid], { input: { mode: 'off', approved: 'off' } });
+  assert.equal(r.code, 0, r.stderr);
+  assert.equal(JSON.parse(v.read('vault.config.json')).proposals, 'off');
+});
