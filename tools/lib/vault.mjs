@@ -49,6 +49,9 @@ export function config() {
   return loaded;
 }
 
+// For a script that writes the config and then builds from it in the same process.
+export const reloadConfig = () => { loaded = undefined; };
+
 // Git Bash hands out /c/Users/... paths; Node on Windows needs c:/Users/... The \\?\ and \\.\ prefixes only lift the
 // length limit, so they come off before paths are compared.
 const native = p => (process.platform === 'win32'
@@ -91,7 +94,7 @@ export const isMarkerName = m => typeof m === 'string' && Boolean(m.trim()) && !
 const markersOf = d => strings(config().domains[d]?.markers).filter(isMarkerName);
 
 // Each marker file name with the domains it puts a folder in.
-function markerDomains() {
+export function markerDomains() {
   const by = new Map();
   for (const d of Object.keys(config().domains)) {
     for (const m of markersOf(d)) by.set(fold(m), [...(by.get(fold(m)) ?? []), d]);
@@ -100,7 +103,7 @@ function markerDomains() {
 }
 
 // A marker is a file, or a link to one.
-const isFileAt = p => { try { return fs.statSync(p, { throwIfNoEntry: false })?.isFile() ?? false; } catch { return false; } };
+export const isFileAt = p => { try { return fs.statSync(p, { throwIfNoEntry: false })?.isFile() ?? false; } catch { return false; } };
 
 // A worktree checks out the same project, so its project root is the main checkout.
 export const mainCheckout = dir => dir.replace(/[\\/]\.claude[\\/]worktrees[\\/][^\\/]+(?=[\\/]|$)/i, '');
