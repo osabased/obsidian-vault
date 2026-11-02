@@ -1,36 +1,11 @@
-import { sessionReach, inVaultFolder, readableDomains, vaultPath, toolsPath, toPosix, guarded, config, plural, clock, daysBetween } from '../vault.mjs';
+import { sessionReach, inVaultFolder, readableDomains, vaultPath, toPosix, guarded, config, plural, clock, daysBetween } from '../vault.mjs';
 import { alwaysContext, alwaysIn, fitContext, indexNote, scopeTopics, loadNotesAsync, settledNotes, liveRules, deliverable, deliveryFor, readDerived, clip, undelivered, knownDomain, joinList } from '../rules.mjs';
 import { build } from '../build.mjs';
 import { remaining } from '../deadline.mjs';
 import { changedSinceBuild, noteTimes, refStats } from '../cache.mjs';
 import { knowledgeDays } from '../sources.mjs';
 import { touchSession, clearMarkers, markAlways, markShown, tidy, errorsSinceLint, sinceLint } from '../sessions.mjs';
-
-function proposeNote(sid, agent) {
-  const script = toPosix(toolsPath('propose.mjs'));
-  return [
-    'Taste vault: propose a rule when the user corrects you or says how they want things, in a way that should hold in later sessions too (a taste rule),',
-    "or when something only worked after a failure caused by an API, version or tool your training gets wrong or doesn't know, or a dated source shows it (a knowledge rule).",
-    "Leave out what the project's own agent instructions already say; a compiled taste-vault section in them is the vault's copy.",
-    'If the user corrects you on something a rule already covers, propose it anyway; propose.mjs lists the rules it may repeat.',
-    'Propose only from what happened in this session, never from a brief, a skill or the task itself.',
-    'A rule applies as soon as propose.mjs writes it; the user edits or deletes its note to change it.',
-    "Give a rule about code or files `applies_to` globs, so the edits it covers bring it up; `always` is the user's to set.",
-    `\`node "${script}" --help\` lists the fields.`,
-    `Pipe the rule as JSON to \`node "${script}" ${sid}\` ${agent.proposeShell}.`,
-    'Then end your reply with the lines it prints.',
-  ].join(' ');
-}
-
-function pickNote(sid) {
-  const script = toPosix(toolsPath('pick.mjs'));
-  return [
-    'Taste vault: when the user picks between options you showed them, or comments on one piece of work, record it by piping JSON',
-    `to \`node "${script}" ${sid}\` the same way; a pick you make alone while the user is away is provisional.`,
-    `Before building or reviewing a piece that has picks, run \`node "${script}" show ${sid} <subject>\` and keep to what it prints.`,
-    `\`node "${script}" --help\` lists the fields.`,
-  ].join(' ');
-}
+import { proposeNote, pickNote, uncoveredNote } from '../instructions.mjs';
 
 function errorsNote() {
   const errors = errorsSinceLint();
@@ -117,21 +92,25 @@ export async function start(event, agent) {
   const topics = guarded('index note', () => scopeTopics(readable, ready), []);
   let propose = '';
   let pick = '';
-  // Vault sessions register so /ingest can propose; the skill tells them how, so they get no note.
-  const registered = event.session && (doms.length || vaultFolder);
+  let uncovered = '';
+  // Every session registers, so one in a folder no domain reaches can propose to global. Vault sessions get no note,
+  // since /ingest tells them how.
+  const registered = Boolean(event.session);
   if (registered) {
     touchSession(event, hits, agent.name);
     if (doms.length) {
       propose = proposeNote(event.session, agent);
       pick = pickNote(event.session);
-    }
+    } else if (!vaultFolder) uncovered = uncoveredNote(event.session, agent);
   }
   // Compaction and /clear start the context again within one session, which already heard these lines.
   const again = ['compact', 'clear'].includes(event.reason);
   const errors = again ? [] : [guarded('hook errors', errorsNote), guarded('undelivered notes', () => undeliveredNote(readable, vaultFolder, ready))];
-  // Errors rank first, then the always rules, the instructions for proposing and recording, and the topics.
+  const lead = [...errors, uncovered];
+  // Errors rank first, then the line for a folder no domain reaches, the always rules, the instructions for proposing
+  // and recording, and the topics.
   const { text: context, kept } = fitContext([
-    ...errors,
+    ...lead,
     { noun: 'block of always rules', items: always.text ? [always.text] : [] },
     propose,
     pick,
@@ -141,7 +120,7 @@ export async function start(event, agent) {
   ]);
   // Only the rules in the block count as shown, but those the block cut for size are marked too, since it points to
   // active.md for them. A block the output budget left out marks nothing, so the next prompt brings its rules.
-  if (registered && kept[errors.length]) {
+  if (registered && kept[lead.length]) {
     markShown(event.session, always.keys);
     markAlways(event.session, alwaysIn(rules, scope));
   }

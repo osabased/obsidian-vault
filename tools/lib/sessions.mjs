@@ -30,11 +30,28 @@ export function touchSession(event, hits, agent) {
     transcript: event.transcript ?? prev.transcript ?? null,
     cwd: prev.cwd ?? event.cwd ?? null,
     last_seen: new Date().toISOString(),
-    ...(hits
+    // A start in a folder no domain reaches records the folder alone, so its domains are found again from the config and
+    // one added later reaches the session from its next prompt rather than its next start.
+    ...(hits?.length
       ? { reach: { cwd: event.cwd ?? null, domains: [...new Set(hits.map(h => h.domain))], roots: hits.map(({ domain, root }) => ({ domain, root })) } }
+      : hits ? { reach: { cwd: event.cwd ?? null } }
       : prev.reach ? { reach: prev.reach } : {}),
   };
   writeJson(file, entry);
+}
+
+// A domain started in a session joins the reach its start recorded, rather than the reach being found again, since this
+// process still holds the config from before the domain was added. cwd stays as it was, since prompts read the reach only
+// for that folder. A reach with no roots, a folder's alone or none, gets that folder's first.
+export function addReach(sid, { domain, root }) {
+  const file = registry(safeId(sid));
+  const entry = readJsonSafe(file);
+  if (!entry) return;
+  const cwd = entry.reach ? entry.reach.cwd : entry.cwd ?? null;
+  const hits = Array.isArray(entry.reach?.roots) ? entry.reach.roots : sessionReach(cwd);
+  const roots = [...hits.map(({ domain: d, root: r }) => ({ domain: d, root: r })), { domain, root }];
+  const domains = [...new Set([...(Array.isArray(entry.reach?.domains) ? entry.reach.domains : hits.map(h => h.domain)), domain])];
+  writeJson(file, { ...entry, reach: { cwd, domains, roots } });
 }
 
 const samePath = (a, b) => Boolean(a && b) && toPosix(a).toLowerCase() === toPosix(b).toLowerCase();
@@ -57,11 +74,12 @@ export function sessionHits(sid, cwd) {
 
 // Each of a registered session's domains with its project root: those the latest session start found, which compaction
 // or a resume in another folder replaces, and those of the folder the session began in, so pick.mjs and propose.mjs
-// reach the same domains. An entry without roots, written by older tools, finds them again.
+// reach the same domains. A reach without roots, from older tools or a start no domain reached, finds them again.
 export function sessionRoots(entry) {
   const reach = entry?.reach;
   const latest = Array.isArray(reach?.roots) ? reach.roots
-    : Array.isArray(reach?.domains) ? sessionReach(reach.cwd).filter(h => reach.domains.includes(h.domain)) : [];
+    : Array.isArray(reach?.domains) ? sessionReach(reach.cwd).filter(h => reach.domains.includes(h.domain))
+    : reach ? sessionReach(reach.cwd) : [];
   const first = reach && samePath(reach.cwd, entry?.cwd) ? [] : sessionReach(entry?.cwd);
   const all = [...latest, ...first].filter(r => typeof r?.domain === 'string' && typeof r?.root === 'string').map(({ domain, root }) => ({ domain, root }));
   const keys = all.map(r => `${r.domain}|${toPosix(r.root).toLowerCase()}`);

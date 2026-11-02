@@ -1,6 +1,6 @@
 # All-rounder vault: design draft
 
-Status: draft, 2026-11-01. Phases 0 to 6 are built and merged into main: phase 0 (checks), phase 1 (format), phase 2 (delivery), phase 3 (neutral fixtures), phase 4 (knowledge mechanisms) with its perf pass, phase 5 (media and tool triggers) and phase 6 (second adapter: the identifier test, the move behind the Claude Code adapter, the Codex adapter, compiled files and the provider tests). Phases 3 to 6 were each reviewed and fixed before merging.
+Status: draft, 2026-11-01. Phases 0 to 6 are built and merged into main: phase 0 (checks), phase 1 (format), phase 2 (delivery), phase 3 (neutral fixtures), phase 4 (knowledge mechanisms) with its perf pass, phase 5 (media and tool triggers) and phase 6 (second adapter: the identifier test, the move behind the Claude Code adapter, the Codex adapter, compiled files and the provider tests). Phase 7 (agents start domains) is built and merged too. Phases 3 to 7 were each reviewed and fixed before merging.
 
 Scope: structure, design and architecture only. This design adds no knowledge to the vault. It names no domain, platform, package ecosystem or site as built in. Where it needs an example, it uses a placeholder.
 
@@ -119,6 +119,11 @@ The bar asks for features native to the vault. Where a Claude Code mechanism doe
    - Per-format code is an extension behind a fixed interface, chosen by config.
    - Per-tool mappings are config data.
    - *Alternative not taken:* built-in support for a first domain, which would shape the defaults around it.
+8. **An agent can start a domain, only after the user agrees.**
+   - A session in a project no domain reaches can propose to `global`, and can suggest a domain to the user: a name, a title, its topics, and a file that marks the project's kind. `node tools/domain.mjs` writes it once the user's words agreeing to it are in the session (6.3e).
+   - The agent picks the name, the title, the topics and the marker. The tool only checks them and writes, so no code knows a domain (decision 7).
+   - A domain changes what every project of its kind gets, on every machine once the vault is committed and pulled, so the user agrees first, unlike a rule, which applies as soon as it is written.
+   - *Alternatives not taken:* domains only by hand, which leaves a session in a new kind of project nothing to propose to but `global`; adding the domain first and telling the user, as for rules; and code that infers a marker from a project's manifest names, which would put knowledge of ecosystems in the core.
 
 ## 6. Design
 
@@ -302,7 +307,7 @@ Phase-3 notes then need no migration, even where the tooling lands later.
     - Session start names a set number of topics per domain, ranked by note count, then "and N more in index/<domain>.md".
 - *Check.* `latency.mjs`: the fastest of 5 gated edits stays under 1,000 ms at 1,000 notes (781 ms before the cache). The target with the cache is under 300 ms at 3,000 notes.
 
-### 6.3 Reach: subagents, edit surfaces, tools, shell writes
+### 6.3 Reach: subagents, edit surfaces, tools, shell writes, new domains
 
 **a. Subagents.**
 - *Problem.*
@@ -371,6 +376,38 @@ Phase-3 notes then need no migration, even where the tooling lands later.
   - The gate markers keep it to one continuation per file, and Claude Code ends the turn after 8 stop-hook continuations in a row (hooks). `stop_hook_active` is ignored: honouring it would skip the files a continuation writes.
   - A project that isn't a git repo gets no detection, which the adapter declares.
 - *Check.* A turn that writes a rule-covered file with a shell command and stops is sent that rule once and continues. The next stop passes.
+
+**e. Projects no domain reaches.**
+- *Problem.*
+  - A session in a folder no domain reaches doesn't register (`start.mjs:121`, `prompt.mjs:46`), hears nothing about proposing, and is refused even a `global` rule (`propose.mjs:89`). A preference the user states there is lost unless they notice and add a domain by hand.
+  - An agent that sees a domain is missing can't add one. `propose.mjs` takes only the session's domains and `global` (`propose.mjs:357`). A note in a domain config doesn't list is refused (`rules.mjs:305`) and is a lint error (`lint.mjs:91`).
+  - The edit guard tells the agent to leave `vault.local.json` to the user (`pre-tool.mjs:17`), and AGENTS.md:24 says the same.
+- *Design.*
+  - **Registration.** Every session with an id registers, at start and on each prompt, whatever its folder. A session no domain reaches then gets what a domain session gets for `global`: its always rules marked as shown, and those that come due later delivered on a prompt (`prompt.mjs:56`). `.state/` is untracked, so the folders the registry records stay on this machine, and `tidy` drops an entry unseen for 30 days.
+  - **The line.** A session start in a folder no domain reaches, outside the vault folder, sends one line, ranked after the errors. Compaction and `/clear` send it again, as they do the note on proposing. The draft, whose copy is an open question (§8 item 7):
+    > Taste vault: no domain covers this project. When the user states a preference that should hold in later sessions, propose it to `global` if it holds in every project (`node "<propose.mjs>" --help`). If it holds only for projects like this one, suggest a domain to the user in your reply: a name, a title, and a file here that marks the project's kind. Once they agree, start it with `node "<domain.mjs>" <sid>`; `--help` lists the fields.
+  - **`propose.mjs`.** A registered session no domain reaches may propose to `global`. Any other domain is refused, and the refusal names `tools/domain.mjs`, as does the refusal of a domain outside a domain session's own. An unregistered session is refused as today.
+  - **`node tools/domain.mjs <sid>`**, a top-level tool that reads JSON on stdin and finds its session as `propose.mjs` does (`ownEntry`). It works from any registered session, so a domain session can start a second domain for a kind of project its own don't fit. The fields:
+    - `name`: the domain's key, in kebab-case. Refused: `global`, a key `vault.config.json` already has, and a key, or a title of two or more words, that the neutral-core test (§3) would find in `tools/`, `.claude/skills/`, `test/` or AGENTS.md. The refusal names the first lines found. A commit that changes only config runs no tests (`.githooks/pre-commit:12-15`), so without this check a clashing name would fail the next commit to `tools/`. The scan moves into one `tools/lib/` function that the test and the tool both call.
+    - `title`: a short phrase on one line.
+    - `topics`: the domain's topic list, so the domain's first rule on a topic gets no lint warning that the topic is unlisted.
+    - `marker`: a file name with no folder in it (`isMarkerName`, `vault.mjs:90`), present in the session's folder or a folder above it. The nearest folder holding it is the project root, through `mainCheckout` for a worktree, as `markedAbove` (`vault.mjs:110`) finds it.
+    - `path: true`, for a project with no file that marks its kind: the session's project folder goes in `vault.local.json`, and stays on this machine. The folder is the work tree of the main checkout, which `mainWorktree` in `git.mjs`, the one module that runs git (6.6d), gives for the session's folder and for any worktree of it. Outside git it is the session's folder itself.
+    - `vaultOnly: true`, only from a session in the vault folder, for a domain that holds pages only.
+    - `approved`: the user's words agreeing to this domain, checked as `propose.mjs` checks a quote (`typedFor`, `saidIn`), but against the user's latest typed message only. Refused when the words aren't there, and when the session has no transcript to check them in. A picked option's label is the agent's words, not the user's (`transcript.mjs:7`), so the agent asks in its reply.
+    - Exactly one of `marker`, `path` and `vaultOnly` is given. From the vault folder, which is in no project, `marker` is taken without looking for the file, and the output says so; `path` is refused there.
+    - A marker another domain already lists is accepted, and the output names that domain: a monorepo's packages can share a manifest name and be in two domains.
+  - **What it writes.** It checks everything first, then takes `withLock` on `vault.config.json`, reads the file again, and refuses a key another run added meanwhile.
+    - The new entry, as the last key of `domains`, in the file's own indent and line ends. Every byte outside the entry and the comma before it stays as it was, a BOM if there is one and the other entries included.
+    - With `path`, the folder under the new domain in `vault.local.json`, which it creates when missing.
+    - In the session's registry entry, the recorded reach gains `{ domain, root }`, the root being the marker folder or the path. Its `cwd` stays the folder session start recorded, since prompts and subagents read the reach only for that folder (`sessions.mjs:42`). It adds the pair rather than finding the reach again, since `config()` is cached per process (`vault.mjs:39`) and still holds the config from before the write. Prompts, subagents, `pick.mjs` and `propose.mjs` read that reach, so the domain reaches the rest of the session. The edit hook reads config afresh on each call (`pre-tool.mjs:178`). A vault-folder session has no reach to change, since `propose.mjs` offers it every domain.
+    - One `log.md` line through `appendLog`: `added domain <name> · session <short name>`.
+  - **What it prints.**
+    - For the user: the lines it added, and that `vault.config.json` and `vault.local.json` are theirs to edit or delete. Other machines get a marker domain once the user commits the vault and pulls it there; a path stays on this machine.
+    - For the agent: the note on proposing and the note on picks that a session start in the domain sends (`start.mjs:9-33`), since this session's start sent neither. Both notes move to a module the start handler and the tool share.
+  - It commits nothing, and writes nothing in the project.
+  - **`/ingest`.** A source that fits no domain gets an offer of a new one, `vaultOnly: true` when it holds pages only. Batch mode keeps such a source for the end, where the user is asked about the knowledge rules, and offers the domain there.
+- *Check.* In a session in a folder no domain reaches, the start sends the line, and a `global` rule is written. `domain.mjs` refuses until the user's latest typed message holds `approved`, then writes a marker domain and keeps every byte of `vault.config.json` outside the entry and the comma before it. In the same session, a rule proposed for the new domain is written, and the next edit to a file it covers is refused once with it.
 
 ### 6.4 Sources and evidence
 
@@ -1323,6 +1360,55 @@ The phases build mechanism only. Adding real knowledge and taste is the user's c
      - `tools/hooks/` keeps one-line shims for one release. The alternative is no shims: a stale plugin then fails every hook loudly until `claude plugin update`.
      - Copy: the snippet's closing line, the compiled section's heading and intro line, the `refused` line, the `propose.mjs:85` refusal, and the skill's and `proposeNote`'s shell lines (`CODING_STANDARDS.md:15`).
    - **Done** when the phase 6 check in §9 passes. The suite passes with no `todo` test, the identifier test included. Lint reports 0 errors. Both greps print nothing, and the perf group passes. The live provider check is run once on a machine that has both agents' session files.
+7. **Agents start domains.** Built and merged; the start line reads "this project is in no domain" (see Copy below). A session in a project no domain reaches registers, hears one line at start, and may propose to `global`. With the user's agreement, an agent starts a domain through `tools/domain.mjs` (6.3e, decision 8). The line numbers below are main's at the end of phase 6.
+   - **What this settles in §6.**
+     - every session with an id registers; a session's recorded reach, not whether it registered, says which domains it is in (6.3e);
+     - `vault.config.json` gains a second writer besides the user, `domain.mjs`, and only after the user's words agreeing to it;
+     - `vault.local.json` gains the same writer, for `path: true` only, and the edit guard still refuses edits to it;
+     - the neutral-core scan is one function that the test and the tool share (§3).
+   - **Inventory.**
+     - `tools/lib/handlers/start.mjs:121-127`: registration and the line. `proposeNote` and `pickNote` (`start.mjs:9-33`) move to a module `domain.mjs` imports too.
+     - `tools/lib/handlers/prompt.mjs:46-47`: registration.
+     - `tools/propose.mjs:89` and `:357`: `global` for a session no domain reaches, and the refusals that name `domain.mjs`.
+     - `test/neutral-core.test.mjs:13-41`: the scan moves into `tools/lib/`, and the test calls it.
+     - `tools/lib/handlers/pre-tool.mjs:17`: the guard's message.
+     - `.claude/skills/ingest/SKILL.md:24` and `:49`, and the copy in `.agents/skills/ingest/SKILL.md`.
+     - `tools/domain.mjs`: new.
+   - **`tools/domain.mjs`.** `node tools/domain.mjs <sid>`, the JSON on stdin; `--help` lists the fields. Like `propose.mjs`, it is a top-level tool, so it may call any `tools/lib` module. It refuses with one line and exit 1, and writes nothing then. The session id comes as for `propose.mjs`: from the start line, or from the agent's own shell. Its order: read the session, check the fields, scan for clashes, check `approved`, then lock, read the config again, write, release, and print.
+   - **Tests.** Each new test is written before its code and seen red for its reason.
+     - **Registration.** A session start in a folder no domain reaches registers the session and sends the line. A domain session's start and a vault-folder start send no line. A prompt in a folder no domain reaches registers its session.
+     - **`propose.mjs`.** A registered session no domain reaches writes a `global` rule, and is refused another domain with a line naming `domain.mjs`. An unregistered session is still refused.
+     - **Refusals**, each with its line:
+       - no `approved`; `approved` not in the latest typed message; a session with no transcript;
+       - a name that isn't kebab-case, `global`, a key config has, and a key or title the scan finds, named by file and line;
+       - a marker with a folder in it, or one not found at or above the session's folder;
+       - two of `marker`, `path` and `vaultOnly`, or none;
+       - `vaultOnly` outside the vault folder, and `path` in it.
+     - **A marker write.** Every byte of `vault.config.json` outside the entry and the comma before it stays, in a CRLF fixture with a BOM and in an LF one. `log.md` gains one line. The registry's reach gains the domain and the marker folder. Then, in the same session:
+       - a rule proposed for the domain is written;
+       - the next prompt delivers an `always` rule a fixture note gives the domain;
+       - the first edit to a file a proposed rule covers is refused once with it.
+     - **A path write** creates `vault.local.json` when it is missing, and adds to it when present, keeping the other domains. From a worktree under `.claude/worktrees/`, the folder is the main checkout.
+     - **Two runs at once**, adding two domains, both land.
+     - **A shared marker** is written, and the output names the other domain.
+     - **Lint** reports 0 errors after each kind of write, and doesn't warn that the domain reaches nothing or that its first rule's topic is unlisted.
+     - **The adapter contract test**: a start in a folder no domain reaches sends the line through both adapters.
+     - The skill copies still match, and the neutral-core test passes.
+   - **Order of the build.**
+     1. The tests, seen red.
+     2. Registration, the line, and `global` in `propose.mjs`.
+     3. The shared scan, then `domain.mjs`.
+     4. The ingest skill, the guard message, the README and AGENTS.md.
+   - **Rules that change.**
+     - `.claude/skills/ingest/SKILL.md`: step 4 (line 24) and batch step 4 (line 49) offer a new domain for a source that fits none, as 6.3e says. `node tools/lint.mjs --fix` updates the copy.
+     - `pre-tool.mjs:17`: the message says that `domain.mjs` adds a folder once the user agrees, and that otherwise the file is the user's.
+     - The README's Hooks section says an agent can start a domain once the user agrees, and that the lines it writes are the user's to edit or delete.
+     - AGENTS.md changes as §10 says.
+   - **Open questions.** The recommended choice comes first, and is what this design says.
+     - `approved` must be in the user's latest typed message, the one the agent acts on. The alternative is any typed message in the session, as for quotes, which lets an earlier "yes" to something else pass.
+     - `vault.config.json` stays unguarded: AGENTS.md says to start a domain only through `domain.mjs`, and the hooks guard against mistakes, not workarounds. The alternative is an edit guard on it, which would also refuse the config edits the user asks for in the vault folder, such as a feed or a delivery setting.
+     - Copy: the line, each refusal, the output's lines for the user and for the agent, the guard message, and the skill's offer. The draft line's "no domain covers this project" is loose where an `everywhere` domain's pages and keyword rules reach the session; what it means is that no domain is this project's.
+   - **Done** when the phase 7 check in §9 passes: the phase 6 check, with the new tests in the suite and none of them `todo`.
 
 ## 9. Checks
 
@@ -1333,10 +1419,11 @@ The phases build mechanism only. Adding real knowledge and taste is the user's c
 | Phase 4 check: the suite through the TAP reporter, then lint and the grep, below the table | The suite has no failure and exactly 2 `todo` tests, 6.3c and 6.4a, both failing; lint reports 0 errors; the grep prints nothing. Then 6.1c, 6.2a and 6.2b pass, and only phase 5's checks are open. Run the perf group too, since phase 4 adds a read to every hook. | Passes (phase 4, before review): 431 pass, 0 fail, 2 `todo`, 6.3c (the first AskUserQuestion isn't denied) and 6.4a (a quote the PDF's derived text doesn't hold is written); lint 0 errors; the grep prints nothing. The perf group passes. Passes again after the review's fixes: 458 pass, 1 skipped, 0 fail, the same 2 `todo`; lint 0 errors; the grep prints nothing; the perf group passes, its build test included. |
 | Phase 5 check: the suite through the TAP reporter, then lint, the grep and the perf group, below the table | The suite has no failure and no `todo` test; lint reports 0 errors; the grep prints nothing; the perf group passes, AskUserQuestion test included. Then every *Check* in §6 runs on built code. | Passes (phase 5, before review): 473 pass, 0 fail, 0 `todo`; lint 0 errors; the grep prints nothing. The perf group passes, the AskUserQuestion call at 212 ms. After the review's fixes: 530 pass, 1 skipped, 0 fail, 0 `todo`; lint 0 errors; the grep prints nothing. The perf group's latency tests pass, the AskUserQuestion call at 260 ms; its build test misses, a session start that builds taking about 5.2 s against 5,000 ms. With phase 4's perf pass merged in: 535 pass, 1 skipped, 0 fail, 0 `todo`; lint 0 errors; the grep prints nothing; the perf group passes, the AskUserQuestion call at 207 ms and a session start that builds at about 1.5 s. |
 | Phase 6 check: the phase 5 check, then the agent-name grep, below the table | The phase 5 check passes, with the neutral-core identifier test, the adapter contract test and the Codex and compile tests in the suite; the agent-name grep prints nothing. Then nothing in `tools/` outside `tools/adapters/` names an agent, its tools or its hook fields. | Passes (phase 6, after review fixes): 620 pass, 0 fail, 0 `todo`; lint 0 errors; both greps print nothing. The perf group passes: a gated edit at 3,000 notes 199 ms, an AskUserQuestion call 187 ms, a session start that builds about 1.4 s. The live provider check finds every field it reads in both agents' newest transcripts. |
+| Phase 7 check: the phase 6 check, below the table | The phase 6 check passes, with phase 7's registration, `propose.mjs`, `domain.mjs` and adapter contract tests in the suite. Then a session in any folder can keep a preference, in `global` or in a domain the user agreed to. | Passes, merged into main. |
 | Phase 3 check: the suite, then the grep below the table | With the neutral-core `todo` mark removed, the suite passes with 5 `todo` tests (6.1c, 6.2a, 6.2b, 6.3c, 6.4a), each red for its reason, and the grep prints nothing. Then no test, tool, skill or AGENTS.md example leans on one platform, and only the five later-phase checks are open. | Passes (phase 3): the five `todo` tests fail for their reasons, and the grep prints nothing. |
 | The probes as `todo` tests (phase 0) | Each passes with its `todo` mark removed: slow trigger, subagent gate, settle after an mtime change, negated glob, one refusal per file, frontmatter | All pass with their marks removed (phase 2): slow trigger, subagent gate (2), settle after an mtime change (2), one refusal per file, frontmatter, long-path prefix. Negated glob passes (phase 1). |
 | Perf group: `VAULT_PERF=1 node --test test/perf/*.perf.mjs` (about 50 s, outside the default run) | Fastest of 5 gated edits under 1,000 ms at 1,000 notes; fastest of 3 under 300 ms at 3,000; three parallel proposes of unrelated rules at 3,000 notes all succeed (6.6f); an AskUserQuestion call under 300 ms at 3,000 notes (6.3c); at 3,000 notes and 3,000 files in `raw/refs/`, the fastest of 3 session starts that build, after a note edit and after a new copy, under 5,000 ms, and the fastest of 3 builds with nothing changed under 1,500 ms (`build.perf.mjs`) | About 135–166 ms; about 245–290 ms; all succeed in about 4.3–5.4 s (phase 3). With phase 4's reads, 145 ms; 232 ms; all succeed in about 7.4 s, since builds run one at a time under `build.lock`. A warm session start at 3,000 notes takes about 340 ms, including the vault-wide stat for the lint reminder. After the review's fixes, 191 ms; 298 ms; all succeed in about 6.4 s; a session start that builds about 4.6 s, one with nothing changed about 630 ms, and a build with nothing changed about 830 ms. With the copies in `raw/refs/` cached and the hooks' stats taken at once, 155 ms; 201–218 ms; all succeed in about 5.9 s; a session start that builds about 1.4 s, one with nothing changed about 550 ms, and a build with nothing changed about 810 ms. With phase 5, before phase 4's fixes were merged in, 138 ms; 220 ms; an AskUserQuestion call 212 ms; all succeed in about 7.1 s. After phase 5's fixes, 170 ms; 275 ms; an AskUserQuestion call 260 ms; all succeed in about 5.9 s; a session start that builds about 5.2–5.4 s, one with nothing changed about 640–730 ms, and a build with nothing changed about 830–1,010 ms. With phase 4's perf pass merged into phase 5, 172 ms; 233 ms; an AskUserQuestion call 207 ms; all succeed in about 6.3 s; a session start that builds about 1.5 s, one with nothing changed about 590 ms, and a build with nothing changed about 870 ms. With phase 6, before review, 204 ms; 258 ms; an AskUserQuestion call 250 ms; all succeed in about 7.2 s; a session start that builds about 1.8 s, one with nothing changed about 665 ms, and a build with nothing changed about 1,050 ms. The timings are noisy on this machine. |
-| Each *Check* in §6 | As stated there, against the presets. All 17 pass in phase 5 | 17 pass against the presets (6.2c and 6.6f in the perf group), 6.3c and 6.4a with their `todo` marks removed (phase 5, before review) |
+| Each *Check* in §6 | As stated there, against the presets. All 17 pass in phase 5 | 17 pass against the presets (6.2c and 6.6f in the perf group), 6.3c and 6.4a with their `todo` marks removed (phase 5, before review). 6.3e's, added with phase 7, is designed, not built. |
 | Transcript provider test (6.7c): `test/transcript.test.mjs`, and `VAULT_LIVE=1 node --test test/live/*.live.mjs` outside the default run | Each adapter's provider returns exactly the typed messages in its fixture transcript; the live half finds the fields each provider reads in this machine's newest transcript, printing only field names and counts | Built on `phase-6-delivery`. The fixture half passes for both adapters, and the live half passed on 2026-11-01 with no field missing from either newest transcript. |
 | Linear regex test (6.6c) | `new RegExp(p, 'l')` works after `v8.setFlagsFromString` on the installed Node | Works on Node 22.14 |
 | Vault server trial (6.7g) | A PreToolUse `mcp_tool` hook's JSON deny stops an Edit, and a gated edit is faster than the cached command hook | Run once in a scratch folder, not kept. Deny honored, but it fails open. |
@@ -1374,6 +1461,8 @@ out=$(node --test --test-reporter=tap test/*.test.mjs); echo "$out" | grep -E '^
 ```
 
 It prints what the phase 5 check prints, then every line outside `tools/adapters/` that names an agent. It exits 0 only when the phase 5 check passes and that grep prints nothing. The identifier test in the suite checks the same from the names each adapter exports, its folder name and its `sessionVar`; the grep also catches a name no adapter lists yet. The test accepts three kinds of line: `FIRST_AGENT` in `tools/lib/agents.mjs`, the `agents` default in `config()` in `tools/lib/vault.mjs`, and the one-line `tools/hooks/<hook>.mjs` shims that import an adapter's hook.
+
+The phase 7 check is the phase 6 check, run the same way. Its new tests are in `test/*.test.mjs`, so the command doesn't change.
 
 ## 10. AGENTS.md changes
 
@@ -1425,6 +1514,13 @@ The design changes these parts of AGENTS.md. Each change lands with the phase th
   - Line 189 (sheets): a file with derived text can be a sheet too. `pick.mjs` refuses `notes` and comments the user didn't type in the session.
   - Line 204 (Ingest): `/ingest` extracts a binary source's text and scans every source for key- or token-shaped text before going through it, and stops on either until the user decides.
   - Line 212 (quotes): `propose.mjs` also refuses a quote a binary's derived text doesn't hold, a quote against a binary with none, and a source quote against an image, which backs `basis: reading` only. Lint warns on each such quote in a note, checks a quote whose transcript is gone against its `raw/inbox/` row, and counts in one line the quotes it can't check.
+- **Phase 7.** The line numbers are AGENTS.md's at the end of phase 6.
+  - Line 24 (`paths`): "The file is the user's to change" becomes "The file is the user's; `node tools/domain.mjs` adds a session's folder to it only after the user agrees."
+  - Line 29 (global and reach): a session start in a folder no domain reaches sends one line: the session can propose to `global`, and can suggest a domain to the user.
+  - Line 204 (Propose): a session in a folder no domain reaches proposes to `global` only.
+  - A new Operations bullet after Record a pick, **Start a domain**: when a preference holds only for projects of a kind no domain covers, suggest a domain to the user: a name, a title, its topics, and a file that marks the kind, or this folder alone when no file does. Ask in your reply, since an option the user picks is your words, not theirs. Once they agree, pipe it to `node tools/domain.mjs <sid>` with their words as `approved`; `--help` lists the fields. Start a domain only this way, and only once they agree.
+  - Line 207 (Ingest): a source that fits no domain gets an offer of a new one, `vaultOnly: true` when it holds pages only.
+  - Line 225 (what the hooks refuse) doesn't change: edits to `vault.local.json` stay refused, and `domain.mjs` writes it.
 
 ## 11. Unverified claims the design leans on
 
@@ -1458,6 +1554,10 @@ The design changes these parts of AGENTS.md. Each change lands with the phase th
    - Not verified: that hooks in `~/.codex/hooks.json` run in a project the user hasn't trusted. The docs gate only a project's own hooks on trust.
    - Not verified: that Codex ignores `disable-model-invocation` in a skill's frontmatter rather than refusing the skill.
    - Settled from the source: exit codes other than 0 and 2 don't block (`pre_tool_use.rs:278-284`); Stop takes only its schema (`stop.rs:282-329`); commands run through `cmd.exe` on Windows (`command_runner.rs:428-433`); `additionalContextLimit` defaults to 2,500 tokens (`output_spill.rs:12`); the `apply_patch` grammar (`parser.rs:4-45`) and the order chunks are matched in (`seek_sequence.rs:1-6`). The paths are under `codex-rs/hooks/src/` and `codex-rs/apply-patch/src/`.
+10. For phase 7, with no model run:
+   - Not verified: that agents act on the one line, proposing a preference that holds everywhere to `global` and suggesting a domain for one that holds only for a kind of project, rather than dropping it.
+   - Not verified: that agents ask in their reply rather than with a question tool. A picked option's label doesn't count as the user's words, so a refusal there costs the user a typed answer.
+   - Not verified: that a reply the user sends by clicking a suggested answer in the desktop app is recorded as typed (`origin.kind` `human`), so that it counts for `approved`.
 
 ## 12. Not doing
 
@@ -1472,3 +1572,5 @@ The design changes these parts of AGENTS.md. Each change lands with the phase th
 - **Built-in support for any domain, ecosystem or tool.** See §3 and decision 7.
 - **`mcp_tool` hooks.** They fail open. See 6.7g.
 - **Adding knowledge or taste as part of this design.** See §8.
+- **Code that infers a domain or a marker from a project's files.** The agent suggests both, and `domain.mjs` only checks and writes. See decision 8.
+- **Starting a domain without the user's agreement.** See decision 8.

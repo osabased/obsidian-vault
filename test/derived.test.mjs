@@ -3,11 +3,13 @@ import path from 'node:path';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { makeVault, sessionId, ledgerEdit, serve, gitRepo, ruleNote, withFields, sectionOf, LEDGER_GUIDE, LEDGER_REPO } from './fixture.mjs';
+import { today } from '../tools/lib/vault.mjs';
 
 // What .state/derived.json holds as raw/refs/ and the notes change, and what the hooks and review make of it.
 
 const unverified = v => Object.keys(JSON.parse(v.read('.state/derived.json')).unverified).sort();
-const daysAgo = n => new Date(Date.now() - n * 864e5).toISOString().slice(0, 10);
+// Local days, as lint counts them, so the test holds after midnight UTC.
+const daysAgo = n => today(new Date(Date.now() - n * 864e5));
 const LEDGER_URL = 'https://pkg.invalid/ledger';
 const CHANGED = LEDGER_GUIDE.replace('takes a path and', 'takes a path or a URL and');
 // A later copy of the preset's ledger guide, as refresh or another machine saves one.

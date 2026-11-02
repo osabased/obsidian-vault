@@ -2,7 +2,7 @@ import fs from 'node:fs';
 import crypto from 'node:crypto';
 import {
   vaultPath, writeSettled, appendJsonl, appendLog, inboxFile, proposalRows, pickRows, statePath, withLock, today, localDay, toPosix, guarded,
-  shortHash, isVaultOnly, sessionReach, cwdOf,
+  shortHash, isVaultOnly, sessionReach, cwdOf, toolsPath,
 } from './lib/vault.mjs';
 import {
   KEY_RE, BASES, wrongBasis, parseNote, noteErrors, ruleText, ruleTextParts, loadNotes, readNote, liveRules, mentions, isUrl, validDay, byKey, normTopic, domainTopics, vaultFile, joinList,
@@ -24,7 +24,8 @@ const help = () => [
   RUN,
   '',
   'rule.json is an object with these fields:',
-  "  domain       this session's domain (in the vault folder, any domain that isn't vaultOnly), or global for every project",
+  "  domain       this session's domain (in the vault folder, any domain that isn't vaultOnly), or global for every project;",
+  '               a session in a folder no domain reaches proposes to global only',
   '  slug         lowercase-kebab-case',
   '  kind         "taste" (the default), or "knowledge" for a fact about an API, version or tool',
   "               that your training gets wrong or doesn't know",
@@ -85,9 +86,8 @@ function sessionOf(sid) {
   if (!sid) refuse(`there's no session id to propose for. ${PASS}`);
   const { entry, notOwn } = ownEntry(sid);
   if (notOwn) refuse(notOwn);
-  const domains = proposeDomains(entry);
-  if (!domains.length) refuse(`the taste vault has no session ${sid} from a domain's project folder or the vault folder. ${PASS}`);
-  return { ...entry, domains };
+  if (!entry) refuse(`the taste vault has no session ${sid}. ${PASS}`);
+  return { ...entry, domains: proposeDomains(entry) };
 }
 
 const REFS = /^raw\/refs\/./i;
@@ -354,7 +354,9 @@ function propose(sid, input) {
   // Slugs compare in NFC, so a slug typed with combining accents names the same note as its composed spelling.
   const f = { sid, name: shortName(sid, session.agent), domain: line(p, 'domain').normalize('NFC'), slug: line(p, 'slug').normalize('NFC') };
   // A vault-only domain isn't offered, and the note's own check says why it takes no rule.
-  if (!domains.includes(f.domain) && !isVaultOnly(f.domain)) refuse(`domain must be ${joinList(domains, 'or')}.`);
+  if (!domains.includes(f.domain) && !isVaultOnly(f.domain)) {
+    refuse(`domain must be ${joinList(domains, 'or')}. For a rule that holds only in projects of a kind no domain covers, suggest a new domain to the user, and once they agree start it with node "${toPosix(toolsPath('domain.mjs'))}"; --help lists its fields.`);
+  }
   const key = `${f.domain}/${f.slug}`;
   if (!KEY_RE.test(key)) refuse('slug must be lowercase-kebab-case.');
   f.kind = line(p, 'kind', false) || 'taste';
