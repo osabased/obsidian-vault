@@ -2,7 +2,7 @@ import fs from 'node:fs';
 import crypto from 'node:crypto';
 import {
   vaultPath, writeSettled, appendJsonl, appendLog, inboxFile, proposalRows, pickRows, statePath, withLock, today, localDay, toPosix, guarded,
-  shortHash, isVaultOnly, sessionReach, cwdOf, toolsPath,
+  shortHash, isVaultOnly, sessionReach, cwdOf, toolsPath, proposalMode, inVaultFolder,
 } from './lib/vault.mjs';
 import {
   KEY_RE, BASES, wrongBasis, parseNote, noteErrors, ruleText, ruleTextParts, loadNotes, readNote, liveRules, mentions, isUrl, validDay, byKey, normTopic, domainTopics, vaultFile, joinList,
@@ -10,7 +10,7 @@ import {
 } from './lib/rules.mjs';
 import { build } from './lib/build.mjs';
 import { entryKey } from './lib/glob.mjs';
-import { saidIn, normText, quoteTexts, userPageTexts } from './lib/quotes.mjs';
+import { saidIn, normText, quoteTexts, userPageTexts, inLatest } from './lib/quotes.mjs';
 import { ownEntry, marked, markMany, wasShown, carryMarkers, proposeDomains, sessionName } from './lib/sessions.mjs';
 import { setField, yamlQuote, yamlScalar } from './lib/frontmatter.mjs';
 import { subjectRows, laterRows, endedBy, otherLabels } from './lib/picks.mjs';
@@ -59,6 +59,8 @@ const help = () => [
   "               always: true is the user's to set in Obsidian, so propose.mjs refuses it.",
   '  repeats      optional, the key of the rule in the vault this one repeats, like example-ui/flat-buttons:',
   "               propose.mjs adds this rule's Evidence line to that note and writes no new one",
+  "  approved     the user's words agreeing to keep the rule, as they typed them in their latest message. Needed outside",
+  '               the vault folder when proposals is ask or off for the domain; without it, ask prints the rule to offer.',
   '',
   'If the rule may repeat ones in the vault, propose.mjs lists them and refuses once. If it repeats one, propose',
   'it again with repeats set to that rule; if not, propose it again as it is.',
@@ -69,7 +71,7 @@ const help = () => [
 // Every field the code below reads, so a field it doesn't read is refused rather than dropped.
 const FIELDS = new Set([
   'domain', 'slug', 'kind', 'do', 'not', 'because', 'topic', 'basis', 'quote', 'page', 'pick', 'reading', 'error', 'fix', 'file',
-  'source', 'source_date', 'keywords', 'applies_to', 'triggers', 'always', 'repeats',
+  'source', 'source_date', 'keywords', 'applies_to', 'triggers', 'always', 'repeats', 'approved',
 ]);
 
 const topicLines = () => [...domainTopics()].flatMap(([d, topics]) => (topics.length ? [`                 ${d}: ${topics.join(', ')}`] : []));
@@ -315,11 +317,36 @@ function withEvidence(text, entry) {
   return lines.join(eol);
 }
 
+// Outside the vault folder, where /ingest goes through each rule with the user, ask and off write only with the user's
+// words agreeing from their latest message. Without them, ask hands back the rule to offer once every other check has
+// passed, so what the user agrees to is what gets written.
+function consent(f, e, domain, offer) {
+  const mode = proposalMode(domain);
+  if (mode === 'corrections' || inVaultFolder(f.folder)) return null;
+  // Checked before the offer, which no answer could approve without a transcript.
+  if (!typedFor(f.session)) refuse("the taste vault has no transcript for this session, so it can't check the user agreed. Ask the user to write the rule in Obsidian.");
+  if (!f.approved && mode === 'off') refuse(`proposals is off for ${domain}: propose a rule only when the user asks you to keep one, with their words asking as approved.`);
+  if (!f.approved) {
+    refuse([
+      `proposals is ask for ${domain}, so the user agrees to each rule before it is written. End your reply with these lines as they are, and once the user agrees, propose it again with their words agreeing as approved:`,
+      '',
+      ...offer,
+    ].join('\n'));
+  }
+  if (e.said && saidIn(f.approved, [e.said])) refuse("approved is in the rule's quote, which states the preference rather than agrees to keep it. Pass the user's words agreeing to the rule.");
+  if (!inLatest(f.session, f.approved)) refuse(`approved isn't in the user's latest message. ${mode === 'ask' ? 'Offer the rule in your reply' : 'Wait for the user to ask for the rule'}, and pass their words as approved once they agree.`);
+  return f.approved;
+}
+
 // Saved settled, so the rule keeps reaching sessions just when the user has corrected the agent on it.
 function addEvidence(f, e, scope, rules, same, row, notes) {
   const target = f.repeats;
   if (!rules[target] || !scope.includes(rules[target].domain)) refuse(`repeats names ${target}, which isn't a delivered rule in ${joinList(scope, 'or')}. Give the key of a rule the refusal listed.`);
   if (same?.note === target) refuse(`these words already back ${target}.`);
+  f.agreed = consent(f, e, rules[target].domain, [
+    `**Back this rule again?** ${target}: ${rules[target].text}`,
+    `Its note would get this Evidence: ${e.cite}. Say yes to add it.`,
+  ]);
   const { rel } = readNote(target, notes);
   const file = vaultPath(...rel.split('/'));
   const before = fs.readFileSync(file, 'utf8');
@@ -353,6 +380,7 @@ function propose(sid, input) {
   const domains = [...session.domains, 'global'];
   // Slugs compare in NFC, so a slug typed with combining accents names the same note as its composed spelling.
   const f = { sid, name: shortName(sid, session.agent), domain: line(p, 'domain').normalize('NFC'), slug: line(p, 'slug').normalize('NFC') };
+  Object.assign(f, { session, folder: session.cwd, approved: line(p, 'approved', false) });
   // A vault-only domain isn't offered, and the note's own check says why it takes no rule.
   if (!domains.includes(f.domain) && !isVaultOnly(f.domain)) {
     refuse(`domain must be ${joinList(domains, 'or')}. For a rule that holds only in projects of a kind no domain covers, suggest a new domain to the user, and once they agree start it with node "${toPosix(toolsPath('domain.mjs'))}"; --help lists its fields.`);
@@ -403,11 +431,13 @@ function propose(sid, input) {
     const row = note => ({
       id: f.id, at, source: 'agent', kind: e.kind, text: e.said, ...(e.fix ? { fix: e.fix } : {}),
       note, session: sid, agent: session.agent ?? null, transcript: session.transcript ?? null, cwd: session.cwd ?? null, domain: rules[note]?.domain ?? f.domain, ...(e.pick ? { pick: e.pick } : {}), ...(e.page ? { page: e.page } : {}),
+      ...(f.agreed ? { approved: f.agreed } : {}),
     });
     if (f.repeats) return addEvidence(f, e, scope, rules, same, row, notes);
     const taken = readNote(key, notes);
     if (taken) refuse(`${taken.rel} already exists. Pick another slug, or leave that note to the user.`);
     const overlaps = checkRepeats(f, ruleText(n), scope, rules, same, notes);
+    f.agreed = consent(f, e, f.domain, [`**Keep this rule?** ${key}: ${ruleText(n)}`, 'Say yes to keep it, or say how to word it otherwise.']);
     const file = vaultPath(...rel.split('/'));
     writeSettled(file, text);
     appendJsonl(inboxFile(f.name), [row(key)]);
