@@ -303,6 +303,18 @@ test('a session no domain reached at start takes a domain added to the config la
   assert.match(context(prompt(v, sid, 'next step', { cwd: dir })), /zeta\/zeta-always/);
 });
 
+test('a session resumed in a second folder no domain reaches adds that folder by path', t => {
+  const v = makeVault(t);
+  const second = folder(t);
+  const { sid } = started(v, folder(t));
+  v.startSession(sid, { cwd: second, source: 'resume' });
+  const input = { ...QUILL, path: true };
+  delete input.marker;
+  const r = addDomain(v, sid, input);
+  assert.equal(r.code, 0, r.stderr);
+  assert.deepEqual(JSON.parse(v.read('vault.local.json')).domains.quill.paths.map(posix), [posix(second)]);
+});
+
 test("a marker above a nearer folder that another domain's marker holds is refused, since sessions there stop at the nearer one", t => {
   const v = makeVault(t);
   const dir = folder(t, ['quill.project', 'pkg/glim.project']);
