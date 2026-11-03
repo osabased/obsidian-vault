@@ -364,7 +364,8 @@ test('the launcher fails loudly: one stderr line, exit 1', async t => {
   const cases = [
     [[], /^vault mcp failed: no vault folder given; pass the vault checkout's absolute path as the first argument\n$/],
     [['relative/vault'], /^vault mcp failed: the vault folder "relative\/vault" is not an absolute path\n$/],
-    [[v.root], /^vault mcp failed: .*server\.mjs does not exist; in the vault, run git config core\.hooksPath \.githooks, then git hook run post-commit\n$/],
+    [[v.at('gone')], /^vault mcp failed: .*gone does not exist; pass the vault checkout's absolute path as the first argument\n$/],
+    [[v.root], /^vault mcp failed: .*vault-test-\w+ is not a git clone, so \.live\/tools can't be made from its last commit; clone the vault with git clone https:\/\/github\.com\/osabased\/obsidian-vault instead of downloading it, and pass the vault checkout's absolute path as the first argument\n$/],
   ];
   for (const [args, line] of cases) {
     const c = connect(t, args);
@@ -374,6 +375,14 @@ test('the launcher fails loudly: one stderr line, exit 1', async t => {
     assert.match(stderr, line, args.join(' '));
     assert.deepEqual(c.messages, []);
   }
+});
+
+test("the launcher makes .live/tools from the vault's last commit, then serves from it", async t => {
+  const v = makeVault(t);
+  v.checkout();
+  const tools = await list(await open(t, v));
+  assert.ok(tools.some(x => x.name === 'status'), 'status is listed');
+  assert.ok(v.exists('.live/tools/mcp/server.mjs'));
 });
 
 test('the launcher reads a Git Bash drive path as the Windows one', { skip: process.platform !== 'win32' }, async t => {
