@@ -47,7 +47,7 @@ async function launch() {
   const root = vaultFolder(given);
   if (!root) return fail(`the vault folder "${given}" is not an absolute path`);
   const file = path.join(root, '.live', 'tools', 'mcp', 'server.mjs');
-  if (!fs.existsSync(file)) return fail(`${file} does not exist; run .githooks/post-commit in the vault to make it`);
+  if (!fs.existsSync(file)) return fail(`${file} does not exist; in the vault, run git config core.hooksPath .githooks, then git hook run post-commit`);
   const { serve } = await import(pathToFileURL(file).href);
   await serve({ input: process.stdin, output: process.stdout, run });
 }
