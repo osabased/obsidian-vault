@@ -7,7 +7,7 @@ import { sessionView } from '../reach.mjs';
 // or the ones of a domain the session moved into. A section's keys are the rules its items show, and its mark marks
 // the first n of them, once the output budget has said how many it keeps.
 function late(sid, reach, rules) {
-  const due = dueAlways(sid, alwaysIn(rules, reach.own));
+  const due = dueAlways(sid, alwaysIn(rules, reach.always));
   return {
     noun: 'rule', head: 'Taste rules that apply for the rest of this session:', items: due.map(([k, r]) => ruleLine(k, r)), keys: due.map(([k]) => k),
     mark: n => markAlways(sid, due.slice(0, n)),
@@ -15,7 +15,6 @@ function late(sid, reach, rules) {
 }
 
 const mentioned = (entries, said) => entries
-  .filter(([, note]) => note.keywords?.length)
   .map(([key, note]) => ({ key, note, score: new Set(note.keywords.filter(kw => mentions(kw, said)).map(kw => kw.toLowerCase())).size }))
   .filter(h => h.score > 0)
   .sort((a, b) => b.score - a.score || byFit(a.note, b.note) || cmp(a.key, b.key));
@@ -31,7 +30,7 @@ function excerpts(sid, reach, rules, said) {
 }
 
 function pointers(event, reach, pageNotes, said) {
-  const pages = duePages(event, mentioned(Object.entries(pageNotes).filter(([, p]) => reach.page(p)), said));
+  const pages = duePages(event, mentioned(Object.entries(pageNotes).filter(([, p]) => reach.keywordPage(p)), said));
   return {
     noun: 'page', head: 'Vault pages on this request. Read the ones that bear on it:', items: pages.map(h => pageLine(h.key, h.note)),
     mark: n => markPages(event, pages.slice(0, n), Infinity),

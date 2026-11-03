@@ -10,7 +10,7 @@ export function statusLine({ reach, rules, pages }) {
   const always = reaching.filter(reach.always).length;
   const read = Object.values(pages).filter(reach.page).length;
   const where = vaultFolder ? `vault folder${doms.length ? `, ${joinList(doms, 'and')}` : ''}` : doms.length ? joinList(doms, 'and') : 'no domain here';
-  const noun = !vaultFolder && heard.length === 1 ? 'global rule' : 'rule';
+  const noun = heard.length === 1 ? 'global rule' : 'rule';
   const counted = `${plural(reaching.length, noun)}${always ? ` (${always} always)` : ''}`;
   const paged = read ? `${plural(read, 'page')}${vaultFolder ? ' (every domain)' : ''}` : '';
   const modes = vaultFolder ? new Map([['corrections', []]]) : domainsByMode(reach.own);

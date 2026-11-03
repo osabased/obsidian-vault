@@ -13,6 +13,7 @@ import {
 } from './rules.mjs';
 import { hasFormat, reachOf, compileFor } from './compile.mjs';
 import { setField } from './frontmatter.mjs';
+import { routesOf } from './reach.mjs';
 import { NAMESPACE_NAME, validGlob } from './glob.mjs';
 import { EXTENSION_NAME, hasExtension, extensionRel, extension } from './ext.mjs';
 import { SCHEMES } from './versions.mjs';
@@ -149,7 +150,7 @@ export function lint(notes = loadNotes(), chains = sourceChains()) {
   lintCompiled(notes, add);
   const rules = liveRules(notes);
   for (const d of Object.keys(domains)) {
-    const size = alwaysSize(rules, ['global', d]);
+    const size = alwaysSize(rules, routesOf([d], false).always);
     if (size.lines > delivery.activeMaxLines || size.bytes > delivery.activeMaxBytes) {
       add('error', 'active.md', `always-on rules for ${d} come to ${size.lines} lines and ${size.bytes} bytes, over the ${delivery.activeMaxLines} lines or ${delivery.activeMaxBytes} bytes a session start loads`);
     }

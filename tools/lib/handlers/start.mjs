@@ -7,7 +7,7 @@ import { changedSinceBuild, noteTimes, refStats } from '../cache.mjs';
 import { knowledgeDays } from '../sources.mjs';
 import { touchSession, clearMarkers, markAlways, markShown, tidy, errorsSinceLint, sinceLint } from '../sessions.mjs';
 import { proposeNote, pickNote, uncoveredNote } from '../instructions.mjs';
-import { reachOf, viewOf } from '../reach.mjs';
+import { routesOf, viewOf } from '../reach.mjs';
 
 function errorsNote() {
   const errors = errorsSinceLint();
@@ -68,7 +68,7 @@ export async function start(event, agent) {
   const hits = sessionReach(event.cwd);
   const doms = [...new Set(hits.map(d => d.domain))];
   const vaultFolder = inVaultFolder(event.cwd);
-  const reach = reachOf(doms, vaultFolder);
+  const reach = routesOf(doms, vaultFolder);
   const { readable } = reach;
   // Compaction can drop the rules the gate and excerpts already showed, so they show them again.
   if (event.session && (event.reason === 'compact' || event.reason === 'clear')) clearMarkers(event.session);
@@ -89,7 +89,7 @@ export async function start(event, agent) {
   });
   const view = viewOf(reach, settledNotes(notes), deliveryFor(hits, derived && { derived }));
   const { notes: ready, ctx, rules } = view;
-  const always = alwaysContext(reach.own, rules);
+  const always = alwaysContext(reach.always, rules);
   const topics = guarded('index note', () => scopeTopics(readable, ready), []);
   let propose = '';
   let pick = '';
@@ -123,7 +123,7 @@ export async function start(event, agent) {
   // active.md for them. A block the output budget left out marks nothing, so the next prompt brings its rules.
   if (registered && kept[lead.length]) {
     markShown(event.session, always.keys);
-    markAlways(event.session, alwaysIn(rules, reach.own));
+    markAlways(event.session, alwaysIn(rules, reach.always));
   }
   const notice = again ? '' : guarded('status line', () => statusLine(view));
   return context || notice ? { context, notice } : null;

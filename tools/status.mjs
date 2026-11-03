@@ -29,7 +29,7 @@ async function status(sid) {
   if (!sid) refuse("there's no session id. Pass the one from the taste vault's note at session start, or run this from the agent's own shell, which sets it.");
   const entry = readJsonSafe(registry(safeId(sid)));
   if (!entry) refuse(`the taste vault has no session ${sid}.`);
-  return [statusLine(await sessionView(sid, entry.cwd)), shown(sid)].join('\n');
+  return [statusLine(await sessionView(sid, entry.reach?.cwd ?? entry.cwd)), shown(sid)].join('\n');
 }
 
 const args = process.argv.slice(2);
