@@ -2,8 +2,9 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { escapeRegExp } from './rules.mjs';
 
-// The core, skills, tests and AGENTS.md name no domain, so a domain named like a word in them would read as one there.
-const SCANNED = ['tools', '.claude/skills', 'test', 'AGENTS.md'];
+// The core, skills, tests, AGENTS.md and the reference files name no domain, so a domain named like a word in them
+// would read as one there.
+const SCANNED = ['tools', '.claude/skills', 'test', 'AGENTS.md', 'reference'];
 const SKIPPED = new Set(['node_modules', '.git']);
 
 function filesUnder(p) {

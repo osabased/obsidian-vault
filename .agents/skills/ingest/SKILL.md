@@ -7,7 +7,7 @@ argument-hint: "[file | URL | batch]"
 
 # Ingest
 
-Work in the vault root. AGENTS.md has the page and rule formats. With `batch`, follow Batch at the end. Otherwise take one source through these steps with the user.
+Work in the vault root. `reference/notes.md` has the page and rule formats. With `batch`, follow Batch at the end. Otherwise take one source through these steps with the user.
 
 1. **Source.** Take the source the user named. If they named none, run `node tools/review.mjs sources`, which lists the files in `raw/refs/` no source page names, and ask which. If a source page already covers it, update that page in step 4 rather than start another: one whose `source` is the file, or for a URL, the URL or a file in `raw/refs/` whose frontmatter gives that `url`. A copy with a `sha256` is covered only by a page naming that file, or a copy with the same `url` and `sha256`: a re-fetch with a new hash is a new source, with a source page of its own.
 2. **Save it** in `raw/refs/`, so pages and rules cite a copy whose words propose.mjs can check:

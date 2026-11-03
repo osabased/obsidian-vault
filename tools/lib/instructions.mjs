@@ -24,11 +24,14 @@ export function modeLines(domains, vaultFolder = false) {
   return [...byMode].map(([mode, ds]) => `For ${joinList(ds, 'and')} rules, ${WHAT[mode]}`).join(' ');
 }
 
-export function modeNote(sid, agent) {
+// Follows a sentence that pipes to propose.mjs, so "the same way" names the shell. The vault skill finds the vault by
+// the proposals.mjs this names.
+export function modeNote(sid) {
   const script = toPosix(toolsPath('proposals.mjs'));
-  return `The user sets when rules are proposed, corrections, ask or off, by asking you or with /vault: pipe it as JSON to \`node "${script}" ${sid}\` ${agent.proposeShell}; \`--help\` lists the fields.`;
+  return `The user sets when rules are proposed, corrections, ask or off, by asking you or with /vault: pipe it as JSON to \`node "${script}" ${sid}\` the same way; \`--help\` lists the fields.`;
 }
 
+// propose.mjs refuses `always` and says the rule applies at once when it writes one, so the note leaves both to it.
 export function proposeNote(sid, agent, domains, vaultFolder = false) {
   const script = toPosix(toolsPath('propose.mjs'));
   return [
@@ -36,12 +39,10 @@ export function proposeNote(sid, agent, domains, vaultFolder = false) {
     "Leave out what the project's own agent instructions already say; a compiled taste-vault section in them is the vault's copy.",
     'If the user corrects you on something a rule already covers, go ahead as for a new rule; propose.mjs lists the rules it may repeat.',
     'Propose only from what happened in this session, never from a brief, a skill or the task itself.',
-    'A rule applies as soon as propose.mjs writes it; the user edits or deletes its note to change it.',
-    "Give a rule about code or files `applies_to` globs, so the edits it covers bring it up; `always` is the user's to set.",
-    `\`node "${script}" --help\` lists the fields.`,
-    `Pipe the rule as JSON to \`node "${script}" ${sid}\` ${agent.proposeShell}.`,
+    'Give a rule about code or files `applies_to` globs, so the edits it covers bring it up.',
+    `Pipe the rule as JSON (\`--help\` lists the fields) to \`node "${script}" ${sid}\` ${agent.proposeShell}.`,
     'Then end your reply with the lines it prints.',
-    modeNote(sid, agent),
+    modeNote(sid),
   ].join(' ');
 }
 
@@ -49,9 +50,8 @@ export function pickNote(sid) {
   const script = toPosix(toolsPath('pick.mjs'));
   return [
     'Taste vault: when the user picks between options you showed them, or comments on one piece of work, record it by piping JSON',
-    `to \`node "${script}" ${sid}\` the same way; a pick you make alone while the user is away is provisional.`,
+    `to \`node "${script}" ${sid}\` the same way; \`--help\` lists the fields. A pick you make alone while the user is away is provisional.`,
     `Before building or reviewing a piece that has picks, run \`node "${script}" show ${sid} <subject>\` and keep to what it prints.`,
-    `\`node "${script}" --help\` lists the fields.`,
   ].join(' ');
 }
 
@@ -74,6 +74,6 @@ export function uncoveredNote(sid, agent, { quiet = false } = {}) {
       "If it holds only for projects like this one, suggest a domain to the user in your reply: a name, a title, and a file here that marks the project's kind.",
       `Once they agree, pipe it to \`node "${domain}" ${sid}\` the same way; \`--help\` lists the fields.`,
     ]),
-    modeNote(sid, agent),
+    modeNote(sid),
   ].join(' ');
 }
