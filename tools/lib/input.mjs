@@ -3,10 +3,14 @@ import fs from 'node:fs';
 export class UsageError extends Error {}
 export class Refused extends Error {}
 
+// The parser's reason names where the JSON broke, as when a shell halved a backslash, which the usage alone hides.
 export function readInput() {
+  let text;
+  try { text = fs.readFileSync(0, 'utf8').replace(/^﻿/, ''); } catch (e) { throw new UsageError(`Couldn't read stdin: ${e.message}.`); }
+  if (!text.trim()) throw new UsageError('No JSON came on stdin.');
   let p;
-  try { p = JSON.parse(fs.readFileSync(0, 'utf8').replace(/^﻿/, '')); } catch { throw new UsageError(); }
-  if (!p || typeof p !== 'object' || Array.isArray(p)) throw new UsageError();
+  try { p = JSON.parse(text); } catch (e) { throw new UsageError(`The input isn't valid JSON: ${e.message}.`); }
+  if (!p || typeof p !== 'object' || Array.isArray(p)) throw new UsageError('The input must be one JSON object.');
   return p;
 }
 
