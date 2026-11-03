@@ -1,12 +1,13 @@
-import { sessionReach, inVaultFolder, isQuiet, readableDomains, vaultPath, toPosix, guarded, config, plural, clock, daysBetween } from '../vault.mjs';
+import { sessionReach, inVaultFolder, isQuiet, vaultPath, toPosix, guarded, config, plural, clock, daysBetween } from '../vault.mjs';
 import { statusLine } from '../status.mjs';
-import { alwaysContext, alwaysIn, fitContext, indexNote, scopeTopics, loadNotesAsync, settledNotes, liveRules, deliverable, deliveryFor, readDerived, clip, undelivered, knownDomain, joinList } from '../rules.mjs';
+import { alwaysContext, alwaysIn, fitContext, indexNote, scopeTopics, loadNotesAsync, settledNotes, deliveryFor, readDerived, clip, undelivered, knownDomain, joinList } from '../rules.mjs';
 import { build } from '../build.mjs';
 import { remaining } from '../deadline.mjs';
 import { changedSinceBuild, noteTimes, refStats } from '../cache.mjs';
 import { knowledgeDays } from '../sources.mjs';
 import { touchSession, clearMarkers, markAlways, markShown, tidy, errorsSinceLint, sinceLint } from '../sessions.mjs';
 import { proposeNote, pickNote, uncoveredNote } from '../instructions.mjs';
+import { reachOf, viewOf } from '../reach.mjs';
 
 function errorsNote() {
   const errors = errorsSinceLint();
@@ -67,10 +68,10 @@ export async function start(event, agent) {
   const hits = sessionReach(event.cwd);
   const doms = [...new Set(hits.map(d => d.domain))];
   const vaultFolder = inVaultFolder(event.cwd);
-  const readable = readableDomains(doms, vaultFolder);
+  const reach = reachOf(doms, vaultFolder);
+  const { readable } = reach;
   // Compaction can drop the rules the gate and excerpts already showed, so they show them again.
   if (event.session && (event.reason === 'compact' || event.reason === 'clear')) clearMarkers(event.session);
-  const scope = [...doms, 'global'];
   // A session in this folder hears of notes outside any domain too.
   const walked = vaultFolder ? null : readable;
   const notes = await loadNotesAsync(walked);
@@ -86,10 +87,9 @@ export async function start(event, agent) {
     derived = undefined;
     try { build({ waitMs: Math.min(2000, remaining()), refs }); } catch (e) { if (e?.code !== 'ELOCKED') throw e; }
   });
-  const ready = settledNotes(notes);
-  const ctx = deliveryFor(hits, derived && { derived });
-  const rules = deliverable(liveRules(ready), ctx);
-  const always = alwaysContext(scope, rules);
+  const view = viewOf(reach, settledNotes(notes), deliveryFor(hits, derived && { derived }));
+  const { notes: ready, ctx, rules } = view;
+  const always = alwaysContext(reach.own, rules);
   const topics = guarded('index note', () => scopeTopics(readable, ready), []);
   let propose = '';
   let pick = '';
@@ -123,8 +123,8 @@ export async function start(event, agent) {
   // active.md for them. A block the output budget left out marks nothing, so the next prompt brings its rules.
   if (registered && kept[lead.length]) {
     markShown(event.session, always.keys);
-    markAlways(event.session, alwaysIn(rules, scope));
+    markAlways(event.session, alwaysIn(rules, reach.own));
   }
-  const notice = again ? '' : guarded('status line', () => statusLine({ doms, vaultFolder, rules, notes: ready, readable, ctx }));
+  const notice = again ? '' : guarded('status line', () => statusLine(view));
   return context || notice ? { context, notice } : null;
 }

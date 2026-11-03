@@ -1,6 +1,7 @@
-import { inVaultFolder, readableDomains, readJsonSafe, safeId, plural } from './lib/vault.mjs';
-import { loadNotesAsync, settledNotes, liveRules, deliverable, deliveryFor, joinList } from './lib/rules.mjs';
-import { registry, sessionDomains, sessionHits, shownInContext } from './lib/sessions.mjs';
+import { readJsonSafe, safeId, plural } from './lib/vault.mjs';
+import { joinList } from './lib/rules.mjs';
+import { registry, shownInContext } from './lib/sessions.mjs';
+import { sessionView } from './lib/reach.mjs';
 import { statusLine } from './lib/status.mjs';
 import { currentSession } from './lib/agents.mjs';
 import { UsageError, refuse, failure } from './lib/input.mjs';
@@ -23,19 +24,12 @@ function shown(sid) {
   return `shown since the session started or was last compacted: ${parts.length ? parts.join('; ') : 'nothing yet'}`;
 }
 
-// The domains and rules a prompt in the session gets, which follow the session's latest start and the folder it began in.
+// The line counts what a prompt in the session would get now, by the reach its latest start recorded for its folder.
 async function status(sid) {
   if (!sid) refuse("there's no session id. Pass the one from the taste vault's note at session start, or run this from the agent's own shell, which sets it.");
   const entry = readJsonSafe(registry(safeId(sid)));
   if (!entry) refuse(`the taste vault has no session ${sid}.`);
-  const cwd = entry.cwd;
-  const doms = sessionDomains(sid, cwd);
-  const vaultFolder = inVaultFolder(cwd);
-  const readable = readableDomains(doms, vaultFolder);
-  const notes = settledNotes(await loadNotesAsync(vaultFolder ? null : readable));
-  const ctx = deliveryFor(sessionHits(sid, cwd));
-  const rules = deliverable(liveRules(notes), ctx);
-  return [statusLine({ doms, vaultFolder, rules, notes, readable, ctx }), shown(sid)].join('\n');
+  return [statusLine(await sessionView(sid, entry.cwd)), shown(sid)].join('\n');
 }
 
 const args = process.argv.slice(2);
