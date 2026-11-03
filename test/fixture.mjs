@@ -118,7 +118,10 @@ export function makeVault(t, { config = {}, domain = 'glim', topics = ['layout',
   // it changes only the fields it gives.
   const marker = `${domain}.project`;
   fs.writeFileSync(path.join(project, marker), '');
-  const asOf = localDay(new Date(Date.now() - 30 * 86400e3));
+  // Calendar days, since 30 × 24 h back from late evening lands on the next day when the clocks went back in between.
+  const back = new Date();
+  back.setDate(back.getDate() - 30);
+  const asOf = localDay(back);
   const shapes = presets.map(name => PRESETS[name](v, { newProject, asOf, sources }));
   // Most tests propose without the user's approval, so the fixture writes rules at once; proposals.test.mjs sets the
   // other modes, and drops the key to test the default.
