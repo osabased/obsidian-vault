@@ -5,7 +5,7 @@ import { pathToFileURL } from 'node:url';
 // The plugin's hooks.json starts every hook through this file, which runs the hook from the vault's .live/tools/, so the
 // installed plugin copy never goes stale against the vault. The failures here print the line runHook prints, and exit 1,
 // which Claude Code shows as a hook error while the call goes ahead.
-const HOOKS = ['session-start', 'prompt', 'edit', 'stop', 'subagent-start'];
+const HOOKS = ['session-start', 'prompt', 'edit', 'stop', 'subagent-start', 'vault-call'];
 const [hook = '', timeout] = process.argv.slice(2);
 
 function fail(why) {

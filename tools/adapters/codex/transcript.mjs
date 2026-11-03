@@ -19,24 +19,36 @@ export const continuedMark = (sid, text) => Boolean(sid) && marked('turns', sid,
 const userMessage = r => r?.type === 'response_item' && r.payload?.type === 'message' && r.payload.role === 'user';
 const kindsOf = r => r.payload.internal_chat_message_metadata_passthrough?.content_item_kinds;
 
-// Null when the file can't be read, has no session_meta, or holds a user message with no content_item_kinds other than a
-// Stop continuation, so a format change refuses quotes rather than letting injected text count as the user's.
-export function typedMessages(file) {
+const assistantMessage = r => r?.type === 'response_item' && r.payload?.type === 'message' && r.payload.role === 'assistant';
+
+// The conversation in file order, the user's typed messages as typedMessages gives them and the agent's replies as the
+// text of their output_text items. Null when the file can't be read, has no session_meta, or holds a user message with no
+// content_item_kinds other than a Stop continuation, so a format change refuses quotes rather than letting injected text
+// count as the user's.
+export function conversation(file) {
   const rows = readJsonl(file, null);
   const sid = rows?.find(r => r?.type === 'session_meta')?.payload?.id;
   if (!sid) return null;
   const out = [];
-  for (const r of rows.filter(userMessage)) {
+  for (const r of rows) {
+    if (assistantMessage(r)) {
+      const text = (Array.isArray(r.payload.content) ? r.payload.content : []).filter(c => c?.type === 'output_text').map(c => String(c.text ?? '')).join('\n');
+      if (text.trim()) out.push({ role: 'agent', text });
+      continue;
+    }
+    if (!userMessage(r)) continue;
     const kinds = kindsOf(r);
     if (!Array.isArray(kinds)) {
       if (hookPrompt(r)) continue;
       return null;
     }
     if (!typedKinds(kinds)) continue;
-    for (const text of textsOf(r)) if (!text.startsWith(QUESTION_REPLY) && !continuedMark(sid, text)) out.push(text);
+    for (const text of textsOf(r)) if (!text.startsWith(QUESTION_REPLY) && !continuedMark(sid, text)) out.push({ role: 'user', text });
   }
   return out;
 }
+
+export const typedMessages = file => conversation(file)?.filter(e => e.role === 'user').map(e => e.text) ?? null;
 
 // For the live provider test: the fields typedMessages reads, and the ones the file lacks.
 export function transcriptCheck(file) {

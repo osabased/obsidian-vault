@@ -3,7 +3,7 @@ import { vaultPath, toPosix, filesIn } from './lib/vault.mjs';
 import { loadNotes, undelivered, kindLabel, normTopic, clip, cmp, PAGE_KINDS } from './lib/rules.mjs';
 import { parse } from './lib/frontmatter.mjs';
 import { sourceTexts } from './lib/quotes.mjs';
-import { UsageError, failure } from './lib/input.mjs';
+import { UsageError, failure, readInput, schemaOf, schemaArg } from './lib/input.mjs';
 
 const KINDS = ['rule', 'taste', 'knowledge', 'page', ...PAGE_KINDS];
 const USAGE = `usage: node tools/search.mjs "<words>" [--domain <domain>] [--kind <kind>] [--topic <topic>] [--raw] [--limit <n>]
@@ -23,6 +23,27 @@ words such as "the" and "with" match nothing.
   --limit <n>        at most n results, 10 by default
 
 Superseded rules are left out. A note the hooks don't deliver says why.`;
+
+const FIELDS = [
+  { name: 'words', type: 'string', required: true, help: ['the words to look for'] },
+  { name: 'domain', type: 'string', help: ['only notes in that domain'] },
+  { name: 'kind', type: 'string', enum: KINDS, help: ['only rules (rule, taste or knowledge) or pages (page, topic, concept, entity, synthesis or source)'] },
+  { name: 'topic', type: 'string', help: ['only notes on that topic'] },
+  { name: 'raw', type: 'boolean', help: ['true to search the files under raw/refs/ too, which domain, kind and topic leave out'] },
+  { name: 'limit', type: 'number', help: ['at most this many results, 10 by default'] },
+];
+const SUMMARY = "Ranks the vault's notes by the words, best match first, with each one's path and the line that matched. Words in a note's name and keywords count most; plural endings and common words don't count.";
+
+// The argv form's options, so both forms go through search() alike.
+function optionsOf(p) {
+  const extra = Object.keys(p).find(k => !FIELDS.some(f => f.name === k));
+  if (extra) throw new UsageError(`${extra} isn't a field.`);
+  const text = k => (p[k] === undefined || typeof p[k] === 'string' ? p[k] : (() => { throw new UsageError(`${k} must be a string.`); })());
+  if (typeof p.words !== 'string') throw new UsageError('words must be a string.');
+  if (p.raw !== undefined && typeof p.raw !== 'boolean') throw new UsageError('raw must be true or false.');
+  if (p.limit !== undefined && typeof p.limit !== 'number') throw new UsageError('limit must be a number.');
+  return { words: p.words.trim(), o: { domain: text('domain'), kind: text('kind'), topic: text('topic'), raw: p.raw, limit: p.limit === undefined ? undefined : String(p.limit) } };
+}
 
 const STOP = new Set('an and are as at be but by can do does for from has have how in is it its not of on or so than that the then there these they this to was we were what when which who why will with you your'.split(' '));
 // Roughly singular, so "buttons" finds "button" and "entries" finds "entry". Both sides fold alike, so a word folded
@@ -130,6 +151,17 @@ function search(query, o) {
 const OPTIONS = { domain: { type: 'string' }, kind: { type: 'string' }, topic: { type: 'string' }, raw: { type: 'boolean' }, limit: { type: 'string' }, help: { type: 'boolean' } };
 
 try {
+  const argv = process.argv.slice(2);
+  if (schemaArg(argv)) {
+    console.log(JSON.stringify(schemaOf(SUMMARY, FIELDS)));
+    process.exit(0);
+  }
+  if (argv[0] === '--json') {
+    if (argv.length > 1) throw new UsageError();
+    const { words: w, o } = optionsOf(readInput());
+    console.log(search(w, o));
+    process.exit(0);
+  }
   let args;
   try { args = parseArgs({ args: process.argv.slice(2), options: OPTIONS, allowPositionals: true }); } catch { throw new UsageError(); }
   const { values, positionals } = args;

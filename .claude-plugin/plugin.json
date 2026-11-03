@@ -6,6 +6,12 @@
   },
   "repository": "https://github.com/osabased/obsidian-vault",
   "skills": "./.claude/skills/",
+  "mcpServers": {
+    "vault": {
+      "command": "node",
+      "args": ["${CLAUDE_PLUGIN_ROOT}/mcp/launch.mjs", "${user_config.vault}"]
+    }
+  },
   "userConfig": {
     "vault": {
       "type": "directory",

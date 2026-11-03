@@ -265,7 +265,7 @@ test("with no session id given, propose takes the agent's own session, and refus
   const { v, sid } = setup(t);
   const none = v.run('propose.mjs', [], { input: proposal() });
   assert.equal(none.code, 1);
-  assert.match(none.stderr, /there's no session id to propose for\. Pass the session id/);
+  assert.match(none.stderr, /there's no session id to propose for\. The vault's tools pass the session id themselves\. From a shell, pass it as the first argument/);
   const r = v.run('propose.mjs', [], { input: proposal(), env: { [sessionVar]: sid } });
   assert.equal(r.code, 0, r.stderr);
   assert.match(r.stdout, /^Wrote wiki\/glim\/rules\/new-rule\.md\./);
@@ -292,7 +292,7 @@ test('a field propose does not take is refused by name, and requires and tools a
   for (const field of ['requires', 'tools']) {
     const r = v.propose(sid, proposal({ [field]: ['x'] }));
     assert.equal(r.code, 1);
-    assert.equal(r.stderr, `Not proposed: ${field} isn't a field propose.mjs takes. Fields like requires and tools are added to the note by hand. node tools/propose.mjs --help lists the fields.\n`);
+    assert.equal(r.stderr, `Not proposed: ${field} isn't a field propose.mjs takes. Fields like requires and tools are added to the note by hand. The \`propose\` tool's schema lists the fields.\n`);
   }
   assert.equal(v.exists('wiki/glim/rules/new-rule.md'), false);
 });
