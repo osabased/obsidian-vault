@@ -368,7 +368,7 @@ export const settledRules = (notes = loadNotes()) => liveRules(settledNotes(note
 export function livePages(notes = loadNotes()) {
   const pages = {};
   for (const n of notes) {
-    if (n.type !== 'page' || !(n.keywords?.length || n.applies_to?.length) || undelivered(n)) continue;
+    if (n.type !== 'page' || n.superseded_by || !(n.keywords?.length || n.applies_to?.length) || undelivered(n)) continue;
     pages[n.key] = {
       rel: n.rel, domain: n.domain, kind: n.kind, summary: n.summary, keywords: n.keywords, applies_to: n.applies_to, triggers: n.triggers,
       requires: n.requires, contentHash: n.contentHash,
