@@ -25,7 +25,7 @@ const toolFile = (tool, ti) => (tool === 'NotebookEdit' ? ti.notebook_path : ti.
 export const proposeShell = 'from the Bash tool with a quoted heredoc, since PowerShell turns curly quotes and dashes into ?';
 
 export const identifiers = [
-  'CLAUDE_CODE_', 'CLAUDE_PLUGIN_', 'hookSpecificOutput', 'permissionDecision', 'additionalContext', 'AskUserQuestion', 'MultiEdit', 'NotebookEdit',
+  'CLAUDE_CODE_', 'CLAUDE_PLUGIN_', 'hookSpecificOutput', 'systemMessage', 'permissionDecision', 'additionalContext', 'AskUserQuestion', 'MultiEdit', 'NotebookEdit',
   'toolUseResult', 'isCompactSummary', 'isMeta', 'queued_command', 'system-reminder', 'task-notification', 'local-command-', 'stop_hook_active',
   'session_id', 'agent_id', 'tool_name', 'transcript_path', 'file_path', 'notebook_path', 'old_string', 'new_string', 'new_source', 'Claude Code',
 ];
@@ -96,7 +96,13 @@ export function output(hook, results) {
   const denies = results.flatMap(r => (r?.deny ? [r.deny] : []));
   if (denies.length) return { hookSpecificOutput: { hookEventName: 'PreToolUse', permissionDecision: 'deny', permissionDecisionReason: denies.join('\n\n') } };
   const context = results.flatMap(r => (r?.context ? [r.context] : []));
-  return context.length ? { hookSpecificOutput: { hookEventName: EVENT_NAMES[hook], additionalContext: context.join('\n\n') } } : null;
+  // A notice is for the user, who sees systemMessage; the agent doesn't.
+  const notice = results.flatMap(r => (r?.notice ? [r.notice] : []));
+  if (!context.length && !notice.length) return null;
+  return {
+    ...(notice.length && { systemMessage: notice.join('\n') }),
+    ...(context.length && { hookSpecificOutput: { hookEventName: EVENT_NAMES[hook], additionalContext: context.join('\n\n') } }),
+  };
 }
 
 export const registration = root => ({

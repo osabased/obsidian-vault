@@ -1,4 +1,4 @@
-import { toolsPath, toPosix, proposalMode } from './vault.mjs';
+import { toolsPath, toPosix, proposalMode, domainsByMode } from './vault.mjs';
 import { joinList } from './rules.mjs';
 
 // What a session is told about proposing and recording, by the start hook and by domain.mjs once it starts a domain.
@@ -19,8 +19,7 @@ const WHAT = {
 // in the vault folder proposes as in corrections whatever the mode.
 export function modeLines(domains, vaultFolder = false) {
   if (vaultFolder) return WHAT.corrections;
-  const byMode = new Map();
-  for (const d of domains) byMode.set(proposalMode(d), [...(byMode.get(proposalMode(d)) ?? []), d]);
+  const byMode = domainsByMode(domains);
   if (byMode.size === 1) return WHAT[[...byMode.keys()][0]];
   return [...byMode].map(([mode, ds]) => `For ${joinList(ds, 'and')} rules, ${WHAT[mode]}`).join(' ');
 }
@@ -63,15 +62,18 @@ const GLOBAL = {
   off: (propose, how) => `Propose a \`global\` rule only when the user asks you to keep a preference that holds in every project: pipe it as JSON to ${propose} ${how} with their words asking as approved, then end your reply with the lines it prints; \`--help\` lists the fields.`,
 };
 
-// A session whose folder no domain reaches can keep a preference in global, or in a domain the user agrees to start.
-export function uncoveredNote(sid, agent) {
+// A session whose folder no domain reaches can keep a preference in global, or in a domain the user agrees to start. A
+// folder the user keeps quiet, such as a scratch folder, is no project to start a domain for.
+export function uncoveredNote(sid, agent, { quiet = false } = {}) {
   const propose = `\`node "${toPosix(toolsPath('propose.mjs'))}" ${sid}\``;
   const domain = toPosix(toolsPath('domain.mjs'));
   return [
-    'Taste vault: this project is in no domain.',
+    quiet ? 'Taste vault: this folder is in no domain.' : 'Taste vault: this project is in no domain.',
     GLOBAL[proposalMode('global')](propose, agent.proposeShell),
-    "If it holds only for projects like this one, suggest a domain to the user in your reply: a name, a title, and a file here that marks the project's kind.",
-    `Once they agree, pipe it to \`node "${domain}" ${sid}\` the same way; \`--help\` lists the fields.`,
+    ...(quiet ? [] : [
+      "If it holds only for projects like this one, suggest a domain to the user in your reply: a name, a title, and a file here that marks the project's kind.",
+      `Once they agree, pipe it to \`node "${domain}" ${sid}\` the same way; \`--help\` lists the fields.`,
+    ]),
     modeNote(sid, agent),
   ].join(' ');
 }

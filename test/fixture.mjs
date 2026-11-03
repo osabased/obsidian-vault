@@ -9,10 +9,11 @@ import { pathToFileURL } from 'node:url';
 const TOOLS = path.resolve(import.meta.dirname, '..', 'tools');
 
 // The tools find the vault from their own location, so each test runs a copy of tools/ inside a vault of its own.
-// presets names shapes from PRESETS to add; the test's own domains, local and config merge over theirs.
+// presets names shapes from PRESETS to add; the test's own domains, local and config merge over theirs. quiet is
+// vault.local.json's list of quiet folder globs.
 // sources gives the almanac preset's saved sources a url, repo and commit to point at, such as a server from serve() or a
 // repository from gitRepo(), in place of hosts that never resolve.
-export function makeVault(t, { config = {}, domain = 'glim', topics = ['layout', 'code'], domains = {}, local = {}, presets = [], under = os.tmpdir(), sources = {} } = {}) {
+export function makeVault(t, { config = {}, domain = 'glim', topics = ['layout', 'code'], domains = {}, local = {}, quiet, presets = [], under = os.tmpdir(), sources = {} } = {}) {
   const unknown = presets.filter(p => !Object.hasOwn(PRESETS, p));
   if (unknown.length) throw new Error(`no preset ${unknown.join(', ')}; the presets are ${Object.keys(PRESETS).join(', ')}`);
   if (presets.includes('glim') && domain !== 'glim') throw new Error(`the glim preset fills the default domain, so it needs domain 'glim', not '${domain}'`);
@@ -125,7 +126,7 @@ export function makeVault(t, { config = {}, domain = 'glim', topics = ['layout',
     domains: merged([{ [domain]: { title: 'Glim', topics, markers: [marker] } }, ...shapes.map(s => s.domains ?? {}), domains]),
     ...merged([{ proposals: 'corrections' }, ...shapes.map(s => s.config ?? {}), config]),
   }, null, 2)}\n`);
-  v.write('vault.local.json', `${JSON.stringify({ domains: merged([...shapes.map(s => s.local ?? {}), local]) }, null, 2)}\n`);
+  v.write('vault.local.json', `${JSON.stringify({ domains: merged([...shapes.map(s => s.local ?? {}), local]), quiet }, null, 2)}\n`);
   return v;
 }
 

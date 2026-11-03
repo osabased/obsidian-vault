@@ -13,7 +13,7 @@ import {
 } from './rules.mjs';
 import { hasFormat, reachOf, compileFor } from './compile.mjs';
 import { setField } from './frontmatter.mjs';
-import { NAMESPACE_NAME } from './glob.mjs';
+import { NAMESPACE_NAME, validGlob } from './glob.mjs';
 import { EXTENSION_NAME, hasExtension, extensionRel, extension } from './ext.mjs';
 import { SCHEMES } from './versions.mjs';
 import { build } from './build.mjs';
@@ -939,6 +939,9 @@ function lintReach(add) {
   if (!local || typeof mine !== 'object' || Array.isArray(mine)) {
     add('error', 'vault.local.json', 'vault.local.json must be JSON in the form { "domains": { "<domain>": { "paths": ["<folder>"] } } }');
     return;
+  }
+  if (local.quiet !== undefined && !isList(local.quiet, g => isFolder(g) && validGlob(g))) {
+    add('error', 'vault.local.json', 'quiet must be a list of globs over absolute folder paths, such as "C:/scratch/**"');
   }
   const pathsOf = d => (Array.isArray(mine[d]?.paths) ? mine[d].paths : []);
   for (const [d, x] of Object.entries(shared)) {

@@ -1,4 +1,5 @@
-import { sessionReach, inVaultFolder, readableDomains, vaultPath, toPosix, guarded, config, plural, clock, daysBetween } from '../vault.mjs';
+import { sessionReach, inVaultFolder, isQuiet, readableDomains, vaultPath, toPosix, guarded, config, plural, clock, daysBetween } from '../vault.mjs';
+import { statusLine } from '../status.mjs';
 import { alwaysContext, alwaysIn, fitContext, indexNote, scopeTopics, loadNotesAsync, settledNotes, liveRules, deliverable, deliveryFor, readDerived, clip, undelivered, knownDomain, joinList } from '../rules.mjs';
 import { build } from '../build.mjs';
 import { remaining } from '../deadline.mjs';
@@ -101,7 +102,7 @@ export async function start(event, agent) {
     if (doms.length) {
       propose = proposeNote(event.session, agent, doms, vaultFolder);
       pick = pickNote(event.session);
-    } else if (!vaultFolder) uncovered = uncoveredNote(event.session, agent);
+    } else if (!vaultFolder) uncovered = uncoveredNote(event.session, agent, { quiet: isQuiet(event.cwd) });
   }
   // Compaction and /clear start the context again within one session, which already heard these lines.
   const again = ['compact', 'clear'].includes(event.reason);
@@ -124,5 +125,6 @@ export async function start(event, agent) {
     markShown(event.session, always.keys);
     markAlways(event.session, alwaysIn(rules, scope));
   }
-  return context ? { context } : null;
+  const notice = again ? '' : guarded('status line', () => statusLine({ doms, vaultFolder, rules, notes: ready, readable }));
+  return context || notice ? { context, notice } : null;
 }
