@@ -21,6 +21,8 @@ function filled(t) {
   v.write('wiki/glim/rules/prism.md', ruleNote({ keywords: ['prism'], doLine: 'Bend light.', notLine: 'Block it.' }));
   v.write('wiki/global/rules/plain.md', ruleNote({ domain: 'global', keywords: ['plain'], doLine: 'Write plainly.', notLine: 'Ornament.' }));
   v.write('wiki/glim/topics/code.md', pageNote({ keywords: ['quartz'] }));
+  // No keyword or glob brings this page up, so no session gets it.
+  v.write('wiki/glim/concepts/quiet-page.md', pageNote({ kind: 'concept' }));
   return v;
 }
 
@@ -42,10 +44,22 @@ test('a start no domain reaches counts the global rules, and domains with their 
   assert.equal(v.startSession(sessionId(), { cwd: v.root }).systemMessage, 'vault: vault folder, every domain · 3 rules (1 always) · 1 page · proposals: corrections');
 });
 
-test('a compact or clear start shows no line, since the session already saw it', t => {
+test("an everywhere domain's keyword rules count where they reach, and its always rules don't", t => {
+  const v = filled(t);
+  const config = JSON.parse(v.read('vault.config.json'));
+  config.domains.wide = { title: 'Wide', topics: ['code'], everywhere: true };
+  v.write('vault.config.json', JSON.stringify(config));
+  v.write('wiki/wide/rules/terse.md', ruleNote({ domain: 'wide', keywords: ['terse'], doLine: 'Be terse.', notLine: 'Pad.' }));
+  v.write('wiki/wide/rules/calm.md', ruleNote({ domain: 'wide', always: true, doLine: 'Stay calm.', notLine: 'Panic.' }));
+  const dir = folder(t, 'vault-status-');
+  assert.match(v.startSession(sessionId(), { cwd: dir }).systemMessage, /^vault: no domain here · 2 rules · proposals/);
+});
+
+test('a resumed start shows the line again, and a compact or clear start shows none, since the session already saw it', t => {
   const v = filled(t);
   const sid = sessionId();
   v.startSession(sid);
+  assert.match(v.startSession(sid, { source: 'resume' }).systemMessage, /^vault: glim/);
   for (const source of ['compact', 'clear']) assert.equal(v.startSession(sid, { source })?.systemMessage, undefined);
 });
 
@@ -54,27 +68,33 @@ test('a quiet folder keeps the offer to propose to global and drops the domain p
   const quiet = folder(t, 'vault-quiet-');
   const loud = folder(t, 'vault-loud-');
   const hushed = context(v.startSession(sessionId(), { cwd: quiet }));
-  assert.match(hushed, /Taste vault: this folder is in no domain\./);
+  assert.match(hushed, /Taste vault: this project is in no domain\./);
   assert.match(hushed, /`global`/);
   assert.doesNotMatch(hushed, /suggest a domain|domain\.mjs/);
   assert.match(context(v.startSession(sessionId(), { cwd: loud })), /suggest a domain to the user/);
 });
 
-test('lint reports a quiet entry that is no glob over an absolute path', t => {
-  const v = makeVault(t, { quiet: ['scratch/**'] });
-  assert.match(v.run('lint.mjs').stdout, /quiet must be a list of globs over absolute folder paths/);
+const QUIET_ERROR = /quiet must be a list of globs over absolute folder paths/;
+
+test('lint takes a quiet glob over an absolute path and reports one that is not', t => {
+  assert.doesNotMatch(makeVault(t, { quiet: [`${posix(os.tmpdir())}/scratch/**`] }).run('lint.mjs').stdout, QUIET_ERROR);
+  assert.match(makeVault(t, { quiet: ['scratch/**'] }).run('lint.mjs').stdout, QUIET_ERROR);
+  if (process.platform === 'win32') assert.match(makeVault(t, { quiet: ['/scratch/**'] }).run('lint.mjs').stdout, QUIET_ERROR, 'a path with no drive never matches a folder');
 });
 
 test('status.mjs prints the line and what the session was shown', t => {
   const v = filled(t);
   const sid = sessionId();
   v.startSession(sid);
-  assert.equal(v.run('status.mjs', [sid]).stdout.split('\n')[1], 'shown this session: 1 rule, glim/brief');
+  const SHOWN = 'shown since the session started or was last compacted: ';
+  assert.equal(v.run('status.mjs', [sid]).stdout.split('\n')[1], `${SHOWN}1 rule, glim/brief`);
   prompt(v, sid, 'make the prism and the quartz plain');
   const r = v.run('status.mjs', [sid]);
   assert.equal(r.code, 0, r.stderr);
   const [line, shown] = r.stdout.trim().split('\n');
   assert.equal(line, 'vault: glim · 3 rules (1 always) · 1 page · proposals: corrections');
-  assert.match(shown, /^shown this session: 3 rules, glim\/brief, glim\/prism and global\/plain; 1 page, glim\/code$/);
+  assert.equal(shown, `${SHOWN}3 rules, glim/brief, glim/prism and global/plain; 1 page, glim/code`);
+  v.startSession(sid, { source: 'compact' });
+  assert.equal(v.run('status.mjs', [sid]).stdout.split('\n')[1], `${SHOWN}1 rule, glim/brief`, 'rules and pages both start again');
   assert.equal(v.run('status.mjs', ['no-such-session']).code, 1);
 });

@@ -221,10 +221,12 @@ export function proposalMode(d) {
   return d === 'global' ? top : modeOr(config().domains[d]?.proposals, top);
 }
 
-// The domains under each mode, in the order given.
 export function domainsByMode(domains) {
   const byMode = new Map();
-  for (const d of domains) byMode.set(proposalMode(d), [...(byMode.get(proposalMode(d)) ?? []), d]);
+  for (const d of domains) {
+    const mode = proposalMode(d);
+    byMode.set(mode, [...(byMode.get(mode) ?? []), d]);
+  }
   return byMode;
 }
 
@@ -500,7 +502,8 @@ function tryLock(file, token, staleMs) {
     fs.writeFileSync(file, token, { flag: 'wx' });
     return true;
   } catch (e) {
-    if (e.code !== 'EEXIST') throw e;
+    // Windows refuses to create a file while another process is still deleting it, as a lock being released is.
+    if (e.code !== 'EEXIST' && !(process.platform === 'win32' && e.code === 'EPERM')) throw e;
   }
   const seen = readToken(file);
   if (seen !== null && stale(seen, Date.now() - mtime(file), staleMs)) steal(file, seen, token);

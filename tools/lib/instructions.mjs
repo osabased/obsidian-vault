@@ -68,7 +68,7 @@ export function uncoveredNote(sid, agent, { quiet = false } = {}) {
   const propose = `\`node "${toPosix(toolsPath('propose.mjs'))}" ${sid}\``;
   const domain = toPosix(toolsPath('domain.mjs'));
   return [
-    quiet ? 'Taste vault: this folder is in no domain.' : 'Taste vault: this project is in no domain.',
+    'Taste vault: this project is in no domain.',
     GLOBAL[proposalMode('global')](propose, agent.proposeShell),
     ...(quiet ? [] : [
       "If it holds only for projects like this one, suggest a domain to the user in your reply: a name, a title, and a file here that marks the project's kind.",

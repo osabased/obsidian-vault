@@ -940,7 +940,9 @@ function lintReach(add) {
     add('error', 'vault.local.json', 'vault.local.json must be JSON in the form { "domains": { "<domain>": { "paths": ["<folder>"] } } }');
     return;
   }
-  if (local.quiet !== undefined && !isList(local.quiet, g => isFolder(g) && validGlob(g))) {
+  // Windows calls /scratch absolute, but a session's folder there starts with its drive, so such a glob never matches.
+  const rooted = g => process.platform !== 'win32' || /^(?:[A-Za-z]:[\\/]|[\\/]{2}[^\\/])/.test(g);
+  if (local.quiet !== undefined && !isList(local.quiet, g => isFolder(g) && rooted(g) && validGlob(g))) {
     add('error', 'vault.local.json', 'quiet must be a list of globs over absolute folder paths, such as "C:/scratch/**"');
   }
   const pathsOf = d => (Array.isArray(mine[d]?.paths) ? mine[d].paths : []);
