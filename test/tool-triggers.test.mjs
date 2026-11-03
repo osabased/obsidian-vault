@@ -9,7 +9,7 @@ const ask = (v, sid, question = 'Which card layout?', opts) => v.edit(sid, 'AskU
 const toolRule = (domain, doLine, triggers = []) => ruleNote({ domain, topic: 'layout', extra: ['tools:', '  - AskUserQuestion'], triggers, doLine });
 const named = out => [...(denied(out) ?? '').matchAll(/^- (\S+): Do:/gm)].map(m => m[1]).sort();
 
-test('an everywhere domain\'s tools rule reaches a session outside its projects, and the vault folder gets every domain\'s', t => {
+test('an everywhere domain\'s tools rule reaches a session outside its projects, and the vault folder gets only the domains its prompts hear', t => {
   const v = makeVault(t, {
     domains: {
       house: { title: 'House', everywhere: true, topics: ['layout'] },
@@ -28,7 +28,7 @@ test('an everywhere domain\'s tools rule reaches a session outside its projects,
   assert.equal(ask(v, sid), null, 'the retry goes through');
   const inVault = sessionId();
   v.startSession(inVault, { cwd: v.root });
-  assert.deepEqual(named(ask(v, inVault, undefined, { cwd: v.root })), ['glim/glim-ask', 'house/house-ask', 'other/other-ask']);
+  assert.deepEqual(named(ask(v, inVault, undefined, { cwd: v.root })), ['house/house-ask'], "the vault folder reads every domain's pages, not their tools rules");
 });
 
 test('a second agent of the session is refused once too, and a reworded rule is refused again', t => {

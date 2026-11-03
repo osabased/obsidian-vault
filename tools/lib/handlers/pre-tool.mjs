@@ -1,5 +1,6 @@
 import fs from 'node:fs';
-import { config, domainsFor, everywhereDomains, vaultRel, vaultOwn, toPosix, cwdOf, shortHash, plainText, readableDomains, inVaultFolder } from '../vault.mjs';
+import { config, domainsFor, everywhereDomains, vaultRel, vaultOwn, toPosix, cwdOf, shortHash, plainText, inVaultFolder } from '../vault.mjs';
+import { reachOf } from '../reach.mjs';
 import {
   loadNotesAsync, settledNotes, liveRules, livePages, deliverable, deliveryFor, byFit, ruleLine, rulePointer, pageLine, fitContext, cmp, clip, parseNote, QUOTED, agentNotesSpan, authoredByUser, AGENT_NOTES, TOP_HEADING, isMap,
 } from '../rules.mjs';
@@ -185,12 +186,13 @@ function nameScope(t, cwd, hits) {
 // A call to a tool with rules on its name, in the domains a prompt's keywords reach. Each rule tests its triggers
 // against the call's whole input, and is no more specific than `**`.
 function toolScope(event, tool, cwd, hits) {
-  const domains = readableDomains(hits.map(h => h.domain), inVaultFolder(cwd));
+  const reach = reachOf([...new Set(hits.map(h => h.domain))], inVaultFolder(cwd));
+  const domains = reach.heard;
   const text = plainText(asText(event.args));
   const place = `tool:${tool}`;
   return {
     domains, hits,
-    matching: notes => Object.entries(notes).flatMap(([key, note]) => (domains.includes(note.domain) && note.tools?.includes(tool)
+    matching: notes => Object.entries(notes).flatMap(([key, note]) => (reach.tool(note) && note.tools.includes(tool)
       ? [{ key, note, rel: tool, place, spec: [0, 0], text }] : [])),
   };
 }

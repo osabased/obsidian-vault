@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { makeVault, ruleNote, pageNote, sessionId, prompt } from './fixture.mjs';
+import { makeVault, ruleNote, pageNote, sessionId, prompt, editFile } from './fixture.mjs';
 
 // The status line the user sees at session start, /vault status, and folders the user keeps quiet.
 const context = out => out?.hookSpecificOutput?.additionalContext ?? '';
@@ -41,7 +41,7 @@ test('a start no domain reaches counts the global rules, and domains with their 
   config.domains.glim.proposals = 'off';
   v.write('vault.config.json', JSON.stringify(config));
   assert.match(v.startSession(sessionId()).systemMessage, /proposals: global corrections, glim off$/);
-  assert.equal(v.startSession(sessionId(), { cwd: v.root }).systemMessage, 'vault: vault folder, every domain · 3 rules (1 always) · 1 page · proposals: corrections');
+  assert.equal(v.startSession(sessionId(), { cwd: v.root }).systemMessage, 'vault: vault folder · 1 rule · 1 page (every domain) · proposals: corrections', "glim's rules don't reach the vault folder, its pages do");
 });
 
 test("an everywhere domain's keyword rules count where they reach, and its always rules don't", t => {
@@ -80,6 +80,63 @@ test('lint takes a quiet glob over an absolute path and reports one that is not'
   assert.doesNotMatch(makeVault(t, { quiet: [`${posix(os.tmpdir())}/scratch/**`] }).run('lint.mjs').stdout, QUIET_ERROR);
   assert.match(makeVault(t, { quiet: ['scratch/**'] }).run('lint.mjs').stdout, QUIET_ERROR);
   if (process.platform === 'win32') assert.match(makeVault(t, { quiet: ['/scratch/**'] }).run('lint.mjs').stdout, QUIET_ERROR, 'a path with no drive never matches a folder');
+});
+
+// A vault with a rule or page on every route from three domains: the session's own, an everywhere one, and one the
+// session isn't in. Each route is driven through the hooks that deliver it.
+function routed(t) {
+  const v = makeVault(t, { domains: { wide: { title: 'Wide', topics: ['code'], everywhere: true }, other: { title: 'Other', topics: ['code'], markers: ['other.project'] } } });
+  const rule = (key, opts) => {
+    const [domain, slug] = key.split('/');
+    v.write(`wiki/${domain}/rules/${slug}.md`, ruleNote({ domain, doLine: `Do ${slug}.`, notLine: `Skip ${slug}.`, ...opts }));
+  };
+  const asks = ['tools:', '  - AskUserQuestion'];
+  rule('glim/brief', { always: true });
+  rule('glim/prism', { keywords: ['prism'] });
+  rule('glim/ask', { extra: asks });
+  rule('glim/edits', { applies_to: ['src/**'] });
+  rule('global/plain', { keywords: ['plain'] });
+  rule('global/files', { applies_to: ['src/**'] });
+  rule('wide/calm', { always: true, keywords: ['calm'] });
+  rule('wide/terse', { keywords: ['terse'] });
+  rule('wide/asks', { extra: asks });
+  rule('wide/sweep', { always: true });
+  rule('wide/edits', { applies_to: ['src/**'] });
+  rule('other/quill', { keywords: ['quill'] });
+  rule('other/asks', { extra: asks });
+  for (const [domain, word] of [['glim', 'quartz'], ['wide', 'opal'], ['other', 'jade']]) v.write(`wiki/${domain}/topics/code.md`, pageNote({ domain, keywords: [word] }));
+  return v;
+}
+
+function drive(v, sid, cwd) {
+  v.startSession(sid, { cwd });
+  for (const word of ['prism', 'plain', 'calm', 'terse', 'quill', 'quartz', 'opal', 'jade']) prompt(v, sid, `the ${word}`, { cwd });
+  v.edit(sid, 'AskUserQuestion', { questions: [] }, { cwd });
+  editFile(v, sid, 'src/a.zq', { abs: path.join(cwd, 'src', 'a.zq'), cwd });
+  const [line, shown] = v.run('status.mjs', [sid]).stdout.trim().split('\n');
+  const keys = part => (shown.split(': ')[1].split('; ').find(p => p.includes(` ${part}`))?.split(', ').slice(1).join(', ') ?? '').split(/, | and /).filter(Boolean).sort();
+  return { line, rules: keys('rule'), pages: keys('page') };
+}
+
+const counted = (line, noun) => Number(new RegExp(`(\\d+) ${noun}`).exec(line)?.[1] ?? 0);
+
+test('the status line counts exactly the rules and pages the hooks deliver, in each kind of folder', t => {
+  const v = routed(t);
+  const own = ['glim/ask', 'glim/brief', 'glim/edits', 'glim/prism', 'global/files', 'global/plain'];
+  const wide = ['wide/asks', 'wide/calm', 'wide/terse'];
+  const cases = [
+    { name: 'project', cwd: v.project, rules: [...own, ...wide], pages: ['glim/code', 'wide/code'], line: /^vault: glim · 9 rules \(1 always\) · 2 pages · / },
+    { name: 'no domain', cwd: folder(t, 'vault-routes-'), rules: ['global/files', 'global/plain', ...wide], pages: ['wide/code'], line: /^vault: no domain here · 5 rules · 1 page · / },
+    { name: 'vault folder', cwd: v.root, rules: ['global/files', 'global/plain', ...wide], pages: ['glim/code', 'other/code', 'wide/code'], line: /^vault: vault folder · 5 rules · 3 pages \(every domain\) · / },
+  ];
+  for (const c of cases) {
+    const got = drive(v, sessionId(), c.cwd);
+    assert.deepEqual(got.rules, [...c.rules].sort(), `${c.name}: rules delivered`);
+    assert.deepEqual(got.pages, c.pages, `${c.name}: pages delivered`);
+    assert.equal(counted(got.line, 'rule'), got.rules.length, `${c.name}: ${got.line}`);
+    assert.equal(counted(got.line, 'page'), got.pages.length, `${c.name}: ${got.line}`);
+    assert.match(got.line, c.line);
+  }
 });
 
 test('status.mjs prints the line and what the session was shown', t => {
