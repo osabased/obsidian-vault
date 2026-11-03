@@ -1,4 +1,4 @@
-import { sessionReach, inVaultFolder, isQuiet, vaultPath, toPosix, guarded, config, plural, clock, daysBetween } from '../vault.mjs';
+import { sessionReach, isQuiet, vaultPath, toPosix, guarded, config, plural, clock, daysBetween } from '../vault.mjs';
 import { statusLine } from '../status.mjs';
 import { alwaysContext, alwaysIn, fitContext, indexNote, scopeTopics, loadNotesAsync, settledNotes, deliveryFor, readDerived, clip, undelivered, knownDomain, joinList } from '../rules.mjs';
 import { build } from '../build.mjs';
@@ -7,7 +7,7 @@ import { changedSinceBuild, noteTimes, refStats } from '../cache.mjs';
 import { knowledgeDays } from '../sources.mjs';
 import { touchSession, clearMarkers, markAlways, markShown, tidy, errorsSinceLint, sinceLint } from '../sessions.mjs';
 import { proposeNote, pickNote, uncoveredNote } from '../instructions.mjs';
-import { routesOf, viewOf } from '../reach.mjs';
+import { routesFor, viewOf } from '../reach.mjs';
 
 function errorsNote() {
   const errors = errorsSinceLint();
@@ -66,10 +66,8 @@ function sourcesNote(scope, derived) {
 export async function start(event, agent) {
   guarded('tidy', tidy);
   const hits = sessionReach(event.cwd);
-  const doms = [...new Set(hits.map(d => d.domain))];
-  const vaultFolder = inVaultFolder(event.cwd);
-  const reach = routesOf(doms, vaultFolder);
-  const { readable } = reach;
+  const reach = routesFor(hits, event.cwd, agent);
+  const { doms, vaultFolder, readable } = reach;
   // Compaction can drop the rules the gate and excerpts already showed, so they show them again.
   if (event.session && (event.reason === 'compact' || event.reason === 'clear')) clearMarkers(event.session);
   // A session in this folder hears of notes outside any domain too.
@@ -97,8 +95,9 @@ export async function start(event, agent) {
   // Every session registers, so one in a folder no domain reaches can propose to global. Vault sessions get no note,
   // since /ingest tells them how.
   const registered = Boolean(event.session);
+  let entry = null;
   if (registered) {
-    touchSession(event, hits, agent.name);
+    entry = touchSession(event, hits, agent.name);
     if (doms.length) {
       propose = proposeNote(event.session, agent, doms, vaultFolder);
       pick = pickNote(event.session);
@@ -125,6 +124,6 @@ export async function start(event, agent) {
     markShown(event.session, always.keys);
     markAlways(event.session, alwaysIn(rules, reach.always));
   }
-  const notice = again ? '' : guarded('status line', () => statusLine(view));
+  const notice = again ? '' : guarded('status line', () => statusLine(view, entry));
   return context || notice ? { context, notice } : null;
 }

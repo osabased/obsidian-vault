@@ -1,6 +1,6 @@
 import fs from 'node:fs';
-import { config, domainsFor, everywhereDomains, vaultRel, vaultOwn, toPosix, cwdOf, shortHash, plainText, inVaultFolder } from '../vault.mjs';
-import { routesOf } from '../reach.mjs';
+import { config, domainsFor, vaultRel, vaultOwn, toPosix, cwdOf, shortHash, plainText } from '../vault.mjs';
+import { routesOf, routesFor } from '../reach.mjs';
 import {
   loadNotesAsync, settledNotes, liveRules, livePages, deliverable, deliveryFor, byFit, ruleLine, rulePointer, pageLine, fitContext, cmp, clip, parseNote, QUOTED, agentNotesSpan, authoredByUser, AGENT_NOTES, TOP_HEADING, isMap,
 } from '../rules.mjs';
@@ -165,18 +165,17 @@ function aliasedFiles(t, hits, namespaces) {
 // the file it maps to, and a rule both match refuses once.
 function nameScope(t, cwd, hits) {
   const { namespaces } = config();
-  const doms = [...new Set(hits.map(h => h.domain))];
+  const reach = routesOf(hits.map(h => h.domain), false);
   const files = aliasedFiles(t, hits, namespaces);
-  const everywhere = everywhereDomains();
   const place = `${t.namespace}:${t.path}`;
   const own = (notes, pages) => Object.entries(notes).flatMap(([key, note]) => {
-    if (note.domain !== 'global' && !doms.includes(note.domain) && !(pages && everywhere.includes(note.domain))) return [];
-    const glob = note.applies_to?.length ? matchTarget(note.applies_to, t, namespaces) : null;
+    if (!(pages ? reach.filePage : reach.fileRule)(note)) return [];
+    const glob = matchTarget(note.applies_to, t, namespaces);
     return glob ? [{ key, note, rel: place, place, spec: specificity(glob, namespaces) }] : [];
   });
   const viaFiles = files.map(f => matcher(f, cwd));
   return {
-    domains: [...doms, ...files.flatMap(f => domainsFor(f, cwd).map(d => d.domain)), 'global', ...everywhere],
+    domains: [...new Set([...reach.heard, ...files.flatMap(f => domainsFor(f, cwd).map(d => d.domain))])],
     hits: [...hits, ...files.flatMap(f => domainsFor(f, cwd))],
     matching: (notes, pages = false) => [...own(notes, pages), ...viaFiles.flatMap(m => m(notes, pages))]
       .filter((m, i, all) => all.findIndex(x => x.key === m.key) === i),
@@ -186,7 +185,7 @@ function nameScope(t, cwd, hits) {
 // A call to a tool with rules on its name, in the domains a prompt's keywords reach. Each rule tests its triggers
 // against the call's whole input, and is no more specific than `**`.
 function toolScope(event, tool, cwd, hits) {
-  const reach = routesOf(hits.map(h => h.domain), inVaultFolder(cwd));
+  const reach = routesFor(hits, cwd);
   const domains = reach.heard;
   const text = plainText(asText(event.args));
   const place = `tool:${tool}`;

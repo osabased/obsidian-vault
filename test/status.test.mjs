@@ -55,6 +55,40 @@ test("an everywhere domain's keyword rules count where they reach, and its alway
   assert.match(v.startSession(sessionId(), { cwd: dir }).systemMessage, /^vault: no domain here · 2 rules · proposals/);
 });
 
+test('the proposals mode is the one propose.mjs keeps to, by the folder the session began in', t => {
+  const v = filled(t);
+  const config = JSON.parse(v.read('vault.config.json'));
+  config.domains.glim.proposals = 'ask';
+  v.write('vault.config.json', JSON.stringify(config));
+  const first = out => out.stdout.split('\n')[0];
+  const project = sessionId();
+  v.startSession(project);
+  assert.match(v.startSession(project, { source: 'resume', cwd: v.root }).systemMessage, /^vault: vault folder · .* · proposals: global corrections, glim ask$/);
+  assert.match(first(v.run('status.mjs', [project])), /proposals: global corrections, glim ask$/);
+  const vault = sessionId();
+  v.startSession(vault, { cwd: v.root });
+  assert.match(v.startSession(vault, { source: 'resume' }).systemMessage, /^vault: glim · .* · proposals: corrections$/);
+  assert.match(first(v.run('status.mjs', [vault])), /proposals: corrections$/);
+});
+
+test("a tools rule counts when the session's agent sends its edit hook a tool it names, other than a file tool", t => {
+  const v = filled(t);
+  for (const [slug, tool] of [['asks', 'AskUserQuestion'], ['edits', 'Edit'], ['shell', 'Bash']]) {
+    v.write(`wiki/glim/rules/${slug}.md`, ruleNote({ doLine: `Do ${slug}.`, notLine: `Skip ${slug}.`, extra: ['tools:', `  - ${tool}`] }));
+  }
+  const sid = sessionId();
+  assert.equal(v.startSession(sid).systemMessage, 'vault: glim · 4 rules (1 always) · 1 page · proposals: corrections');
+  assert.match(v.run('status.mjs', [sid]).stdout, /^vault: glim · 4 rules /);
+});
+
+test('/vault status counts for the folder the latest prompt came from', t => {
+  const v = filled(t);
+  const sid = sessionId();
+  v.startSession(sid);
+  prompt(v, sid, 'hello', { cwd: folder(t, 'vault-status-') });
+  assert.match(v.run('status.mjs', [sid]).stdout, /^vault: no domain here · 1 global rule · /);
+});
+
 test('a resumed start shows the line again, and a compact or clear start shows none, since the session already saw it', t => {
   const v = filled(t);
   const sid = sessionId();
