@@ -255,11 +255,14 @@ function allKeys(kind, id) {
 
 const shownKeys = id => allKeys('delivered', id);
 
-// The rules and pages a session and its subagents were shown, by key. A marker may lead with a subagent's id and end
+// The rules and pages a session and its subagents were shown since it started or was last compacted or cleared, by key.
+// Both come from markers compaction clears, so they cover the same span. A marker may lead with a subagent's id and end
 // with a hash; its key is the part naming its domain.
-export function shownThisSession(sid) {
-  const keysOf = kind => [...new Set([...allKeys(kind, safeId(sid))].map(m => m.split('|').find(part => part.includes('/'))).filter(Boolean))];
-  return { rules: keysOf('delivered'), pages: keysOf('pages') };
+export function shownInContext(sid) {
+  const keyOf = m => m.split('|').find(part => part.includes('/'));
+  const keys = markers => [...new Set(markers.map(keyOf).filter(Boolean))];
+  const id = safeId(sid);
+  return { rules: keys([...allKeys('excerpts', id)].filter(m => m.startsWith('shown|'))), pages: keys([...allKeys('pages', id)]) };
 }
 
 // A marker holds its id, in which a rule's wording hash follows its key. The session whose evidence changed a rule's

@@ -125,6 +125,6 @@ export async function start(event, agent) {
     markShown(event.session, always.keys);
     markAlways(event.session, alwaysIn(rules, scope));
   }
-  const notice = again ? '' : guarded('status line', () => statusLine({ doms, vaultFolder, rules, notes: ready, readable }));
+  const notice = again ? '' : guarded('status line', () => statusLine({ doms, vaultFolder, rules, notes: ready, readable, ctx }));
   return context || notice ? { context, notice } : null;
 }

@@ -6,7 +6,7 @@ A taste vault for Claude Code, based on Andrej Karpathy's LLM wiki pattern: a sm
 
 1. **Work as usual.** Each new or resumed session starts with one line, such as `vault: roblox · 12 rules (2 always) · 3 pages · proposals: ask`: the domains the folder is in, the rules and pages that can reach the session, and when agents propose rules. `vault: no domain here` means only `global` reaches it.
 2. **Correct the agent.** When you say how you want things, the agent keeps it as a rule, in the way `proposals` sets: `ask` offers each rule and keeps it once you agree. The rule reaches later sessions from then on.
-3. **Check what reached a session.** `/obsidian-vault:vault status` prints the start line again, then the rules and pages the vault has shown the session so far.
+3. **Check what reached a session.** `/obsidian-vault:vault status` prints the start line again, then the rules and pages the vault has shown the session since it started or was last compacted.
 4. **Read and edit in Obsidian.** Open this folder, not the one above it, as the Obsidian vault, so its ignore filters apply. Edit or delete any note; a saved note applies after a minute without another save.
 5. **Go through sources and tidy up here.** Open Claude Code in this folder for `/obsidian-vault:ingest` and `/obsidian-vault:lint`; the session start reminds you when lint is due.
 
