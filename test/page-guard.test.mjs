@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { makeVault, ruleNote, denied } from './fixture.mjs';
+import { makeVault, ruleNote, denied, sessionId } from './fixture.mjs';
 
 const SID = '9f8e7d6c-0000-4000-8000-000000000002';
 const PAGE_REL = 'wiki/glim/source-shop.md';
@@ -105,4 +105,50 @@ test('an old_string with straight quotes still finds curly ones, as the Edit too
   const curly = SAID.replace('"', '“').replace('"', '”');
   const v = vault(t, { [PAGE_REL]: PAGE.replace(SAID, curly) });
   assert.match(denied(edit(v, 'Edit', PAGE_REL, { old_string: `${SAID}\n`, new_string: '' })) ?? '', /the tabs feel cramped/);
+});
+
+const NEW_RULE = 'wiki/glim/rules/x.md';
+const write = (v, sid, rel, cwd) => v.edit(sid, 'Write', { file_path: v.at(...rel.split('/')), content: ruleNote() }, { cwd });
+
+test("a new rule file from a session outside the vault folder is refused with the way to propose it, and a rule that exists is not", t => {
+  const v = vault(t, { 'wiki/glim/rules/old.md': ruleNote() });
+  const why = denied(write(v, SID, NEW_RULE, v.project));
+  assert.equal(why, "`wiki/glim/rules/x.md` would be a new rule. Outside the vault folder, rules are kept only through the vault's `propose` tool, so the user agrees to each one. Propose it there.");
+  assert.ok(denied(write(v, SID, NEW_RULE, v.project)), 'the refusal repeats; it is not a one-time gate');
+  assert.equal(denied(write(v, SID, 'wiki/glim/rules/old.md', v.project)), null);
+  assert.ok(denied(write(v, SID, 'wiki/global/rules/x.md', v.project)));
+});
+
+const TOPIC_RULE = 'wiki/glim/topics/x.md';
+const asRule = (v, sid, cwd) => v.edit(sid, 'Edit', { file_path: v.at(...PAGE_REL.split('/')), old_string: 'type: page', new_string: 'type: rule' }, { cwd });
+
+test('a note outside rules/ that is a rule once written is refused, whether new or a page turned into one', t => {
+  const v = vault(t);
+  assert.match(denied(write(v, SID, TOPIC_RULE, v.project)) ?? '', /^`wiki\/glim\/topics\/x\.md` would be a new rule\./);
+  assert.match(denied(asRule(v, SID, v.project)) ?? '', /^`wiki\/glim\/source-shop\.md` would be a new rule\./);
+});
+
+test('a new page outside rules/ and an edit to a note that is already a rule are allowed from a project session', t => {
+  const v = vault(t, { 'wiki/glim/topics/old.md': ruleNote() });
+  const page = v.edit(SID, 'Write', { file_path: v.at(...TOPIC_RULE.split('/')), content: PAGE }, { cwd: v.project });
+  assert.equal(denied(page), null);
+  const reword = v.edit(SID, 'Write', { file_path: v.at('wiki', 'glim', 'topics', 'old.md'), content: ruleNote({ because: 'Another reason.' }) }, { cwd: v.project });
+  assert.equal(denied(reword), null);
+});
+
+test('a new rule file from a session in the vault folder is allowed', t => {
+  const v = vault(t);
+  assert.equal(denied(write(v, SID, NEW_RULE, v.root)), null);
+  assert.equal(denied(write(v, SID, NEW_RULE, v.at('wiki'))), null);
+  assert.equal(denied(write(v, SID, TOPIC_RULE, v.root)), null);
+  assert.equal(denied(asRule(v, SID, v.root)), null);
+});
+
+test("the folder the session registered decides, not the folder of the edit", t => {
+  const v = vault(t);
+  v.startSession(SID, { cwd: v.project });
+  assert.ok(denied(write(v, SID, NEW_RULE, v.root)));
+  const inside = sessionId();
+  v.startSession(inside, { cwd: v.root });
+  assert.equal(denied(write(v, inside, NEW_RULE, v.project)), null);
 });

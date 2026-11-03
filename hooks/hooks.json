@@ -8,7 +8,8 @@
       { "hooks": [{ "type": "command", "command": "node", "args": ["${CLAUDE_PLUGIN_ROOT}/hooks/launch.mjs", "prompt", "10"], "timeout": 10 }] }
     ],
     "PreToolUse": [
-      { "matcher": "^(?:Edit|Write|MultiEdit|NotebookEdit|AskUserQuestion|mcp__.*)$", "hooks": [{ "type": "command", "command": "node", "args": ["${CLAUDE_PLUGIN_ROOT}/hooks/launch.mjs", "edit", "10"], "timeout": 10 }] }
+      { "matcher": "^(?:Edit|Write|MultiEdit|NotebookEdit|AskUserQuestion|mcp__.*)$", "hooks": [{ "type": "command", "command": "node", "args": ["${CLAUDE_PLUGIN_ROOT}/hooks/launch.mjs", "edit", "10"], "timeout": 10 }] },
+      { "matcher": "^mcp__(?:plugin_obsidian-vault_vault|vault)__[a-z]+$", "hooks": [{ "type": "command", "command": "node", "args": ["${CLAUDE_PLUGIN_ROOT}/hooks/launch.mjs", "vault-call", "10"], "timeout": 10, "onFailure": "block" }] }
     ],
     "Stop": [
       { "hooks": [{ "type": "command", "command": "node", "args": ["${CLAUDE_PLUGIN_ROOT}/hooks/launch.mjs", "stop", "10"], "timeout": 10 }] }

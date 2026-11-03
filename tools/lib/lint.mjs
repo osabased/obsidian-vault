@@ -141,6 +141,7 @@ export function lint(notes = loadNotes(), chains = sourceChains()) {
   lintTopicPages(notes, add);
   lintOrphans(notes, resolve, add);
   lintPicks(add);
+  lintInbox(add);
   lintSources(add, chains);
   lintManifestCase(add);
   lintBundles(add, hashOf);
@@ -236,6 +237,17 @@ function lintPicks(add) {
         if (typeof r[how] === 'string' && !ids.has(r[how])) add('warn', file, `${r.id} ${how} ${r[how]}, which has no row`);
       }
       if (typeof r.sheet === 'string' && r.sheet && !fs.existsSync(vaultPath(r.sheet))) add('warn', file, `${r.id} names sheet ${r.sheet}, which doesn't exist`);
+    }
+  }
+}
+
+// Rows from before consent was recorded have neither field.
+function lintInbox(add) {
+  for (const { file, rows } of datedFiles('inbox')) {
+    for (const r of rows) {
+      if (r.consent === undefined) continue;
+      if (r.consent !== 'prompt' && r.consent !== 'code') add('warn', file, `${r.id} records consent ${JSON.stringify(r.consent)}, which is neither "prompt" nor "code"`);
+      else if (r.consent === 'code' && !(typeof r.approved === 'string' && r.approved.trim())) add('warn', file, `${r.id} records consent "code" with no approved reply, the typed message that held the code`);
     }
   }
 }

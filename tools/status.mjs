@@ -4,10 +4,12 @@ import { registry, shownInContext } from './lib/sessions.mjs';
 import { sessionView } from './lib/reach.mjs';
 import { statusLine } from './lib/status.mjs';
 import { agent, hasAgent, currentSession, FIRST_AGENT } from './lib/agents.mjs';
-import { UsageError, refuse, failure } from './lib/input.mjs';
+import { UsageError, refuse, failure, schemaOf, schemaArg } from './lib/input.mjs';
 
 const RUN = 'usage: node tools/status.mjs [session-id]';
 const USAGE = `${RUN}\n       node tools/status.mjs --help says what it prints`;
+
+const SUMMARY = "Shows the vault's status line for this session's folder, then the rules and pages the vault has shown the session since it started or was last compacted. Takes no fields.";
 
 const help = () => [
   RUN,
@@ -27,7 +29,7 @@ function shown(sid) {
 // The line counts what a prompt in the session would get now, in the folder its latest prompt came from, with the tools
 // its agent sends the edit hook.
 async function status(sid) {
-  if (!sid) refuse("there's no session id. Pass the one from the taste vault's note at session start, or run this from the agent's own shell, which sets it.");
+  if (!sid) refuse("there's no session id. The vault's tools pass it themselves. From a shell, pass it as the first argument, or run this from the agent's own shell, which sets its session variable.");
   const entry = readJsonSafe(registry(safeId(sid)));
   if (!entry) refuse(`the taste vault has no session ${sid}.`);
   const cwd = entry.last_cwd ?? entry.reach?.cwd ?? entry.cwd;
@@ -37,7 +39,8 @@ async function status(sid) {
 
 const args = process.argv.slice(2);
 try {
-  if (args[0] === '--help' && args.length === 1) console.log(help());
+  if (schemaArg(args)) console.log(JSON.stringify(schemaOf(SUMMARY, [])));
+  else if (args[0] === '--help' && args.length === 1) console.log(help());
   else if (args.length > 1) throw new UsageError();
   else console.log(await status(args[0] ?? currentSession()?.id));
 } catch (e) {

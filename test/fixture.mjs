@@ -238,7 +238,32 @@ export function proposeAtOnce(v, rules, { timeout } = {}) {
   return Promise.all(rules.map((rule, i) => v.runAsync('propose.mjs', [sids[i]], { input: rule, timeout })));
 }
 
-export const denied = out => (out?.hookSpecificOutput?.permissionDecision === 'deny' ? out.hookSpecificOutput.permissionDecisionReason : null);
+// A vault tool call as the PreToolUse hook records it, and allowed as the server marks it once the user allows the call
+// at the prompt, through the fixture vault's own lib/calls.mjs. input is the call's input as the hook saw it, which the
+// script must then be given. Returns the call id.
+let calls = 0;
+export function recordedCall(v, sid, { tool = 'keep', offer = null, allow = true, input = {} } = {}) {
+  const call = `toolu_fixture${String(++calls).padStart(8, '0')}`;
+  const lib = pathToFileURL(v.at('tools', 'lib', 'calls.mjs')).href;
+  const code = `const c = await import(${JSON.stringify(lib)}); const a = JSON.parse(process.argv[1]); c.recordCall(a); if (a.allow) c.allowCall(a.call);`;
+  execFileSync(process.execPath, ['--input-type=module', '-e', code, JSON.stringify({ call, session: sid, subagent: null, tool, offer, allow, input })], { env: cleanEnv() });
+  return call;
+}
+
+// keep.mjs run for an offer as the server runs it once the user allowed the call; recorded is the input the hook saw,
+// the input sent unless given.
+export function keepAllowed(v, sid, offerId, text, { recorded } = {}) {
+  const input = { id: offerId, offer: text };
+  return v.run('keep.mjs', [sid, recordedCall(v, sid, { offer: offerId, input: recorded ?? input })], { input });
+}
+
+// The id and lines of an offer from propose.mjs, domain.mjs or proposals.mjs output, or null when it holds none.
+export function offerOf(stdout) {
+  const id = /^Offered `(o-[0-9a-f]{8})`/.exec(stdout)?.[1];
+  return id ? { id, text: stdout.slice(stdout.indexOf('\n\n') + 2).trimEnd() } : null;
+}
+
+export const denied = out =>(out?.hookSpecificOutput?.permissionDecision === 'deny' ? out.hookSpecificOutput.permissionDecisionReason : null);
 
 export const lintFound = async (v, re) => (await v.import('lib/lint.mjs')).lint().filter(f => f.file.startsWith('wiki/') && re.test(f.msg));
 

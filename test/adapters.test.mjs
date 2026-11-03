@@ -57,7 +57,7 @@ for (const d of [claudeCode, codex]) {
     t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
     const text = d.context(d.start(vault(t), sessionId(), { cwd: dir })) ?? '';
     assert.match(text, /Taste vault: this project is in no domain./);
-    assert.match(text, /domain.mjs/);
+    assert.match(text, /call the vault.s `domain` tool/);
   });
 
   test(`${d.name}: a prompt with a keyword gets the excerpt once`, t => {
@@ -131,6 +131,13 @@ for (const d of [claudeCode, codex]) {
     const call = () => d.toolCall(v, sid, 'mcp__fixture__set_property', { path: 'A.B.C', value: 'x' });
     assert.match(d.deny(call()) ?? '', /^Taste rules apply to glim-tree:A\.B\.C:\n- glim\/tree-rule: Do: Name nodes plainly\./);
     assert.equal(call(), null);
+  });
+
+  test(`${d.name}: a call of the vault's own tool is not gated by the edit hook, whatever a rule names`, t => {
+    const { v, sid } = started(t);
+    v.write('wiki/glim/rules/vault-rule.md', ruleNote({ extra: ['tools:', "  - 'mcp__vault__propose'", "  - 'mcp__other__propose'"], doLine: 'Gate the call.' }));
+    assert.equal(d.toolCall(v, sid, 'mcp__vault__propose', { domain: 'glim' }), null);
+    assert.match(d.deny(d.toolCall(v, sid, 'mcp__other__propose', { domain: 'glim' })) ?? '', /glim\/vault-rule: Do: Gate the call\./);
   });
 
   test(`${d.name}: propose with no session argument uses the session from the agent's session variable`, async t => {
