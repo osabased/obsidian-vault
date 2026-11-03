@@ -230,10 +230,6 @@ export function domainsByMode(domains) {
   return byMode;
 }
 
-// The vault folder is where every domain's pages are read, a vault-only domain's among them; an everywhere domain's
-// pages reach every session.
-export const readableDomains = (doms, vaultFolder) => [...new Set([...(vaultFolder ? Object.keys(config().domains) : [...doms, ...everywhereDomains()]), 'global'])];
-
 export function readJson(file, fallback) {
   try {
     return JSON.parse(fs.readFileSync(file, 'utf8').replace(/^\uFEFF/, ''));

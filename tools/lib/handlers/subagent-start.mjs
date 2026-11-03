@@ -8,7 +8,7 @@ import { sessionView } from '../reach.mjs';
 // prompt still gets an always rule that changed.
 export async function subagentStart(event) {
   const { reach, notes, rules } = await sessionView(event.session, event.cwd);
-  const always = alwaysContext(reach.own, rules);
+  const always = alwaysContext(reach.always, rules);
   const topics = guarded('index note', () => scopeTopics(reach.readable, notes), []);
   if (event.session) markShown(event.session, always.keys);
   const { text: context } = fitContext([

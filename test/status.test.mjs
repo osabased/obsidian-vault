@@ -41,7 +41,7 @@ test('a start no domain reaches counts the global rules, and domains with their 
   config.domains.glim.proposals = 'off';
   v.write('vault.config.json', JSON.stringify(config));
   assert.match(v.startSession(sessionId()).systemMessage, /proposals: global corrections, glim off$/);
-  assert.equal(v.startSession(sessionId(), { cwd: v.root }).systemMessage, 'vault: vault folder · 1 rule · 1 page (every domain) · proposals: corrections', "glim's rules don't reach the vault folder, its pages do");
+  assert.equal(v.startSession(sessionId(), { cwd: v.root }).systemMessage, 'vault: vault folder · 1 global rule · 1 page (every domain) · proposals: corrections', "glim's rules don't reach the vault folder, its pages do");
 });
 
 test("an everywhere domain's keyword rules count where they reach, and its always rules don't", t => {
@@ -104,7 +104,10 @@ function routed(t) {
   rule('wide/edits', { applies_to: ['src/**'] });
   rule('other/quill', { keywords: ['quill'] });
   rule('other/asks', { extra: asks });
-  for (const [domain, word] of [['glim', 'quartz'], ['wide', 'opal'], ['other', 'jade']]) v.write(`wiki/${domain}/topics/code.md`, pageNote({ domain, keywords: [word] }));
+  for (const [domain, word] of [['glim', 'quartz'], ['wide', 'opal'], ['other', 'jade']]) {
+    v.write(`wiki/${domain}/topics/code.md`, pageNote({ domain, keywords: [word] }));
+    v.write(`wiki/${domain}/concepts/files.md`, pageNote({ domain, kind: 'concept', extra: ['applies_to:', "  - 'src/**'"] }));
+  }
   return v;
 }
 
@@ -114,7 +117,7 @@ function drive(v, sid, cwd) {
   v.edit(sid, 'AskUserQuestion', { questions: [] }, { cwd });
   editFile(v, sid, 'src/a.zq', { abs: path.join(cwd, 'src', 'a.zq'), cwd });
   const [line, shown] = v.run('status.mjs', [sid]).stdout.trim().split('\n');
-  const keys = part => (shown.split(': ')[1].split('; ').find(p => p.includes(` ${part}`))?.split(', ').slice(1).join(', ') ?? '').split(/, | and /).filter(Boolean).sort();
+  const keys = noun => (new RegExp(`\\d+ ${noun}s?, ([^;]+)`).exec(shown)?.[1] ?? '').split(/, | and /).filter(Boolean).sort();
   return { line, rules: keys('rule'), pages: keys('page') };
 }
 
@@ -125,9 +128,9 @@ test('the status line counts exactly the rules and pages the hooks deliver, in e
   const own = ['glim/ask', 'glim/brief', 'glim/edits', 'glim/prism', 'global/files', 'global/plain'];
   const wide = ['wide/asks', 'wide/calm', 'wide/terse'];
   const cases = [
-    { name: 'project', cwd: v.project, rules: [...own, ...wide], pages: ['glim/code', 'wide/code'], line: /^vault: glim · 9 rules \(1 always\) · 2 pages · / },
-    { name: 'no domain', cwd: folder(t, 'vault-routes-'), rules: ['global/files', 'global/plain', ...wide], pages: ['wide/code'], line: /^vault: no domain here · 5 rules · 1 page · / },
-    { name: 'vault folder', cwd: v.root, rules: ['global/files', 'global/plain', ...wide], pages: ['glim/code', 'other/code', 'wide/code'], line: /^vault: vault folder · 5 rules · 3 pages \(every domain\) · / },
+    { name: 'project', cwd: v.project, rules: [...own, ...wide], pages: ['glim/code', 'glim/files', 'wide/code', 'wide/files'], line: /^vault: glim · 9 rules \(1 always\) · 4 pages · / },
+    { name: 'no domain', cwd: folder(t, 'vault-routes-'), rules: ['global/files', 'global/plain', ...wide], pages: ['wide/code', 'wide/files'], line: /^vault: no domain here · 5 rules · 2 pages · / },
+    { name: 'vault folder', cwd: v.root, rules: ['global/files', 'global/plain', ...wide], pages: ['glim/code', 'other/code', 'wide/code', 'wide/files'], line: /^vault: vault folder · 5 rules · 4 pages \(every domain\) · / },
   ];
   for (const c of cases) {
     const got = drive(v, sessionId(), c.cwd);

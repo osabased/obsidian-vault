@@ -535,14 +535,14 @@ export const domainTitle = d => (d === 'global' ? 'Every project' : config().dom
 
 const isRule = line => line.startsWith('- ');
 const alwaysEntries = rules => Object.entries(rules).filter(([, r]) => r.always).sort((a, b) => byFit(a[1], b[1]) || byKey(a, b));
-export const alwaysIn = (rules, scope) => alwaysEntries(rules).filter(([, r]) => scope.includes(r.domain));
+export const alwaysIn = (rules, reaches) => alwaysEntries(rules).filter(([, r]) => reaches(r));
 
 // The keys go in the order their rule lines do.
-function alwaysLines(rules, domains) {
-  const entries = alwaysIn(rules, domains);
+function alwaysLines(rules, reaches) {
+  const entries = alwaysIn(rules, reaches);
   const lines = [];
   const keys = [];
-  for (const d of domainOrder(domains)) {
+  for (const d of domainOrder(entries.map(([, r]) => r.domain))) {
     const mine = entries.filter(([, r]) => r.domain === d);
     if (!mine.length) continue;
     lines.push('', `## ${d}`, ...mine.map(([k, r]) => ruleLine(k, r)));
@@ -551,16 +551,16 @@ function alwaysLines(rules, domains) {
   return { lines, keys };
 }
 
-export function alwaysSize(rules, domains) {
-  const { lines } = alwaysLines(rules, domains);
+export function alwaysSize(rules, reaches) {
+  const { lines } = alwaysLines(rules, reaches);
   if (!lines.length) return { lines: 0, bytes: 0 };
   const all = [...HEAD, ...lines];
   return { lines: all.length, bytes: Buffer.byteLength(all.join('\n')) };
 }
 
 // The always rules' block for a session start, and the rules it holds: rules that don't fit are left to active.md.
-export function alwaysContext(domains, rules = liveRules()) {
-  const { lines, keys } = alwaysLines(rules, domains);
+export function alwaysContext(reaches, rules = liveRules()) {
+  const { lines, keys } = alwaysLines(rules, reaches);
   if (!lines.length) return { text: '', keys: [] };
   const { activeMaxLines, activeMaxBytes, maxContextChars } = config().delivery;
   const fits = xs => xs.length <= activeMaxLines && Buffer.byteLength(xs.join('\n')) <= Math.min(activeMaxBytes, maxContextChars);
