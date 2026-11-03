@@ -88,12 +88,13 @@ test('pages reach the sessions their domain\'s rules reach, and every page reach
   assert.deepEqual(pointed(prompt(v, sessionId(), 'which solver?', { cwd: v.root })), ['global/solver-basics', 'reading/solver-history']);
 });
 
-test('a page saved within the settle window, or with an error, does not come up', t => {
+test('a page saved within the settle window, with an error, or superseded does not come up', t => {
   const v = makeVault(t);
   for (const slug of ['a-grid', 'b-grid']) v.write(`wiki/glim/${slug}.md`, pushed({ keywords: ['grid'], applies_to: ['src/**'] }));
   // Both sort ahead of the settled pages, so either one coming up shows in the pointers.
   v.write('wiki/glim/a-fresh-grid.md', pushed({ keywords: ['grid'], applies_to: ['src/**'] }), { settled: false });
   v.write('wiki/glim/a-broken-grid.md', pushed({ applies_to: ['src/**'], extra: ['keywords: grid'] }));
+  v.write('wiki/glim/a-old-grid.md', pushed({ keywords: ['grid'], applies_to: ['src/**'], extra: ['superseded_by: glim/a-grid'] }));
   assert.deepEqual(pointed(prompt(v, sessionId(), 'a grid')), ['glim/a-grid', 'glim/b-grid']);
   assert.deepEqual(pointed(edit(v, sessionId(), 'src/a.zq')), ['glim/a-grid', 'glim/b-grid']);
 });
