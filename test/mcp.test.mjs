@@ -364,7 +364,7 @@ test('the launcher fails loudly: one stderr line, exit 1', async t => {
   const cases = [
     [[], /^vault mcp failed: no vault folder given; pass the vault checkout's absolute path as the first argument\n$/],
     [['relative/vault'], /^vault mcp failed: the vault folder "relative\/vault" is not an absolute path\n$/],
-    [[v.root], /^vault mcp failed: .*server\.mjs does not exist; run \.githooks\/post-commit in the vault to make it\n$/],
+    [[v.root], /^vault mcp failed: .*server\.mjs does not exist; in the vault, run git config core\.hooksPath \.githooks, then git hook run post-commit\n$/],
   ];
   for (const [args, line] of cases) {
     const c = connect(t, args);

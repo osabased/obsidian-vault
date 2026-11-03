@@ -87,7 +87,7 @@ test('the launcher fails loudly: one stderr line, exit 1', t => {
   const v = makeVault(t);
   const failures = [
     ['an unset vault option', launch('prompt'), /^vault prompt failed: the plugin's vault option is not set; run claude plugin configure obsidian-vault\n$/],
-    ['a vault with no .live/tools', launch('prompt', { vault: v.root }), /^vault prompt failed: .*\.live[\\/]tools does not exist; run \.githooks\/post-commit in the vault to make it\n$/],
+    ['a vault with no .live/tools', launch('prompt', { vault: v.root }), /^vault prompt failed: .*\.live[\\/]tools does not exist; in the vault, run git config core\.hooksPath \.githooks, then git hook run post-commit\n$/],
     ['an unknown hook name', launch('../prompt', { vault: v.root }), /^vault \.\.\/prompt failed: no hook of that name, only session-start, prompt, edit, stop, subagent-start, vault-call\n$/],
     ['no hook name', launch(undefined, { vault: v.root }), /^vault {2}failed: no hook of that name/],
   ];
