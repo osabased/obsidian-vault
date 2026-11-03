@@ -22,12 +22,23 @@ export const sends = tool => SENT.test(tool);
 
 const toolFile = (tool, ti) => (tool === 'NotebookEdit' ? ti.notebook_path : ti.file_path);
 
-export const proposeShell = 'from the Bash tool with a quoted heredoc, since PowerShell turns curly quotes and dashes into ?';
+// Claude Code asks the user at its own permission prompt before it runs a marked tool, so the user's allowing is the
+// consent. The marker is sent from markerSince on, and call gives the id the PreToolUse hook sees as tool_use_id.
+export const consent = 'prompt';
+export const mcp = {
+  client: 'claude-code', minVersion: '2.1.295', markerSince: '2.1.246',
+  marker: { 'anthropic/requiresUserInteraction': true },
+  call: meta => meta?.['claudecode/toolUseId'] ?? null, thread: () => null,
+};
+// A plugin's server is named mcp__plugin_<plugin>_<server>, and one added with claude mcp add mcp__<server>.
+export const vaultMatcher = '^mcp__(?:plugin_obsidian-vault_vault|vault)__[a-z]+$';
+export const vaultTool = name => /^mcp__(?:plugin_obsidian-vault_vault|vault)__([a-z]+)$/.exec(name)?.[1] ?? null;
 
 export const identifiers = [
   'CLAUDE_CODE_', 'CLAUDE_PLUGIN_', 'hookSpecificOutput', 'systemMessage', 'permissionDecision', 'additionalContext', 'AskUserQuestion', 'MultiEdit', 'NotebookEdit',
   'toolUseResult', 'isCompactSummary', 'isMeta', 'queued_command', 'system-reminder', 'task-notification', 'local-command-', 'stop_hook_active',
   'session_id', 'agent_id', 'tool_name', 'transcript_path', 'file_path', 'notebook_path', 'old_string', 'new_string', 'new_source', 'Claude Code',
+  'tool_use_id', 'claudecode/', 'anthropic/requiresUserInteraction', 'mcp__plugin_', 'mcp_server',
 ];
 
 const foldQuotes = s => s.replace(/[‘’]/g, "'").replace(/[“”]/g, '"');
@@ -64,10 +75,12 @@ function newText(tool, ti) {
   return String(ti.new_string ?? '');
 }
 
-// A file tool call with no path has nothing to gate, so it gives no event.
+// A file tool call with no path has nothing to gate, so it gives no event. Neither does a call of the vault's own tool,
+// which no rule governs and the vault-call hook records.
 function preTool(input, base) {
   const tool = input.tool_name;
   const ti = input.tool_input ?? {};
+  if (vaultTool(tool)) return [];
   if (!fileTools.includes(tool)) return [{ ...base, tool, args: input.tool_input, added: newText(tool, ti) }];
   const file = toolFile(tool, ti);
   if (!file) return [];
@@ -80,13 +93,17 @@ export function events(hook, input) {
     case 'session-start': return [{ session: base.session, cwd: base.cwd, transcript: input.transcript_path, reason: input.source === 'startup' ? 'new' : input.source }];
     case 'prompt': return [{ ...base, transcript: input.transcript_path, text: input.prompt }];
     case 'edit': return preTool(input, base);
+    case 'vault-call': {
+      const tool = vaultTool(input.tool_name);
+      return tool ? [{ session: base.session, subagent: base.agent ?? null, cwd: base.cwd, tool, call: input.tool_use_id, args: input.tool_input }] : [];
+    }
     case 'subagent-start':
     case 'stop': return [base];
     default: throw new Error(`no hook ${hook}`);
   }
 }
 
-const EVENT_NAMES = { 'session-start': 'SessionStart', prompt: 'UserPromptSubmit', edit: 'PreToolUse', stop: 'Stop', 'subagent-start': 'SubagentStart' };
+const EVENT_NAMES = { 'session-start': 'SessionStart', prompt: 'UserPromptSubmit', edit: 'PreToolUse', 'vault-call': 'PreToolUse', stop: 'Stop', 'subagent-start': 'SubagentStart' };
 
 // Stop's additionalContext continues the turn. The gate markers alone keep it to one continuation per file, so
 // stop_hook_active is not consulted: a file a continuation writes still gets its rules, and Claude Code ends the turn

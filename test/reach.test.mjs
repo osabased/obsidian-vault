@@ -35,7 +35,7 @@ test('6.1a: a session in an unlisted folder holding a domain\'s marker gets its 
   const sid = sessionId();
   const start = context(v.startSession(sid, { cwd: dir }));
   assert.match(start, /glim\/always-rule: Do: Open each glim file with a purpose line\./);
-  assert.match(start, /propose\.mjs/);
+  assert.match(start, /through the vault's `propose` tool/);
   assert.match(denied(edit(v, sid, '', { abs: path.join(dir, 'src', 'x.zq'), cwd: dir })) ?? '', /glim\/zq-trigger/);
   const r = v.propose(sid, {
     domain: v.domain, slug: 'name-steps', topic: 'naming', basis: 'reading', reading: 'The user renamed the steps.',
@@ -262,7 +262,7 @@ test('in the vault folder propose takes any domain but a vault-only one', t => {
   const sid = sessionId();
   v.startSession(sid, { cwd: v.root });
   const r = v.propose(sid, widgetRule('nope'));
-  assert.match(r.stderr, /^Not proposed: domain must be glim, alpha or global\. [^\n]*domain\.mjs[^\n]*\n$/);
+  assert.match(r.stderr, /^Not proposed: domain must be glim, alpha or global\. [^\n]*the vault's `domain` tool[^\n]*\n$/);
 });
 
 test('a marker in a worktree of a project makes the main checkout the project root', async t => {
