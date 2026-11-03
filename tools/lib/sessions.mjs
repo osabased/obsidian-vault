@@ -17,8 +17,8 @@ export function ownEntry(sid) {
   return { entry: readJsonSafe(registry(safeId(sid))), notOwn: null };
 }
 
-// `cwd` stays where the session registered, so a move into the vault folder doesn't let it propose for every domain.
-// Session start passes what sessionReach found for its folder, markers below it among them, so prompts, pick.mjs and
+// `cwd` stays where the session registered, so a move into the vault folder doesn't let it propose for every domain;
+// `last_cwd` is the folder of its latest prompt or start, which /vault status counts for. Session start passes what sessionReach found for its folder, markers below it among them, so prompts, pick.mjs and
 // propose.mjs read the domains and their project roots here rather than scan the tree again.
 export function touchSession(event, hits, agent) {
   const id = safeId(event.session);
@@ -29,6 +29,7 @@ export function touchSession(event, hits, agent) {
     agent: agent ?? prev.agent ?? null,
     transcript: event.transcript ?? prev.transcript ?? null,
     cwd: prev.cwd ?? event.cwd ?? null,
+    last_cwd: event.cwd ?? prev.last_cwd ?? null,
     last_seen: new Date().toISOString(),
     // A start in a folder no domain reaches records the folder alone, so its domains are found again from the config and
     // one added later reaches the session from its next prompt rather than its next start.
@@ -38,6 +39,7 @@ export function touchSession(event, hits, agent) {
       : prev.reach ? { reach: prev.reach } : {}),
   };
   writeJson(file, entry);
+  return entry;
 }
 
 // A domain started in a session joins the reach its start recorded, rather than the reach being found again, since this
@@ -65,11 +67,13 @@ const domainsIn = (entry, cwd) => {
 // The domains session start found for this session's folder, or, in a folder it didn't scan, that folder's own.
 export const sessionDomains = (sid, cwd) => domainsIn(sid ? readJsonSafe(registry(safeId(sid))) : null, cwd);
 
-// The same domains, each with its project root.
+// The same domains, each with its project root. A reach with domains and no roots, from older tools, finds their roots again.
 export function sessionHits(sid, cwd) {
-  const { roots } = recorded(sid ? readJsonSafe(registry(safeId(sid))) : null, cwd);
-  return Array.isArray(roots) ? roots.filter(r => typeof r?.domain === 'string' && typeof r?.root === 'string')
-    : domainsFor(cwd).map(({ domain, root }) => ({ domain, root }));
+  const { roots, domains } = recorded(sid ? readJsonSafe(registry(safeId(sid))) : null, cwd);
+  const hits = Array.isArray(roots) ? roots
+    : Array.isArray(domains) ? sessionReach(cwd).filter(h => domains.includes(h.domain))
+    : domainsFor(cwd);
+  return hits.filter(r => typeof r?.domain === 'string' && typeof r?.root === 'string').map(({ domain, root }) => ({ domain, root }));
 }
 
 // Each of a registered session's domains with its project root: those the latest session start found, which compaction
@@ -142,12 +146,22 @@ export function markMany(kind, sid, keys) {
 
 export const mark = (kind, sid, key) => markMany(kind, sid, [key]).length > 0;
 
-// Kept with the excerpt markers, so clearMarkers resets both. Returns the [key, rule] entries not marked before.
+// A rule comes once a session, by whichever route brings it first: an always rule a prompt's keywords brought isn't loaded
+// again, nor one loaded brought by keyword. Both marks hold the rule's hash, so a reworded rule comes again. The always
+// marks are kept with the excerpt marks, so clearMarkers resets both.
+const alwaysMark = (key, rule) => `always|${key}|${rule.hash}`;
+const excerptMark = (key, rule) => `${key}|${rule.hash}`;
+
+// Returns the [key, rule] entries not marked before.
 export function markAlways(sid, entries) {
-  const id = ([k, r]) => `always|${k}|${r.hash}`;
+  const id = ([k, r]) => alwaysMark(k, r);
   const fresh = new Set(markMany('excerpts', sid, entries.map(id)));
   return entries.filter(e => fresh.has(id(e)));
 }
+
+// The first `max` { key, note } keyword hits no route has brought, left unmarked.
+export const dueExcerpts = (sid, hits, max) => unmarked('excerpts', sid, hits.filter(h => !marked('excerpts', sid, alwaysMark(h.key, h.note))), h => excerptMark(h.key, h.note), max);
+export const markExcerpts = (sid, hits) => markMany('excerpts', sid, hits.map(h => excerptMark(h.key, h.note)));
 
 // The first `max` items not yet marked, marked in one batch.
 export function markFirst(kind, sid, items, max, keyOf) {
@@ -183,8 +197,8 @@ export function unmarked(kind, sid, items, keyOf, max = Infinity) {
   return due;
 }
 
-// The [key, rule] entries markAlways would mark, left unmarked.
-export const dueAlways = (sid, entries) => unmarked('excerpts', sid, entries, ([k, r]) => `always|${k}|${r.hash}`);
+// The [key, rule] entries markAlways would mark and no prompt's keywords brought, left unmarked.
+export const dueAlways = (sid, entries) => unmarked('excerpts', sid, entries.filter(([k, r]) => !marked('excerpts', sid, excerptMark(k, r))), ([k, r]) => alwaysMark(k, r));
 export const duePages = (event, ranked, max = config().delivery.maxPages) => unmarked('pages', event.session, ranked, h => pageMark(event, h), max);
 
 // Two markers, both keyed by the rule alone, so a rule reworded since still counts as shown. The delivered one is

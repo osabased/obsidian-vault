@@ -1,18 +1,19 @@
-import { domainsFor, everywhereDomains, inside, toPosix } from './vault.mjs';
+import { domainsFor, inside, toPosix } from './vault.mjs';
 import { tryRegex, cmp, byFit } from './rules.mjs';
 import { bestMatch, specificity, bySpecificity } from './glob.mjs';
 import { marked, agentKey } from './sessions.mjs';
+import { routesOf } from './reach.mjs';
 
-// Global's globs are read from the file's first project folder, or from the session's folder when no domain has the file.
-// An everywhere domain's pages reach every edit, read as global's when its reach doesn't take in the file; its rules
-// gate only where its reach does.
+// The file's domains reach the edit by reach.mjs's file routes. Global's globs are read from the file's first project
+// folder, or from the session's folder when no domain has the file, and so are an everywhere domain's pages when its
+// reach doesn't take in the file.
 export function matcher(file, cwd, doms = domainsFor(file, cwd)) {
   const fallback = doms[0]?.rel ?? inside(cwd, file, cwd);
-  const everywhere = everywhereDomains();
+  const reach = routesOf(doms.map(d => d.domain), false);
   return (notes, pages = false) => Object.entries(notes).flatMap(([key, note]) => {
-    const own = doms.find(d => d.domain === note.domain)?.rel;
-    const rel = note.domain === 'global' || (pages && own === undefined && everywhere.includes(note.domain)) ? fallback : own;
-    if (!note.applies_to?.length || typeof rel !== 'string') return [];
+    if (!(pages ? reach.filePage : reach.fileRule)(note)) return [];
+    const rel = doms.find(d => d.domain === note.domain)?.rel ?? fallback;
+    if (typeof rel !== 'string') return [];
     const glob = bestMatch(note.applies_to, rel);
     return glob ? [{ key, note, rel, place: rel.toLowerCase(), spec: specificity(glob) }] : [];
   });
@@ -20,7 +21,7 @@ export function matcher(file, cwd, doms = domainsFor(file, cwd)) {
 
 export function fileScope(file, cwd) {
   const doms = domainsFor(file, cwd);
-  return { domains: [...doms.map(d => d.domain), 'global', ...everywhereDomains()], hits: doms, matching: matcher(file, cwd, doms) };
+  return { domains: routesOf(doms.map(d => d.domain), false).heard, hits: doms, matching: matcher(file, cwd, doms) };
 }
 
 // A note with triggers comes up only on an edit whose new text matches one.

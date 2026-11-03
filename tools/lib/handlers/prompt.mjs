@@ -1,10 +1,10 @@
 import { config } from '../vault.mjs';
 import { alwaysIn, ruleLine, pageLine, fitContext, cmp, mentions, byFit } from '../rules.mjs';
-import { touchSession, turnStarted, markAlways, markShown, markMany, markPages, unmarked, dueAlways, duePages } from '../sessions.mjs';
+import { touchSession, turnStarted, markAlways, markShown, markExcerpts, markPages, dueAlways, dueExcerpts, duePages } from '../sessions.mjs';
 import { sessionView } from '../reach.mjs';
 
 // Session start marks the always rules it loads, so these are the ones written, reworded or settled since,
-// or the ones of a domain the session moved into. A section's keys are the rules its items show, and its mark marks
+// or the ones of a domain the session moved into, less any an earlier prompt's keywords brought. A section's keys are the rules its items show, and its mark marks
 // the first n of them, once the output budget has said how many it keeps.
 function late(sid, reach, rules) {
   const due = dueAlways(sid, alwaysIn(rules, reach.always));
@@ -21,11 +21,10 @@ const mentioned = (entries, said) => entries
 
 function excerpts(sid, reach, rules, said) {
   const ranked = mentioned(Object.entries(rules).filter(([, r]) => reach.keyword(r)), said);
-  const keyOf = h => `${h.key}|${h.note.hash}`;
-  const hits = unmarked('excerpts', sid, ranked, keyOf, config().delivery.maxPromptExcerpts);
+  const hits = dueExcerpts(sid, ranked, config().delivery.maxPromptExcerpts);
   return {
     noun: 'rule', head: 'Taste rules that may apply to this request:', items: hits.map(h => ruleLine(h.key, h.note)), keys: hits.map(h => h.key),
-    mark: n => markMany('excerpts', sid, hits.slice(0, n).map(keyOf)),
+    mark: n => markExcerpts(sid, hits.slice(0, n)),
   };
 }
 
@@ -43,7 +42,7 @@ export async function prompt(event, agent) {
   turnStarted(sid);
   touchSession(event, undefined, agent.name);
   const said = String(event.text ?? '');
-  const { reach, rules, pages } = await sessionView(sid, event.cwd);
+  const { reach, rules, pages } = await sessionView(sid, event.cwd, agent);
   const sections = [late(sid, reach, rules), excerpts(sid, reach, rules, said), pointers(event, reach, pages, said)];
   const { text: context, kept } = fitContext(sections);
   // What the budget cut is neither marked delivered nor counted as shown, so a later prompt brings it.

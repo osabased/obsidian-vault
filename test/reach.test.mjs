@@ -103,6 +103,37 @@ test('6.1a: an everywhere domain\'s pages and keyword rules reach any folder, an
   assert.doesNotMatch(denied(out), /commons\/gate/);
 });
 
+test("an everywhere domain's always rule with keywords comes once a session, by whichever route brings it first", t => {
+  const v = makeVault(t, { domains: { wide: { title: 'Wide', topics: ['code'], everywhere: true, markers: ['wide.project'] } } });
+  fs.writeFileSync(path.join(v.project, 'wide.project'), '');
+  const calm = doLine => v.write('wiki/wide/rules/calm.md', ruleNote({ domain: 'wide', always: true, keywords: ['calm'], doLine, notLine: 'Panic.' }));
+  calm('Stay calm.');
+  const away = folder(t);
+  const loaded = sessionId();
+  assert.match(context(v.startSession(loaded)), /wide\/calm/);
+  assert.doesNotMatch(context(prompt(v, loaded, 'stay calm', { cwd: away })), /wide\/calm/, 'loaded at start, so a prompt elsewhere leaves it');
+  const heard = sessionId();
+  v.startSession(heard, { cwd: away });
+  assert.match(context(prompt(v, heard, 'stay calm', { cwd: away })), /wide\/calm/);
+  assert.doesNotMatch(context(prompt(v, heard, 'hello')), /wide\/calm/, 'brought by its keywords, so its project leaves it');
+  calm('Keep calm.');
+  assert.match(context(prompt(v, heard, 'hello')), /wide\/calm: Do: Keep calm\./, 'reworded, it comes again');
+});
+
+test('a recorded reach with domains and no roots, as older tools wrote it, keeps the domains a marker below the folder gave', t => {
+  const v = makeVault(t, { domains: { alpha: ALPHA } });
+  const dir = folder(t, ['sub/alpha.project']);
+  const sid = sessionId();
+  v.startSession(sid, { cwd: dir });
+  const file = `.state/sessions/${sid}.json`;
+  const entry = JSON.parse(v.read(file));
+  delete entry.reach.roots;
+  v.write(file, JSON.stringify(entry));
+  v.write('wiki/alpha/rules/late.md', ruleNote({ domain: 'alpha', always: true, doLine: 'Alpha late rule.', notLine: 'Skip it.' }));
+  assert.match(context(prompt(v, sid, 'hello', { cwd: dir })), /alpha\/late/);
+  assert.match(v.run('status.mjs', [sid]).stdout, /^vault: alpha · 1 rule \(1 always\)/);
+});
+
 test('6.1a: lint reports a missing path as an error and a domain that reaches no project as a warning', async t => {
   const v = makeVault(t, { presets: ['glim'], domains: { alpha: { title: 'Alpha', topics: [] } }, local: { glim: { paths: ['C:/nowhere/glim'] } } });
   assert.deepEqual(await reachFound(v), [
