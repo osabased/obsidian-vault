@@ -118,7 +118,7 @@ function clashes(f) {
   const hits = namedIn(vaultPath(), { [f.name]: { title: f.title } });
   if (!hits.length) return;
   const more = hits.length > 3 ? `, and ${hits.length - 3} more` : '';
-  refuse(`the vault's tools, skills, tests or AGENTS.md name no domain, and they already use this name or title: ${hits.slice(0, 3).join('; ')}${more}. Pick another.`);
+  refuse(`the vault's tools, skills, tests, AGENTS.md and reference files name no domain, and they already use this name or title: ${hits.slice(0, 3).join('; ')}${more}. Pick another.`);
 }
 
 function approval(entry, p) {

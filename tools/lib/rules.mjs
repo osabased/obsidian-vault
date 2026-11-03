@@ -589,7 +589,7 @@ export function indexNote(topics) {
   if (!topics.length) return '';
   return [
     `Taste vault: when the task touches ${joinList(topics, 'or')}, read \`${toPosix(vaultPath('index.md'))}\` and the pages it lists under those topics.`,
-    `File a useful answer that draws on the vault back as a page, as \`${toPosix(vaultPath('AGENTS.md'))}\` says under Pages.`,
+    `File a useful answer that draws on the vault back as a page, as \`${toPosix(vaultPath('reference', 'notes.md'))}\` says under Pages.`,
   ].join(' ');
 }
 
