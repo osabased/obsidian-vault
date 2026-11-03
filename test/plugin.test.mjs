@@ -4,7 +4,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { makeVault, cleanEnv, sessionId } from './fixture.mjs';
-import { matcher as EDIT_HOOK_MATCHER } from '../tools/adapters/claude-code/adapter.mjs';
+import { matcher as EDIT_HOOK_MATCHER, vaultMatcher as VAULT_HOOK_MATCHER } from '../tools/adapters/claude-code/adapter.mjs';
 
 const ROOT = path.resolve(import.meta.dirname, '..');
 const LAUNCHER = path.join(ROOT, 'hooks', 'launch.mjs');
@@ -13,7 +13,7 @@ const commands = Object.entries(hooksJson.hooks).flatMap(([event, groups]) => gr
 
 test('hooks.json starts each hook through the launcher in exec form, with its timeout as the launcher arg', () => {
   assert.deepEqual(Object.keys(hooksJson.hooks).sort(), ['PreToolUse', 'SessionStart', 'Stop', 'SubagentStart', 'UserPromptSubmit']);
-  assert.equal(commands.length, 5, 'one command per event');
+  assert.equal(commands.length, 6, 'one command per hook');
   for (const c of commands) {
     assert.equal(c.type, 'command');
     assert.equal(c.command, 'node', `${c.event} runs node with no shell`);
@@ -22,15 +22,18 @@ test('hooks.json starts each hook through the launcher in exec form, with its ti
     assert.ok(Number.isFinite(c.timeout) && c.timeout > 0, `${c.event} has a timeout`);
     assert.equal(c.args[2], String(c.timeout), `${c.event}: the arg and the timeout agree`);
   }
-  assert.deepEqual(commands.map(c => c.args[1]).sort(), ['edit', 'prompt', 'session-start', 'stop', 'subagent-start']);
+  assert.deepEqual(commands.map(c => c.args[1]).sort(), ['edit', 'prompt', 'session-start', 'stop', 'subagent-start', 'vault-call']);
   const tools = fs.readdirSync(path.join(ROOT, 'tools', 'adapters', 'claude-code', 'hooks')).map(f => f.replace(/\.mjs$/, ''));
   for (const name of tools) assert.ok(commands.some(c => c.args[1] === name), `tools/adapters/claude-code/hooks/${name}.mjs has an event`);
 });
 
-test('hooks.json gives only the edit hook a matcher, the one it ships with', () => {
+test('hooks.json gives only the edit and vault-call hooks a matcher, the ones their adapter ships with', () => {
   const edit = commands.filter(c => c.args[1] === 'edit');
   assert.deepEqual(edit.map(c => [c.event, c.matcher]), [['PreToolUse', EDIT_HOOK_MATCHER]]);
-  assert.deepEqual(commands.filter(c => c.matcher !== undefined).map(c => c.event), ['PreToolUse']);
+  const vaultCall = commands.filter(c => c.args[1] === 'vault-call');
+  assert.deepEqual(vaultCall.map(c => [c.event, c.matcher, c.onFailure]), [['PreToolUse', VAULT_HOOK_MATCHER, 'block']]);
+  assert.deepEqual(commands.filter(c => c.matcher !== undefined).map(c => c.event), ['PreToolUse', 'PreToolUse']);
+  assert.deepEqual(commands.filter(c => c.onFailure !== undefined).map(c => c.args[1]), ['vault-call']);
   assert.equal(EDIT_HOOK_MATCHER, '^(?:Edit|Write|MultiEdit|NotebookEdit|AskUserQuestion|mcp__.*)$');
 });
 
@@ -39,6 +42,12 @@ test('the edit hook\'s matcher, read as Claude Code reads it, sends the file too
   const sends = new RegExp(EDIT_HOOK_MATCHER);
   const sent = ['Edit', 'Write', 'MultiEdit', 'NotebookEdit', 'AskUserQuestion', 'mcp__fixture__set_property', 'TodoWrite', 'Bash', 'NotebookEditor', 'xmcp__fixture__x'].filter(n => sends.test(n));
   assert.deepEqual(sent, ['Edit', 'Write', 'MultiEdit', 'NotebookEdit', 'AskUserQuestion', 'mcp__fixture__set_property']);
+});
+
+test("the vault-call matcher, read as Claude Code reads it, sends the vault's tools whether the plugin or claude mcp add started the server, and nothing else", () => {
+  const sends = new RegExp(VAULT_HOOK_MATCHER);
+  const sent = ['mcp__plugin_obsidian-vault_vault__keep', 'mcp__vault__propose', 'mcp__plugin_obsidian-vault_vault__', 'mcp__other__keep', 'xmcp__vault__keep', 'mcp__vault__keep2', 'mcp__plugin_other_vault__keep', 'Bash'].filter(n => sends.test(n));
+  assert.deepEqual(sent, ['mcp__plugin_obsidian-vault_vault__keep', 'mcp__vault__propose']);
 });
 
 test('plugin.json asks for the vault folder', () => {
@@ -79,7 +88,7 @@ test('the launcher fails loudly: one stderr line, exit 1', t => {
   const failures = [
     ['an unset vault option', launch('prompt'), /^vault prompt failed: the plugin's vault option is not set; run claude plugin configure obsidian-vault\n$/],
     ['a vault with no .live/tools', launch('prompt', { vault: v.root }), /^vault prompt failed: .*\.live[\\/]tools does not exist; run \.githooks\/post-commit in the vault to make it\n$/],
-    ['an unknown hook name', launch('../prompt', { vault: v.root }), /^vault \.\.\/prompt failed: no hook of that name, only session-start, prompt, edit, stop, subagent-start\n$/],
+    ['an unknown hook name', launch('../prompt', { vault: v.root }), /^vault \.\.\/prompt failed: no hook of that name, only session-start, prompt, edit, stop, subagent-start, vault-call\n$/],
     ['no hook name', launch(undefined, { vault: v.root }), /^vault {2}failed: no hook of that name/],
   ];
   for (const [what, r, line] of failures) {

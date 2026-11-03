@@ -1,5 +1,5 @@
 import fs from 'node:fs';
-import { config, domainsFor, vaultRel, vaultOwn, toPosix, cwdOf, shortHash, plainText } from '../vault.mjs';
+import { config, domainsFor, vaultRel, vaultOwn, toPosix, cwdOf, shortHash, plainText, readJsonSafe, safeId, inVaultFolder } from '../vault.mjs';
 import { routesOf, routesFor } from '../reach.mjs';
 import {
   loadNotesAsync, settledNotes, liveRules, livePages, deliverable, deliveryFor, byFit, ruleLine, rulePointer, pageLine, fitContext, cmp, clip, parseNote, QUOTED, agentNotesSpan, authoredByUser, AGENT_NOTES, TOP_HEADING, isMap,
@@ -8,7 +8,7 @@ import { matchTarget, targetNames, specificity, bySpecificity } from '../glob.mj
 import { matcher, fileScope, fires, dueRules, gatedFile } from '../scope.mjs';
 import { parse } from '../frontmatter.mjs';
 import { extension } from '../ext.mjs';
-import { mark, marked, markMany, markShown, markPages, duePages, agentKey, keyHash, sessionHits, turnStart } from '../sessions.mjs';
+import { mark, marked, markMany, markShown, markPages, duePages, agentKey, keyHash, sessionHits, turnStart, registry } from '../sessions.mjs';
 
 function vaultGuard(file, cwd) {
   const rel = vaultRel(file, cwd);
@@ -23,9 +23,29 @@ function vaultGuard(file, cwd) {
   if (low === '.sources' || low.startsWith('.sources/')) return '`.sources/` holds the clones `tools/refresh.mjs` checks git sources in. Leave it to refresh.';
   if (low.startsWith('raw/')) {
     if (fs.existsSync(toPosix(file, cwd))) return `raw/ is append-only: ${rel} already exists and can't be changed. Put new material in a new file under raw/refs/.`;
-    if (!/^raw\/refs\/./.test(low)) return 'raw/ is append-only. New files go under raw/refs/; tools/propose.mjs and tools/pick.mjs write the rest.';
+    if (!/^raw\/refs\/./.test(low)) return "raw/ is append-only. New files go under raw/refs/; the vault's `propose`, `keep` and `pick` tools write the rest.";
   }
   return null;
+}
+
+// A rule written by hand in a project's session would skip the user's agreement. The folder the session registered
+// decides, since a session moving into the vault folder later gains no more reach than it started with. Any note under
+// wiki/ whose frontmatter says `type: rule` is live, so the result is judged, not the folder.
+function newRuleGuard(event, file, cwd) {
+  const rel = vaultRel(file, cwd);
+  if (rel === null || !/^wiki\/.+\.md$/i.test(rel)) return null;
+  if (inVaultFolder(readJsonSafe(registry(safeId(event.session)))?.cwd ?? cwd)) return null;
+  const exists = fs.existsSync(toPosix(file, cwd));
+  let before = null;
+  if (exists) {
+    try { before = plainText(fs.readFileSync(toPosix(file, cwd), 'utf8')); } catch { return null; }
+  }
+  const after = event.after ? event.after(before ?? '') : null;
+  const isRule = after === null
+    ? !exists && /^wiki\/[^/]+\/rules\/[^/]+\.md$/i.test(rel)
+    : parseNote(after, rel).type === 'rule' && (before === null || parseNote(before, rel).type !== 'rule');
+  if (!isRule) return null;
+  return `\`${rel}\` would be a new rule. Outside the vault folder, rules are kept only through the vault's \`propose\` tool, so the user agrees to each one. Propose it there.`;
 }
 
 // Fences are kept: a quote the user wrote inside one is still theirs.
@@ -248,7 +268,7 @@ export async function preTool(event) {
   const t = target(event);
   const cwd = cwdOf(event);
   if (t?.namespace === 'file') {
-    const why = vaultGuard(t.path, cwd) ?? noteGuard(event, t.path, cwd);
+    const why = vaultGuard(t.path, cwd) ?? newRuleGuard(event, t.path, cwd) ?? noteGuard(event, t.path, cwd);
     if (why) return { deny: why };
     if (vaultOwn(vaultRel(t.path, cwd))) return null;
   }

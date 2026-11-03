@@ -8,7 +8,7 @@ import { makeVault, ruleNote, sessionId, cleanEnv } from './fixture.mjs';
 
 const HOOKS = path.resolve(import.meta.dirname, '..', '.githooks');
 
-test('a copy of tools/ inside the vault reads and writes the vault, and names its own scripts', t => {
+test('a copy of tools/ inside the vault reads and writes the vault, and names tools rather than scripts', t => {
   const v = makeVault(t);
   v.write('wiki/glim/rules/said.md', ruleNote({ always: true, doLine: 'Zebra quartz mango.' }));
   fs.cpSync(v.at('tools'), v.at('.live', 'tools'), { recursive: true });
@@ -17,9 +17,8 @@ test('a copy of tools/ inside the vault reads and writes the vault, and names it
   });
   const context = JSON.parse(r.stdout).hookSpecificOutput.additionalContext;
   assert.match(context, /Zebra quartz mango\./);
-  for (const script of ['propose.mjs', 'pick.mjs']) {
-    assert.ok(context.includes(`node "${v.root.replace(/\\/g, '/')}/.live/tools/${script}"`), `the start hook names .live/tools/${script}`);
-  }
+  assert.match(context, /vault's `propose` tool/);
+  assert.ok(!context.includes('.mjs'), 'the start hook names tools, not script paths');
   assert.ok(fs.existsSync(v.at('.state', 'sessions')));
   assert.ok(!fs.existsSync(v.at('.live', '.state')));
 });

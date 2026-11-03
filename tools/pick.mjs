@@ -8,7 +8,7 @@ import { KEBAB, settledRules, ruleLine, normTopic, joinList, byKey, byFit, cmp, 
 import { build } from './lib/build.mjs';
 import { IMAGE, hashPath, derivedText } from './lib/sources.mjs';
 import { subjectRows, laterRows, liveRows, endedBy, newestFirst, entry, projectName, sameProject } from './lib/picks.mjs';
-import { UsageError, readInput, refuse, failure, line } from './lib/input.mjs';
+import { UsageError, readInput, refuse, failure, line, renderHelp, schemaOf, schemaArg } from './lib/input.mjs';
 import { ownEntry, markShown, sessionRoots } from './lib/sessions.mjs';
 import { saidIn } from './lib/quotes.mjs';
 import { currentSession, typedFor, shortName } from './lib/agents.mjs';
@@ -17,51 +17,53 @@ const RUN = 'usage: node tools/pick.mjs [session-id] < pick.json';
 const SHOW = '       node tools/pick.mjs show <session-id> <subject> [domain [project]]';
 const USAGE = `${RUN}\n${SHOW}\n       node tools/pick.mjs --help lists the fields of pick.json`;
 
-const help = () => [
+const row = (label, help) => ({ label, help });
+
+// One list drives --help and --schema. A pick, a confirmation and a comment are one flat list with text blocks between.
+const FIELDS = [
+  { name: 'domain', type: 'string', help: ['optional when the session is in one domain, which the row then takes; otherwise the domain this is for,', "one the session is in. A session at a monorepo root is in each package's domain."] },
+  { name: 'project', type: 'string', help: ['optional when the domain has one project folder in this session, which the row then takes; otherwise the', 'project this is for, as the full path or the folder name of one of the projects the refusal lists. A', 'monorepo root has a project for each package.'] },
+  { text: ['', 'A pick, when the user chose between options you showed them, or you chose alone while they were away:'] },
+  { name: 'subject', type: 'string', help: ['the piece of work, lowercase-kebab-case, like shop or style-tile; reuse the one its earlier picks have'] },
+  { name: 'question', type: 'string', help: ['the question the options answered, one line'] },
+  { name: 'header', type: 'string', help: ['optional, a short label for the question'] },
+  { name: 'options', type: 'object[]', help: ['at least two objects: label (one line) and an optional description'] },
+  { name: 'pick', type: 'string', help: ['the label of the option picked'] },
+  { name: 'status', type: 'string', enum: ['user', 'provisional'], help: ['"user" when the user picked it, "provisional" when you picked alone'] },
+  { name: 'notes', type: 'string', help: ["optional, the user's own words about the pick, verbatim; a provisional pick has none"] },
+  { name: 'reason', type: 'string', help: ['optional, your own reasons, in one line'] },
+  { name: 'sheet', type: 'string', help: ['optional, the file the options were picked from, as a full path or one from the folder you run pick.mjs in:', 'an image (.png, .jpg, .jpeg or .webp), or a file whose text node tools/extract.mjs has extracted, which', 'needs a copy in raw/refs/. It is copied into raw/picks/'] },
+  { name: 'replaces', type: 'string', help: ['optional, the id of the live pick on the same subject this one reverses'] },
+  { text: ['', 'A confirmation, when the user agrees with a provisional pick:'] },
+  { name: 'confirms', type: 'string', help: ['the id of the provisional pick'] },
+  row('notes, reason', ['as above']),
+  { text: ['The row copies the question, options, pick and sheet from the pick it confirms, and its reason when you give none.', '', "A comment, when the user says something about a piece of work that isn't a rule for every piece:"] },
+  row('subject', ['as above']),
+  { name: 'comment', type: 'string', help: ["the user's words, verbatim, one line"] },
+  // No help, so --help stays as the argv form's; the schema is where the JSON form of show is described.
+  { name: 'show', type: 'string', describe: 'Instead of recording: the subject (lowercase-kebab-case) to show the picks of, newest first, then the taste and knowledge rules of the project. Run it before building or reviewing the piece and keep to what it returns. Takes only domain and project, with the same meaning.' },
+];
+
+const SUMMARY = "Records the user's pick between options you showed them, your provisional pick, a confirmation of one, or their comment on one piece of work. With show and a subject it returns that subject's picks and the rules instead. domain and project are needed only when the session has several.";
+
+const help = () => renderHelp([
   RUN,
   SHOW,
   '',
   'pick.json is one of three objects. Each records a row in raw/picks/ for a project this session is in, and takes:',
-  '  domain       optional when the session is in one domain, which the row then takes; otherwise the domain this is for,',
-  "               one the session is in. A session at a monorepo root is in each package's domain.",
-  '  project      optional when the domain has one project folder in this session, which the row then takes; otherwise the',
-  '               project this is for, as the full path or the folder name of one of the projects the refusal lists. A',
-  '               monorepo root has a project for each package.',
+], FIELDS, [
   '',
-  'A pick, when the user chose between options you showed them, or you chose alone while they were away:',
-  '  subject      the piece of work, lowercase-kebab-case, like shop or style-tile; reuse the one its earlier picks have',
-  '  question     the question the options answered, one line',
-  '  header       optional, a short label for the question',
-  '  options      at least two objects: label (one line) and an optional description',
-  '  pick         the label of the option picked',
-  '  status       "user" when the user picked it, "provisional" when you picked alone',
-  "  notes        optional, the user's own words about the pick, verbatim; a provisional pick has none",
-  '  reason       optional, your own reasons, in one line',
-  '  sheet        optional, the file the options were picked from, as a full path or one from the folder you run pick.mjs in:',
-  '               an image (.png, .jpg, .jpeg or .webp), or a file whose text node tools/extract.mjs has extracted, which',
-  '               needs a copy in raw/refs/. It is copied into raw/picks/',
-  '  replaces     optional, the id of the live pick on the same subject this one reverses',
-  '',
-  'A confirmation, when the user agrees with a provisional pick:',
-  '  confirms     the id of the provisional pick',
-  '  notes, reason  as above',
-  'The row copies the question, options, pick and sheet from the pick it confirms, and its reason when you give none.',
-  '',
-  "A comment, when the user says something about a piece of work that isn't a rule for every piece:",
-  '  subject      as above',
-  "  comment      the user's words, verbatim, one line",
-  '',
-  'show prints the subject\'s live picks, newest first, then the taste and knowledge rules of the domain and of the other',
+  "show prints the subject's live picks, newest first, then the taste and knowledge rules of the domain and of the other",
   "domains whose projects hold its project. Run it before building or reviewing the piece, and paste what it prints into the",
   "reviewer's prompt. Give the domain when the session is in more than one, and the project when the domain has more than one.",
-].join('\n');
+], 13);
 
 function sessionOf(sid) {
-  if (!sid) refuse("there's no session id to record for. Pass the session id from the taste vault's note at session start, or run this from the agent's own shell, which sets its session id.");
+  if (!sid) refuse("there's no session id to record for. The vault's tools pass the session id themselves. From a shell, pass it as the first argument, or run this from the agent's own shell, which sets its session variable.");
   const { entry: entryRow, notOwn } = ownEntry(sid);
   if (notOwn) refuse(notOwn);
   const hits = [...sessionRoots(entryRow)].sort((a, b) => cmp(a.domain, b.domain) || cmp(a.root, b.root));
-  if (!hits.length) refuse(`the taste vault has no session ${sid} from a domain's project folder. Pass the session id from the taste vault's note at session start.`);
+  if (!hits.length) refuse(`the taste vault has no session ${sid} from a domain's project folder. The vault's tools pass the session id themselves; from a shell, pass this session's own id.`);
   return { ...entryRow, hits };
 }
 
@@ -216,11 +218,17 @@ const ALL_FIELDS = new Set(Object.values(KINDS).flatMap(k => k.fields));
 function record(sid, input) {
   const session = sessionOf(sid);
   const p = input();
+  if (p.show !== undefined) {
+    refused = 'Not shown';
+    const stray = Object.keys(p).find(k => p[k] !== undefined && !['show', 'domain', 'project'].includes(k));
+    if (stray) refuse(`${stray} doesn't go with show, which takes only domain and project.`);
+    return show(sid, line(p, 'show'), optional(p, 'domain'), optional(p, 'project'));
+  }
   const kinds = Object.keys(KINDS).filter(k => p[k] !== undefined);
   if (kinds.length !== 1) refuse('give one of: a pick with question and options, confirms, or comment.');
   const kind = KINDS[kinds[0]];
   const stray = Object.keys(p).find(k => p[k] !== undefined && ALL_FIELDS.has(k) && !kind.fields.includes(k));
-  if (stray) refuse(`${stray} doesn't go with a ${kind.name}. node tools/pick.mjs --help lists each one's fields.`);
+  if (stray) refuse(`${stray} doesn't go with a ${kind.name}. The \`pick\` tool's schema lists each one's fields.`);
   const from = kind.name === 'confirmation' ? pickRows().find(r => r.id === p.confirms) : undefined;
   const s = inDomain(session, { domain: optional(p, 'domain'), project: optional(p, 'project'), from });
   const { make, sheet = null, replaces = '' } = kind.read(p, s);
@@ -289,7 +297,9 @@ function show(sid, subject, domain, project) {
 const args = process.argv.slice(2);
 let refused = 'Not recorded';
 try {
-  if (args[0] === '--help' && args.length === 1) console.log(help());
+  const variant = schemaArg(args);
+  if (variant) console.log(JSON.stringify(schemaOf(SUMMARY, FIELDS)));
+  else if (args[0] === '--help' && args.length === 1) console.log(help());
   else if (args[0] === 'show' && args.length >= 3 && args.length <= 5) {
     refused = 'Not shown';
     console.log(show(args[1], args[2], args[3], args[4]));

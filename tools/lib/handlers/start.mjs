@@ -99,9 +99,9 @@ export async function start(event, agent) {
   if (registered) {
     entry = touchSession(event, hits, agent.name);
     if (doms.length) {
-      propose = proposeNote(event.session, agent, doms, vaultFolder);
-      pick = pickNote(event.session);
-    } else if (!vaultFolder) uncovered = uncoveredNote(event.session, agent, { quiet: isQuiet(event.cwd) });
+      propose = proposeNote(doms, vaultFolder);
+      pick = pickNote();
+    } else if (!vaultFolder) uncovered = uncoveredNote({ quiet: isQuiet(event.cwd) });
   }
   // Compaction and /clear start the context again within one session, which already heard these lines.
   const again = ['compact', 'clear'].includes(event.reason);

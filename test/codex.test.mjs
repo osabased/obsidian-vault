@@ -274,23 +274,35 @@ const snippet = vault => `{
   "hooks": {
     "SessionStart": [{ "hooks": [{ "type": "command", "command": "node \\"${vault}/.live/tools/adapters/codex/launch.mjs\\" session-start 10", "timeout": 10, "additionalContextLimit": 4000 }] }],
     "UserPromptSubmit": [{ "hooks": [{ "type": "command", "command": "node \\"${vault}/.live/tools/adapters/codex/launch.mjs\\" prompt 10", "timeout": 10, "additionalContextLimit": 4000 }] }],
-    "PreToolUse": [{ "matcher": "apply_patch|mcp__.*", "hooks": [{ "type": "command", "command": "node \\"${vault}/.live/tools/adapters/codex/launch.mjs\\" edit 10", "timeout": 10 }] }],
+    "PreToolUse": [
+      { "matcher": "apply_patch|mcp__.*", "hooks": [{ "type": "command", "command": "node \\"${vault}/.live/tools/adapters/codex/launch.mjs\\" edit 10", "timeout": 10 }] },
+      { "matcher": "^mcp__vault__[a-z]+$", "hooks": [{ "type": "command", "command": "node \\"${vault}/.live/tools/adapters/codex/launch.mjs\\" vault-call 10", "timeout": 10 }] }
+    ],
     "SubagentStart": [{ "hooks": [{ "type": "command", "command": "node \\"${vault}/.live/tools/adapters/codex/launch.mjs\\" subagent-start 10", "timeout": 10, "additionalContextLimit": 4000 }] }],
     "Stop": [{ "hooks": [{ "type": "command", "command": "node \\"${vault}/.live/tools/adapters/codex/launch.mjs\\" stop 10", "timeout": 10 }] }]
   }
-}`;
-const WHERE = 'Merge this into ~/.codex/hooks.json, then open /hooks in Codex and trust the five vault hooks. Codex skips them until you do.';
+}
 
-test('node tools/agents.mjs codex prints the hooks.json snippet byte for byte, which parses with the five events', async t => {
+[mcp_servers.vault]
+command = "node"
+args = ["${vault}/mcp/launch.mjs", "${vault}"]`;
+const WHERE = 'Merge the JSON into ~/.codex/hooks.json and add the TOML to ~/.codex/config.toml, then open /hooks in Codex and trust the six vault hooks. Codex skips them until you do.';
+
+test('node tools/agents.mjs codex prints the hooks.json snippet and the config.toml block byte for byte, which parse with the five events and one PreToolUse key of two groups', async t => {
   const v = codexVault(t);
-  const { registration } = await v.import('adapters/codex/adapter.mjs');
+  const { registration, vaultMatcher } = await v.import('adapters/codex/adapter.mjs');
   for (const root of ['/srv/vaults/taste', 'C:/Users/Lowle/My Vaults/taste']) {
     const { where, text } = registration(root);
     assert.equal(text, snippet(root));
     assert.equal(where, WHERE);
-    const hooks = JSON.parse(text).hooks;
+    const [json, toml] = text.split('\n\n[mcp_servers');
+    assert.equal(toml, `.vault]\ncommand = "node"\nargs = ["${root}/mcp/launch.mjs", "${root}"]`);
+    const hooks = JSON.parse(json).hooks;
     assert.deepEqual(Object.keys(hooks), ['SessionStart', 'UserPromptSubmit', 'PreToolUse', 'SubagentStart', 'Stop']);
+    assert.equal(hooks.PreToolUse.length, 2);
     assert.equal(hooks.PreToolUse[0].hooks[0].command, `node "${root}/.live/tools/adapters/codex/launch.mjs" edit 10`);
+    assert.equal(hooks.PreToolUse[1].hooks[0].command, `node "${root}/.live/tools/adapters/codex/launch.mjs" vault-call 10`);
+    assert.equal(hooks.PreToolUse[1].matcher, vaultMatcher);
   }
   const r = v.run('agents.mjs', ['codex']);
   assert.equal(r.code, 0, r.stderr);
