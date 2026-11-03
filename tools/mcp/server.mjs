@@ -125,7 +125,7 @@ export function serve({ input, output, run }) {
     throw new RpcError(-32601, `Method not found: ${method}`);
   }
 
-  // post-commit replaces .live/tools as a whole, so a new folder is a new set of scripts and schemas.
+  // post-commit and the launchers replace .live/tools as a whole, so a new folder is a new set of scripts and schemas.
   const signature = () => {
     try {
       const s = fs.statSync(toolsPath());

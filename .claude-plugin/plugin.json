@@ -16,7 +16,7 @@
     "vault": {
       "type": "directory",
       "title": "Vault folder",
-      "description": "The vault checkout whose .live/tools/ the hooks run, with .githooks/post-commit having made it.",
+      "description": "The folder you cloned the vault into. The hooks and the tool server run its tools as of its last commit.",
       "required": true
     }
   }

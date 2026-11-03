@@ -2,22 +2,18 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { spawn } from 'node:child_process';
 import { pathToFileURL } from 'node:url';
+import { vaultFolder, liveTools } from '../hooks/live.mjs';
 
 // The vault's MCP server, started by the agent with the vault folder as its argument. It runs the server from the
-// vault's .live/tools/, as hooks/launch.mjs runs the hooks, so the installed copy never goes stale against the vault.
-// The server is pure protocol; this file runs the scripts for it, since tools/ keeps child processes to lib/git.mjs.
+// vault's .live/tools/, as hooks/launch.mjs runs the hooks, so the installed copy never goes stale against the vault,
+// and makes the copy again when the vault's last commit changed tools/, as session start does. The server is pure
+// protocol; this file runs the scripts for it, since tools/ keeps child processes to lib/git.mjs.
+const FIX = "pass the vault checkout's absolute path as the first argument";
 const [given = ''] = process.argv.slice(2);
 
 function fail(why) {
   process.stderr.write(`vault mcp failed: ${why.replace(/\s+/g, ' ').trim()}\n`);
   process.exitCode = 1;
-}
-
-// Git Bash spells C:/x as /c/x, which node on Windows reads as C:\c\x. A relative path would mean a different folder in
-// each session, so it is refused.
-function vaultFolder(p) {
-  const spelled = process.platform === 'win32' ? p.replace(/^[\\/]([a-z])(?:[\\/]|$)/i, '$1:/') : p;
-  return path.isAbsolute(spelled) ? path.resolve(spelled) : null;
 }
 
 function run(file, args, { input = '', cwd, env, timeoutMs }) {
@@ -43,11 +39,11 @@ function run(file, args, { input = '', cwd, env, timeoutMs }) {
 }
 
 async function launch() {
-  if (!given) return fail("no vault folder given; pass the vault checkout's absolute path as the first argument");
+  if (!given) return fail(`no vault folder given; ${FIX}`);
   const root = vaultFolder(given);
   if (!root) return fail(`the vault folder "${given}" is not an absolute path`);
-  const file = path.join(root, '.live', 'tools', 'mcp', 'server.mjs');
-  if (!fs.existsSync(file)) return fail(`${file} does not exist; run .githooks/post-commit in the vault to make it`);
+  const file = path.join(liveTools(root, { fix: FIX, refresh: true }), 'mcp', 'server.mjs');
+  if (!fs.existsSync(file)) return fail(`${file} does not exist; commit the vault's tools/, then start a new session`);
   const { serve } = await import(pathToFileURL(file).href);
   await serve({ input: process.stdin, output: process.stdout, run });
 }
