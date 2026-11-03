@@ -2,13 +2,27 @@
 
 A taste vault for Claude Code, based on Andrej Karpathy's LLM wiki pattern: a small wiki of the user's preferences, written as rules the agent gets back in later sessions. `AGENTS.md` describes the layout and the note formats.
 
+## Daily use
+
+1. **Work as usual.** Each new or resumed session starts with one line, such as `vault: roblox · 12 rules (2 always) · 3 pages · proposals: ask`: the domains the folder is in, the rules and pages that can reach the session, and when agents propose rules. `vault: no domain here` means only `global` reaches it.
+2. **Correct the agent.** When you say how you want things, the agent keeps it as a rule, in the way `proposals` sets: `ask` offers each rule and keeps it once you agree. The rule reaches later sessions from then on.
+3. **Check what reached a session.** `/obsidian-vault:vault status` prints the start line again, then the rules and pages the vault has shown the session so far.
+4. **Read and edit in Obsidian.** Open this folder, not the one above it, as the Obsidian vault, so its ignore filters apply. Edit or delete any note; a saved note applies after a minute without another save.
+5. **Go through sources and tidy up here.** Open Claude Code in this folder for `/obsidian-vault:ingest` and `/obsidian-vault:lint`; the session start reminds you when lint is due.
+
+A project whose kind no domain covers gets an offer to start one. For folders where that offer is noise, such as an app's scratch folders, list globs over their absolute paths under `quiet` in `vault.local.json`: sessions there can still keep a rule in `global`, and hear no domain offer.
+
+```json
+{ "domains": {}, "quiet": ["C:/Users/me/AppData/Local/SomeApp/**/scratch/**"] }
+```
+
 ## Plugin
 
 The repo is also a Claude Code plugin with three skills and the hooks:
 
 - `/obsidian-vault:ingest` goes through a source with you, a file or a URL whose text it saves, and turns it and what you say about it into pages and rules. `/obsidian-vault:ingest batch` takes in every file in `raw/refs/` no source page names yet, and asks before adding any rule.
 - `/obsidian-vault:lint` checks the whole wiki and proposes fixes.
-- `/obsidian-vault:vault` sets when agents propose rules: `corrections` (as soon as you correct them), `ask` (they offer each rule and keep it once you agree; the default) or `off` (only when you ask), for every project or one domain, as `/obsidian-vault:vault off` or `/obsidian-vault:vault corrections <domain>`. Saying it in words works too.
+- `/obsidian-vault:vault` sets when agents propose rules: `corrections` (as soon as you correct them), `ask` (they offer each rule and keep it once you agree; the default) or `off` (only when you ask), for every project or one domain, as `/obsidian-vault:vault off` or `/obsidian-vault:vault corrections <domain>`. Saying it in words works too. `/obsidian-vault:vault status` shows what the vault does in the session.
 - The hooks deliver the rules and pages to your sessions. `hooks/hooks.json` starts SessionStart, UserPromptSubmit, PreToolUse (edits), Stop and SubagentStart through `hooks/launch.mjs`, which runs the hook from your vault.
 
 ```
@@ -49,6 +63,7 @@ What Codex doesn't give the vault, and the vault doesn't work around:
 - **Failures.** A hook that fails is marked failed and the call goes on. The vault logs it in `.state/errors.log` and names it at the next session start.
 - **Context size.** `additionalContextLimit` counts tokens by Codex's own estimate, and Codex saves longer context to a file with a preview.
 - **Untrusted hooks** don't run, and the vault can't tell.
+- **The status line** isn't shown, since the vault doesn't know whether Codex shows a hook's `systemMessage`. `node tools/status.mjs` prints it.
 
 ### Projects without the hooks
 

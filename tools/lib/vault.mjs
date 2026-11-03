@@ -2,6 +2,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
 import { armDeadline } from './deadline.mjs';
+import { globToRegExp, validGlob } from './glob.mjs';
 
 // The plugin's hooks run a copy of tools/ inside the vault, which .githooks/post-commit keeps at the last
 // commit, so the vault is the nearest folder above the code that holds vault.config.json.
@@ -32,7 +33,7 @@ export const DEFAULTS = {
 };
 
 const strings = xs => (Array.isArray(xs) ? xs.filter(x => typeof x === 'string' && x.trim()) : []);
-const local = () => readJsonSafe(vaultPath('vault.local.json'))?.domains ?? {};
+const local = () => readJsonSafe(vaultPath('vault.local.json')) ?? {};
 
 // Paths differ per machine, so they come from the untracked vault.local.json; a file lint finds broken gives none.
 let loaded;
@@ -40,11 +41,11 @@ export function config() {
   if (!loaded) {
     const c = readJson(vaultPath('vault.config.json'), {});
     const mine = local();
-    const domains = Object.fromEntries(Object.entries(c.domains ?? {}).map(([d, x]) => [d, { ...x, paths: strings(mine?.[d]?.paths) }]));
+    const domains = Object.fromEntries(Object.entries(c.domains ?? {}).map(([d, x]) => [d, { ...x, paths: strings(mine.domains?.[d]?.paths) }]));
     const extractors = Array.isArray(c.extractors) ? c.extractors : [];
     // The agents whose tool names lint checks, in the order a script looks for its own session, each a folder in tools/adapters/.
     const agents = Array.isArray(c.agents) ? c.agents : ['claude-code'];
-    loaded = { domains, extractors, agents, proposals: c.proposals, ...Object.fromEntries(Object.entries(DEFAULTS).map(([k, d]) => [k, { ...d, ...c[k] }])) };
+    loaded = { domains, extractors, agents, proposals: c.proposals, quiet: strings(mine.quiet).filter(g => validGlob(g)), ...Object.fromEntries(Object.entries(DEFAULTS).map(([k, d]) => [k, { ...d, ...c[k] }])) };
   }
   return loaded;
 }
@@ -198,6 +199,14 @@ export function sessionReach(cwd) {
 
 export const inVaultFolder = cwd => Boolean(cwd) && vaultRel(cwd) !== null;
 
+// Folders the user keeps quiet, such as an app's scratch folders, are globs over absolute paths in vault.local.json. A
+// glob lint finds broken is left out. A POSIX path's leading slash comes off both sides, as normGlob takes it off the glob.
+export function isQuiet(cwd) {
+  if (!cwd) return false;
+  const p = toPosix(cwd).replace(/^\//, '');
+  return config().quiet.some(g => globToRegExp(g).test(p));
+}
+
 // A vault-only domain holds pages only, which sessions read from the vault folder. It is set in vault.config.json rather
 // than read from missing paths, so a domain is vault-only on every machine or none.
 export const isVaultOnly = d => d !== 'global' && config().domains[d]?.vaultOnly === true;
@@ -210,6 +219,13 @@ const modeOr = (x, fallback) => (PROPOSAL_MODES.includes(x) ? x : fallback);
 export function proposalMode(d) {
   const top = modeOr(config().proposals, 'ask');
   return d === 'global' ? top : modeOr(config().domains[d]?.proposals, top);
+}
+
+// The domains under each mode, in the order given.
+export function domainsByMode(domains) {
+  const byMode = new Map();
+  for (const d of domains) byMode.set(proposalMode(d), [...(byMode.get(proposalMode(d)) ?? []), d]);
+  return byMode;
 }
 
 // The vault folder is where every domain's pages are read, a vault-only domain's among them; an everywhere domain's
