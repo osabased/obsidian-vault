@@ -5,13 +5,14 @@ import {
 } from './vault.mjs';
 import {
   KEY_RE, BASES, wrongBasis, parseNote, noteErrors, ruleText, ruleTextParts, loadNotes, readNote, liveRules, mentions, isUrl, validDay, byKey, normTopic, domainTopics, vaultFile, joinList,
-  sharedFiles, rankPair, maxChars, fitIn,
+  sharedFiles, rankPair, maxChars, fitIn, hasChannel,
 } from './rules.mjs';
 import { build } from './build.mjs';
 import { entryKey } from './glob.mjs';
 import { saidIn, normText, quoteTexts, userPageTexts, inLatest } from './quotes.mjs';
 import { callerEntry, PASS, marked, markMany, wasShown, carryMarkers, proposeDomains, sessionName } from './sessions.mjs';
-import { setField, yamlQuote, yamlScalar } from './frontmatter.mjs';
+import { setField, setList, yamlQuote, yamlScalar } from './frontmatter.mjs';
+import { pageChange, writePage } from './propose-page.mjs';
 import { subjectRows, laterRows, endedBy, otherLabels } from './picks.mjs';
 import { refuse, line, lines, Refused } from './input.mjs';
 import { typedFor, shortName } from './agents.mjs';
@@ -256,11 +257,12 @@ function withEvidence(text, entry) {
   return lines.join(eol);
 }
 
-// Outside the vault folder, where /ingest goes through each rule with the user, ask and off only offer the rule once
-// every other check has passed, and keep writes it once the user agrees, so what the user agrees to is what gets written.
-// Kept, the offer's text must still be what these fields give: the rule a repeat backs may have changed since. A held
-// rule waits for release whatever the mode. An entry from the review queue is offered again in every mode, since it went
-// there for the user's review, and a subagent's rule waits there for it.
+// Only corrections writes at once, and only a rule from a project session: ask and off offer the change once every other
+// check has passed, and keep writes it once the user agrees, so what the user agrees to is what gets written. The vault
+// folder offers as ask does whatever the mode, and without off's gate, since /ingest and /lint go through each item with
+// the user. A page change is always an offer. Kept, the offer's text must still be what these fields give: the rule a
+// repeat backs may have changed since. A held change waits for release whatever the mode. An entry from the review
+// queue is offered again in every mode, since it went there for the user's review, and a subagent's waits there for it.
 function consent(f, domain, kind, key, offer) {
   if (f.kept) {
     if (offerText(offer, f.kept.code) !== f.kept.text) refuse("the vault changed since the offer, so it isn't what the user agreed to. Propose it again.");
@@ -268,10 +270,10 @@ function consent(f, domain, kind, key, offer) {
   }
   const mode = proposalMode(domain);
   const vault = inVaultFolder(f.folder);
-  const writes = mode === 'corrections' || vault;
+  const writes = mode === 'corrections' && !vault && kind !== 'page';
   if (writes && !f.hold && !f.queueAs && !f.queued) return null;
   // Checked before the offer, which no answer could approve without a transcript.
-  if ((!writes || f.queued) && !f.queueAs && (mode === 'off' || consentOf(f.session) === 'code') && !typedFor(f.session)) {
+  if ((!writes || f.queued) && !f.queueAs && ((mode === 'off' && !vault) || consentOf(f.session) === 'code') && !typedFor(f.session)) {
     refuse("the taste vault has no transcript for this session, so it can't check the user agreed. Ask the user to write the rule in Obsidian.");
   }
   // A filter with no power to write: an offer the user didn't ask for raises no prompt.
@@ -316,15 +318,17 @@ function addEvidence(f, e, scope, rules, same, row, notes) {
   ].join('\n');
 }
 
+// Empty for a rule only always or tools bring up.
 const where = f => {
   const parts = [...(f.applies_to.length ? [`Applies to ${f.applies_to.join(', ')}`] : []), ...(f.keywords.length ? [`keywords: ${f.keywords.join(', ')}`] : [])].join(' · ');
-  return `${parts[0].toUpperCase()}${parts.slice(1)}`;
+  return `${parts.slice(0, 1).toUpperCase()}${parts.slice(1)}`;
 };
 
 const RELEASE_HEAD = 'Call `keep` for each offer below, then say in your final reply what was kept.';
 
-// Held offers are released together once the task is done. Where the mode writes at once they are written now; the rest
-// go to the user as offers. The mode is read now, since the user may have changed it since the rule was held.
+// Held offers are released together once the task is done. Rules a project session holds where the mode writes at once
+// are written now; the rest go to the user as offers. The mode is read now, since the user may have changed it since the
+// rule was held.
 function releaseHeld(sid, session, p) {
   if (p.release !== true) refuse('release must be true.');
   if (Object.keys(p).length > 1) refuse('release takes no other field. Hold each rule on its own, then release them together.');
@@ -333,7 +337,7 @@ function releaseHeld(sid, session, p) {
   const written = [];
   const offered = [];
   for (const o of held) {
-    if (proposalMode(o.key.split('/')[0]) !== 'corrections' && !inVaultFolder(session.cwd)) offered.push(o);
+    if (o.kind === 'page' || inVaultFolder(session.cwd) || proposalMode(o.key.split('/')[0]) !== 'corrections') offered.push(o);
     else if (claimOffer(o.id)) {
       try {
         written.push(proposeRule(sid, o.fields, { kept: { text: o.text, code: o.code, offer: o.id } }));
@@ -355,8 +359,176 @@ function fromQueue(p) {
   const { entry, decided } = entryOf(id);
   if (!entry) refuse(`there's no entry \`${id}\` in raw/queue/.`);
   if (decided) refuse(`\`${id}\` was already ${decided}.`);
-  if (!['rule', 'evidence'].includes(entry.kind)) refuse(`\`${id}\` is a ${entry.kind} entry, which propose doesn't take.`);
+  if (!['rule', 'evidence', 'page', 'reword'].includes(entry.kind)) refuse(`\`${id}\` is a ${entry.kind} entry, which propose doesn't take.`);
   return entry;
+}
+
+// One inbox row per rule written or changed. A queued entry's row names the session the words were typed in, so lint
+// finds them there or in this row.
+const inboxRow = ({ f, e, at, session, sid, kept, queued, rules, change }) => note => {
+  const from = queued ?? { ...session, session: sid };
+  return {
+    id: f.id, at, source: 'agent', kind: e.kind, text: e.said, ...(e.fix ? { fix: e.fix } : {}),
+    note, ...(change ? { change } : {}), session: from.session, agent: from.agent ?? null, transcript: from.transcript ?? null, cwd: from.cwd ?? null,
+    domain: rules[note]?.domain ?? f.domain, ...(e.pick ? { pick: e.pick } : {}), ...(e.page ? { page: e.page } : {}),
+    ...(kept?.consent ? { consent: kept.consent, ...(kept.approved ? { approved: kept.approved } : {}) } : {}),
+    ...(queued ? { queued: queued.id } : {}),
+  };
+};
+
+// Under queue.lock too for a queued entry, so a drop can't land between the check and the kept row. done closes the
+// entry once a reply says what was written.
+function locked(f, queued, session, fn) {
+  return withLock(statePath('propose.lock'), () => (queued ? queueLocked : g => g())(() => {
+    const decided = queued && entryOf(queued.id).decided;
+    if (decided) refuse(`\`${queued.id}\` was already ${decided}.`);
+    const done = reply => {
+      if (queued && typeof reply === 'string') closeEntry({ id: queued.id, decision: 'kept', offer: f.kept?.offer ?? null, sid: f.sid, agentName: session.agent });
+      return reply;
+    };
+    return fn(done);
+  }));
+}
+
+// What follows an offer: a subagent's goes to the review queue, the rest are stored for keep. Made once the propose lock
+// is released, so no propose holds two locks at once.
+function offered(f, session, offer, { fields, quote, queued, noun }) {
+  if (f.queueAs) {
+    const id = newId('u');
+    appendEntry(queueEntry({
+      id, kind: offer.kind, why: f.queueAs.why, unattended: f.queueAs.unattended, from: null, session: f.sid, entry: session,
+      domain: offer.key.split('/')[0], key: offer.key, fields, text: offerText(offer.lines, null), quote, checked: today(),
+    }), f.name);
+    return f.queueAs.reply(id);
+  }
+  if (consentOf(session) === 'prompt' && declined(f.sid, offerText(offer.lines, null))) refuse(`the user denied keeping this ${noun} at the prompt in this session. Don't offer it again unless they ask.`);
+  const extra = { quote, checked: queued?.checked ?? today() };
+  return makeOffer({ ...offer, sid: f.sid, entry: session, fields, hold: f.hold, extra }).reply;
+}
+
+const baseOf = (sid, session, p, { kept, queueAs, queued }) => {
+  const f = { sid, name: shortName(sid, session.agent), session, folder: session.cwd, asked: line(p, 'asked', false), kept, queueAs, queued: queued?.id ?? null };
+  f.hold = p.hold ?? false;
+  if (typeof f.hold !== 'boolean') refuse('hold must be true or false.');
+  return f;
+};
+
+function proposePage(sid, session, p, opts) {
+  const f = baseOf(sid, session, p, opts);
+  const { queued } = opts;
+  let change;
+  const out = locked(f, queued, session, done => {
+    change = pageChange(p, { sid, domains: [...session.domains, 'global'], vault: inVaultFolder(session.cwd), kept: f.kept, queued });
+    const offer = consent(f, change.domain, 'page', change.key, change.lines);
+    return offer ? { offer } : done(writePage(change, f.name));
+  });
+  if (out.offer) {
+    const fields = queued ? { queued: queued.id } : { page: change.rel, text: change.text, base: change.base };
+    return offered(f, session, out.offer, { fields, quote: null, queued, noun: 'page change' });
+  }
+  guarded('build', build);
+  return out;
+}
+
+const REWORD_FIELDS = new Set([
+  'change', 'key', 'do', 'not', 'because', 'applies_to', 'keywords',
+  'basis', 'quote', 'page', 'pick', 'reading', 'error', 'fix', 'file', 'source', 'source_date', 'hold', 'asked',
+]);
+
+// The lead line of name in the note's body, before its first ## section, or added below the others.
+function setLead(text, name, value) {
+  const eol = text.includes('\r\n') ? '\r\n' : '\n';
+  const lines = text.split(/\r?\n/);
+  const start = /^---\s*$/.test(lines[0]) ? lines.findIndex((l, i) => i > 0 && /^---\s*$/.test(l)) + 1 : 0;
+  const next = lines.findIndex((l, i) => i >= start && l.startsWith('## '));
+  const end = next < 0 ? lines.length : next;
+  const lead = new RegExp(`^[ \\t]*(?:\\*\\*)?${name}(?::\\*\\*|\\*\\*:|:)`);
+  const at = lines.findIndex((l, i) => i >= start && i < end && lead.test(l));
+  const written = `**${name}:**${value ? ` ${value}` : ''}`;
+  if (at >= 0) lines[at] = written;
+  else {
+    let last = end - 1;
+    while (last >= start && !lines[last].trim()) last--;
+    lines.splice(last + 1, 0, written);
+  }
+  return lines.join(eol);
+}
+
+// A reword replaces what it gives of the rule's Do, Not, Because, applies_to and keywords, and backs the change with
+// evidence as a new rule is backed. The note keeps its other lines, its Evidence among them.
+function reword(sid, session, p, opts) {
+  if (!Object.hasOwn(p, 'key')) refuse('change needs key, the rule it changes, like example-ui/flat-buttons.');
+  if (line(p, 'change') !== 'reword') refuse('change must be reword.');
+  const unknown = Object.keys(p).find(k => !REWORD_FIELDS.has(k));
+  if (unknown) refuse(`${unknown} isn't a field of a reword, which takes the new do, not, because, applies_to or keywords and the evidence for the change.`);
+  const f = baseOf(sid, session, p, opts);
+  const { kept, queued } = opts;
+  const key = line(p, 'key').normalize('NFC');
+  if (!KEY_RE.test(key)) refuse('key must be a rule key like example-ui/flat-buttons.');
+  const domains = [...session.domains, 'global'];
+  const notes = loadNotes();
+  const old = liveRules(notes)[key] && readNote(key, notes);
+  if (!old || !domains.includes(old.domain)) refuse(`key names ${key}, which isn't a delivered rule in ${joinList(domains, 'or')}.`);
+  Object.assign(f, { domain: old.domain, slug: old.slug, kind: old.kind, topic: old.topic });
+  f.basis = line(p, 'basis');
+  if (!BASES[f.kind].includes(f.basis)) refuse(`${wrongBasis(f.kind, f.basis)}.`);
+  const given = name => Object.hasOwn(p, name);
+  Object.assign(f, {
+    do: given('do') ? line(p, 'do') : old.do, not: given('not') ? line(p, 'not') : old.not, because: given('because') ? line(p, 'because', false) : old.because,
+    applies_to: given('applies_to') ? lines(p, 'applies_to') : old.applies_to, keywords: given('keywords') ? lines(p, 'keywords') : old.keywords,
+  });
+  const same = ['do', 'not', 'because'].every(k => f[k] === old[k]) && sameList(old.applies_to, f.applies_to) && sameList(old.keywords, f.keywords);
+  if (same) refuse(`the reword leaves ${key} as it is. Give the new do, not, because, applies_to or keywords.`);
+  if (!hasChannel({ ...old, applies_to: f.applies_to, keywords: f.keywords })) refuse('give it keywords or applies_to, or nothing will deliver it.');
+  const e = evidence(f, p);
+  if (queued && !e.pick) Object.assign(e, { day: queued.checked, session: sessionName(queued.session, queued.agent) });
+  checkQuote(queued ? { agent: queued.agent, transcript: queued.transcript } : session, e, queued);
+  const at = new Date().toISOString();
+  Object.assign(f, { day: today(), id: newId('a') });
+  const file = vaultPath(...old.rel.split('/'));
+
+  const out = locked(f, queued, session, done => {
+    const before = fs.readFileSync(file, 'utf8');
+    const was = parseNote(before, old.rel);
+    let after = before;
+    for (const [k, name] of [['do', 'Do'], ['not', 'Not'], ['because', 'Because']]) if (f[k] !== was[k]) after = setLead(after, name, f[k]);
+    for (const k of ['applies_to', 'keywords']) if (!sameList(was[k], f[k])) after = setList(after, k, f[k]);
+    after = setField(after, 'updated', f.day);
+    // As for new evidence, as_of moves up to the day the change was checked.
+    const checked = e.date ?? e.day ?? f.day;
+    if (was.kind === 'knowledge' && validDay(was.as_of) && checked > was.as_of) after = setField(after, 'as_of', checked);
+    after = withEvidence(after, evidenceLine(f, e));
+    const n = parseNote(after, old.rel);
+    const bad = ['do', 'not', 'because'].find(k => n[k] !== f[k]) ?? ['applies_to', 'keywords'].find(k => !sameList(n[k], f[k]));
+    if (bad) refuse(`${bad} doesn't survive as the note's text. Rephrase it.`);
+    const [err] = noteErrors(n);
+    if (err) refuse(`${err}.`);
+    const cap = maxChars(n.kind);
+    if (ruleText(n).length > cap) refuse(`${ruleTextParts(n)} come to ${ruleText(n).length} characters; keep them under ${cap} together.`);
+    const earlier = e.pick && proposalRows().find(r => r.pick === e.pick);
+    if (earlier) refuse(`${e.pick} was already proposed as ${earlier.note}.`);
+    const scope = where(was) === where(f) ? [] : [`Was: ${where(was) || 'no keywords or applies_to'}`, `Now: ${where(f) || 'no keywords or applies_to'}`];
+    const offer = consent(f, f.domain, 'reword', key, [
+      `**Change this rule?** ${key}`, `Was: ${ruleText(was)}`, `Now: ${ruleText(n)}`, ...scope, `Its note would get this Evidence: ${e.cite}.`,
+    ]);
+    if (offer) return { offer };
+    writeSettled(file, after);
+    appendJsonl(inboxFile(f.name), [inboxRow({ f, e, at, session, sid, kept, queued, rules: {}, change: 'reword' })(key)]);
+    appendLog([`reworded ${key} · session ${f.name}`]);
+    return done([
+      `Changed ${old.rel}. End your reply with these two lines as they are:`,
+      '',
+      `**Rule changed** ${key}: ${ruleText(n)}`,
+      `To change or remove it, edit ${toPosix(file)}.`,
+    ].join('\n'));
+  });
+  if (out.offer) {
+    const { asked, hold, ...rest } = p;
+    const quote = !e.page && !e.pick && ['stated', 'correction'].includes(e.kind) ? e.said : null;
+    return offered(f, session, out.offer, { fields: queued ? { queued: queued.id } : rest, quote, queued, noun: 'rule change' });
+  }
+  guarded('build', build);
+  return out;
 }
 
 // The input is read after the session is checked, so a script run from the wrong place says that first: p is the input,
@@ -371,15 +543,19 @@ export function proposeRule(sid, p, { kept = null, queueAs = null } = {}) {
   for (const k of ['release', 'queued']) if (queueAs && p && Object.hasOwn(p, k)) refuse(`a subagent's rules wait in the review queue for the user, so ${k} is for the main session.`);
   if (p && Object.hasOwn(p, 'release')) return releaseHeld(sid, session, p);
   const queued = p && Object.hasOwn(p, 'queued') ? fromQueue(p) : null;
-  if (queued) p = { ...queued.fields, ...(Object.hasOwn(p, 'asked') ? { asked: p.asked } : {}) };
+  // A queued page change is checked against the base its entry holds, which pageChange reads from the entry itself.
+  if (queued) {
+    const { base, ...fields } = queued.fields;
+    p = { ...fields, ...(Object.hasOwn(p, 'asked') ? { asked: p.asked } : {}) };
+  }
+  const opts = { kept, queueAs, queued };
+  if (Object.hasOwn(p, 'text')) return proposePage(sid, session, p, opts);
+  if (Object.hasOwn(p, 'change')) return reword(sid, session, p, opts);
   const unknown = Object.keys(p).find(k => !FIELDS.has(k));
   if (unknown) refuse(`${unknown} isn't a field propose.mjs takes. Fields like requires and tools are added to the note by hand. The \`propose\` tool's schema lists the fields.`);
   const domains = [...session.domains, 'global'];
   // Slugs compare in NFC, so a slug typed with combining accents names the same note as its composed spelling.
-  const f = { sid, name: shortName(sid, session.agent), domain: line(p, 'domain').normalize('NFC'), slug: line(p, 'slug').normalize('NFC') };
-  Object.assign(f, { session, folder: session.cwd, asked: line(p, 'asked', false), kept, queueAs, queued: queued?.id ?? null });
-  f.hold = p.hold ?? false;
-  if (typeof f.hold !== 'boolean') refuse('hold must be true or false.');
+  const f = { ...baseOf(sid, session, p, opts), domain: line(p, 'domain').normalize('NFC'), slug: line(p, 'slug').normalize('NFC') };
   // A vault-only domain isn't offered, and the note's own check says why it takes no rule.
   if (!domains.includes(f.domain) && !isVaultOnly(f.domain)) {
     refuse(`domain must be ${joinList(domains, 'or')}. For a rule that holds only in projects of a kind no domain covers, suggest a new domain to the user, and once they agree start it with the vault's \`domain\` tool.`);
@@ -417,10 +593,7 @@ export function proposeRule(sid, p, { kept = null, queueAs = null } = {}) {
   const cap = maxChars(n.kind);
   if (ruleText(n).length > cap) refuse(`${ruleTextParts(n)} come to ${ruleText(n).length} characters; keep them under ${cap} together.`);
 
-  // Under queue.lock too for a queued entry, so a drop can't land between the check and the kept row.
-  const out = withLock(statePath('propose.lock'), () => (queued ? queueLocked : fn => fn())(() => {
-    const decided = queued && entryOf(queued.id).decided;
-    if (decided) refuse(`\`${queued.id}\` was already ${decided}.`);
+  const out = locked(f, queued, session, done => {
     const rows = proposalRows();
     // Any later session can re-propose a recorded answer, so each one backs a single rule.
     const earlier = e.pick && rows.find(r => r.pick === e.pick);
@@ -431,18 +604,7 @@ export function proposeRule(sid, p, { kept = null, queueAs = null } = {}) {
     // Read under the lock, so a proposal written meanwhile is on the list.
     const notes = loadNotes();
     const rules = liveRules(notes);
-    // A queued entry's row names the session the words were typed in, so lint finds them there or in this row.
-    const from = queued ?? { ...session, session: sid };
-    const row = note => ({
-      id: f.id, at, source: 'agent', kind: e.kind, text: e.said, ...(e.fix ? { fix: e.fix } : {}),
-      note, session: from.session, agent: from.agent ?? null, transcript: from.transcript ?? null, cwd: from.cwd ?? null, domain: rules[note]?.domain ?? f.domain, ...(e.pick ? { pick: e.pick } : {}), ...(e.page ? { page: e.page } : {}),
-      ...(kept?.consent ? { consent: kept.consent, ...(kept.approved ? { approved: kept.approved } : {}) } : {}),
-      ...(queued ? { queued: queued.id } : {}),
-    });
-    const done = reply => {
-      if (queued && typeof reply === 'string') closeEntry({ id: queued.id, decision: 'kept', offer: kept?.offer ?? null, sid, agentName: session.agent });
-      return reply;
-    };
+    const row = inboxRow({ f, e, at, session, sid, kept, queued, rules });
     if (f.repeats) return done(addEvidence(f, e, scope, rules, same, row, notes));
     const taken = readNote(key, notes);
     if (taken) refuse(`${taken.rel} already exists. Pick another slug, or leave that note to the user.`);
@@ -459,24 +621,12 @@ export function proposeRule(sid, p, { kept = null, queueAs = null } = {}) {
       `It applies from now on. To change or remove it, edit or delete ${toPosix(file)}.`,
     ];
     return done([`Wrote ${rel}. ${sameFiles(f, n, notes, rules)}End your reply with these ${['two', 'three'][reply.length - 2]} lines as they are:`, '', ...reply].join('\n'));
-  }));
+  });
   if (out.offer) {
     const { asked, hold, ...given } = p;
-    const fields = queued ? { queued: queued.id } : given;
     // The words a quote check passed against the transcript, kept for when it is gone.
     const quote = !e.page && !e.pick && ['stated', 'correction'].includes(e.kind) ? e.said : null;
-    if (queueAs) {
-      const id = newId('u');
-      appendEntry(queueEntry({
-        id, kind: out.offer.kind, why: queueAs.why, unattended: queueAs.unattended, from: null, session: sid, entry: session,
-        domain: out.offer.key.split('/')[0], key: out.offer.key, fields, text: offerText(out.offer.lines, null), quote, checked: today(),
-      }), f.name);
-      return queueAs.reply(id);
-    }
-    // Made once the propose lock is released, so no propose holds two locks at once.
-    if (consentOf(session) === 'prompt' && declined(sid, offerText(out.offer.lines, null))) refuse("the user denied keeping this rule at the prompt in this session. Don't offer it again unless they ask.");
-    const extra = { quote, checked: queued?.checked ?? today() };
-    return makeOffer({ ...out.offer, sid, entry: session, fields, hold: f.hold, extra }).reply;
+    return offered(f, session, out.offer, { fields: queued ? { queued: queued.id } : given, quote, queued, noun: 'rule' });
   }
   // The rebuild takes seconds at thousands of notes, so it runs after the lock is released rather than hold up the other
   // proposes. The note is written by now, so a failed build costs the generated files, not the reply that names the rule.

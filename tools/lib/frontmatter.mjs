@@ -368,6 +368,26 @@ function valueEnd(rest) {
 // comment, which is the user's note. The old value goes whole, quotes too. The new one is written plain when it reads
 // back as itself and was plain before, single-quoted otherwise. Text without frontmatter, without the key, or whose
 // key holds a nested block comes back as it was.
+// A top-level list's lines are the key's line and the indented or `-` lines below it. A key that isn't there is added
+// before the closing line.
+export function setList(text, key, items) {
+  const lines = text.split('\n');
+  const end = closing(lines);
+  if (end < 1) return text;
+  const eol = lines[0].endsWith('\r') ? '\r' : '';
+  const bare = l => l.replace(/\r$/, '');
+  const written = (items.length ? [`${key}:`, ...items.map(x => `  - ${yamlQuote(x)}`)] : [`${key}: []`]).map(l => `${l}${eol}`);
+  const at = lines.findIndex((l, i) => i > 0 && i < end && bare(l).match(KV)?.[1] === key);
+  if (at < 0) {
+    lines.splice(end, 0, ...written);
+    return lines.join('\n');
+  }
+  let stop = at + 1;
+  while (stop < end && /^(?:[ \t]|-)/.test(bare(lines[stop]))) stop++;
+  lines.splice(at, stop - at, ...written);
+  return lines.join('\n');
+}
+
 export function setField(text, key, val) {
   const lines = text.split('\n');
   const end = closing(lines);

@@ -62,7 +62,7 @@ test('edits inside the vault wiki/ and raw/ are not gated by rules', t => {
   const v = makeVault(t);
   v.write('wiki/glim/ui-rule.md', ruleNote({ applies_to: ['**'] }));
   const sid = sessionId();
-  assert.equal(edit(v, sid, '', { abs: v.at('wiki', 'glim', 'other.md') }), null);
+  assert.equal(edit(v, sid, '', { abs: v.at('wiki', 'glim', 'other.md'), cwd: v.root }), null);
   assert.equal(edit(v, sid, '', { abs: v.at('raw', 'refs', 'new.md') }), null);
   assert.ok(denied(edit(v, sid, 'src/a.zq')), 'project files still are');
 });
@@ -85,7 +85,7 @@ test('the vault guard refuses edits to generated files, .state and existing raw 
   assert.match(guard('raw/inbox/2026-10-01.jsonl'), /already exists/);
   assert.match(guard('raw/inbox/new.jsonl'), /^raw\/ is append-only\. New files go under raw\/refs\//);
   assert.equal(guard('raw/refs/new.md'), null);
-  assert.equal(guard('wiki/glim/note.md'), null);
+  assert.equal(denied(edit(v, sid, '', { abs: v.at('wiki', 'glim', 'note.md'), cwd: v.root })), null);
   assert.equal(guard('AGENTS.md'), null);
 });
 

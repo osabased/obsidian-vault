@@ -41,7 +41,7 @@ test('a start no domain reaches counts the global rules, and domains with their 
   config.domains.glim.proposals = 'off';
   v.write('vault.config.json', JSON.stringify(config));
   assert.match(v.startSession(sessionId()).systemMessage, /proposals: global corrections, glim off$/);
-  assert.equal(v.startSession(sessionId(), { cwd: v.root }).systemMessage, 'vault: vault folder · 1 global rule · 1 page (every domain) · proposals: corrections', "glim's rules don't reach the vault folder, its pages do");
+  assert.equal(v.startSession(sessionId(), { cwd: v.root }).systemMessage, 'vault: vault folder · 1 global rule · 1 page (every domain) · proposals: ask', "glim's rules don't reach the vault folder, its pages do");
 });
 
 test("an everywhere domain's keyword rules count where they reach, and its always rules don't", t => {
@@ -67,8 +67,8 @@ test('the proposals mode is the one propose.mjs keeps to, by the folder the sess
   assert.match(first(v.run('status.mjs', [project])), /proposals: global corrections, glim ask$/);
   const vault = sessionId();
   v.startSession(vault, { cwd: v.root });
-  assert.match(v.startSession(vault, { source: 'resume' }).systemMessage, /^vault: glim · .* · proposals: corrections$/);
-  assert.match(first(v.run('status.mjs', [vault])), /proposals: corrections$/);
+  assert.match(v.startSession(vault, { source: 'resume' }).systemMessage, /^vault: glim · .* · proposals: ask$/);
+  assert.match(first(v.run('status.mjs', [vault])), /proposals: ask$/);
 });
 
 test("a tools rule counts when the session's agent sends its edit hook a tool it names, other than a file tool", t => {

@@ -114,11 +114,16 @@ test('in ask, adding evidence to a rule through repeats is offered too', t => {
   assert.equal(v.read('wiki/glim/rules/name-widgets.md'), before);
 });
 
-test('a session in the vault folder proposes as it always has, whatever the mode', t => {
-  const v = vaultIn(t, 'off');
-  const { sid } = started(v, ['call them by their screen'], { cwd: v.root });
-  const r = v.propose(sid, rule());
-  assert.equal(r.code, 0, r.stderr);
+test('a session in the vault folder is offered each rule, under corrections and under off without asked', t => {
+  for (const mode of ['corrections', 'off']) {
+    const v = vaultIn(t, mode);
+    const { sid } = started(v, ['call them by their screen'], { cwd: v.root });
+    const o = offered(v.propose(sid, rule()));
+    assert.ok(!v.exists('wiki/glim/rules/tidy-names.md'), mode);
+    const k = keepAllowed(v, sid, o.id, o.text);
+    assert.equal(k.code, 0, k.stderr);
+    assert.ok(v.exists('wiki/glim/rules/tidy-names.md'), mode);
+  }
 });
 
 test('a session no domain reaches hears the mode for global', t => {
@@ -199,12 +204,23 @@ test('in ask, a session whose consent is a code and has no transcript is refused
   assert.doesNotMatch(r.stderr, /Keep this rule/);
 });
 
-test('a session in the vault folder that a domain reaches hears that it proposes as in corrections', t => {
-  const v = vaultIn(t, 'ask');
+test('a session in the vault folder that a domain reaches hears that it offers rules, and its status says ask', t => {
+  const v = vaultIn(t, 'corrections');
   v.write('vault.local.json', JSON.stringify({ domains: { glim: { paths: [v.root] } } }));
   const { out } = started(v, ['hi'], { cwd: v.root });
-  assert.match(context(out), /propose a rule when the user corrects you/);
-  assert.doesNotMatch(context(out), /offer a rule/);
+  assert.match(context(out), /offer a rule through the vault's `propose` tool/);
+  assert.doesNotMatch(context(out), /propose a rule when the user corrects you/);
+  assert.match(out?.systemMessage ?? '', /proposals: ask/);
+});
+
+test('a domain session hears to hold page changes, and a session in the vault folder, which writes pages directly, does not', t => {
+  const v = vaultIn(t, 'ask');
+  const held = /Hold a page change the same way/;
+  assert.match(context(started(v, ['hi']).out), held);
+  v.write('vault.local.json', JSON.stringify({ domains: { glim: { paths: [v.root] } } }));
+  const inVault = context(started(v, ['hi'], { cwd: v.root }).out);
+  assert.match(inVault, /hold a knowledge rule/);
+  assert.doesNotMatch(inVault, held);
 });
 
 test('lint reports a bad proposals value even when vault.local.json is broken', t => {

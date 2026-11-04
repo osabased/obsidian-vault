@@ -98,6 +98,8 @@ What the source shows, by topic, in the agent's words.
 - `always`, `tools` and `requires`: optional, as a rule's. Nothing delivers `always` or `tools` on a page yet.
 - `source`: source pages, a URL, a file under `raw/` that exists, or a bundle's folder, written without a trailing slash. Lint warns on a source page with none.
 - `source_date`: optional, when the source was published or last updated, as YYYY-MM-DD. Only source pages take `source` and `source_date`; lint warns on another page with either.
+- `package`: an entity page about a library names it as OSV does, the shape `requires` uses: `package: { ecosystem: npm, name: <name> }`. Lint warns on one in another shape, and on two pages with one package, since each library has one entity page.
+- An entity page may have `## Gotchas` and `## Docs read`, so what it says traces to what happened. A `## Gotchas` line takes a `failure` Evidence line's form, `` - <date> · session <short name> · `<file>` · error: "<as printed>" · fixed by: <the fix> ``, and may end with a link to the rule it backs. A `## Docs read` line is `- <URL or raw/refs/ file> · fetched <date>`. Lint warns on a line of either in another form. What is neither goes under `## Agent's reading`.
 - `updated`: the day the page last changed. Set it whenever you change a page. Lint warns on a page other than a source page when a rule it links under `## Rules` or a source page it cites changed after it, and on a topic page when any source page on its topic did, going by `updated` or, since Obsidian doesn't change `updated`, the day the file was last saved.
 - A source page has `## You said`, `## Agent's reading` and `## Rules`, and a topic page `## Rules`, even when one is empty. Lint warns on a missing one.
 - `## You said`: source pages, the user's exact words about the source, one line each with the date and the session's short name. Empty when they said nothing. Lint warns on a line in another form, and on a line whose quote isn't in what the user typed in that session. A line whose session is no longer registered, or whose transcript is gone, can't be checked, and lint counts it in its tally of such quotes (see Evidence in `AGENTS.md`).
@@ -118,7 +120,7 @@ What the source shows, by topic, in the agent's words.
 - **Derived text**, `derived/<sha256>.md`, is the text of a binary source: frontmatter giving its `kind` (`pdf`, `video`, `audio` or `image`), `extractor`, `extractor_version` and `source`, the binary's path under `raw/`, then the text with anchors such as `[p. 3]` and `[t=00:12:31]`. `node tools/extract.mjs <file>` writes it, and replaces it when the extractor or its version has changed (`--force` extracts again); it is never edited by hand. Lint warns when a listed extractor's version has moved on from the one that made the text, naming the command to run. Quotes from a binary are checked against its derived text, without the anchor lines, so a quote may run across a page break.
 
 - Log each operation once, from the vault folder, or from anywhere with the paths in full. Each adds one line to `log.md` and rebuilds `index.md`:
-  - a page written or changed on its own: the vault's `log` tool with `pages` that page
+  - a page written or changed on its own: the vault's `log` tool with `pages` that page, except a page `keep` wrote, which `keep` logged
   - an ingest: `log` with `ingest` the source and `pages`, and `batch` true when the source is one of a batch
   - an answer filed back: `log` with `query` the question and `pages`
 - Lint warns, outside code and the user's quoted words, on a link that no note or other markdown file in the vault answers, on a bare `[[slug]]` more than one note has, and on a link by a note's key or through a folder it isn't in, giving the path to write. It reads a markdown link that starts with `./` or `../` from the note's folder, and any other link from the vault root. It also warns on two topic pages on one topic in a domain, and on a page other than a topic page that no other note links, with a `[[link]]` or a markdown link to its `.md` file.
@@ -155,7 +157,8 @@ Each note the `propose` and `keep` tools write, and each Evidence line they add 
 ```
 
 - `text`: the exact words that back the rule (and `fix` for a failure, `pick` for a recorded answer, `page` for a user's page). Lint checks a quote in a note whose transcript is gone against this.
-- `consent`: how the user agreed to the rule. `prompt` means they allowed the `keep` call at the agent's permission prompt. `code` means they typed the offer's code, and `approved` holds that message as they typed it. A row from a session in the vault folder or in `corrections` mode has neither, and nor has one from before the vault recorded consent, which may hold `approved` words alone.
+- `consent`: how the user agreed to the rule. `prompt` means they allowed the `keep` call at the agent's permission prompt. `code` means they typed the offer's code, and `approved` holds that message as they typed it. A row written in `corrections` mode has neither, and nor has one from before the vault recorded consent or from a vault-folder session that wrote at once, which may hold `approved` words alone.
+- `change`: `reword` on the row of a kept reword, whose `note` is the rule it changed.
 - Lint warns on a `consent` other than `prompt` or `code`, and on `code` with no `approved`.
 - `queued`: the review queue entry the rule was proposed again from (see Queue rows). Its `session`, `agent`, `transcript` and `cwd` are that entry's, the session the words were typed in.
 

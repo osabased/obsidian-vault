@@ -1,7 +1,7 @@
 import fs from 'node:fs';
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { makeVault, sessionId, userTurn, assistantTurn, ruleNote, recordedCall, keepAllowed, offerOf } from './fixture.mjs';
+import { makeVault, sessionId, userTurn, assistantTurn, ruleNote, pageNote, recordedCall, keepAllowed, offerOf, lintFound } from './fixture.mjs';
 import { codexInput, codexRollout } from './codex.mjs';
 
 // Outside the vault folder in ask and off, propose.mjs, domain.mjs and proposals.mjs only offer, and keep.mjs writes the
@@ -360,4 +360,228 @@ test('Codex: every code is four characters with at least one digit', async t => 
     assert.match(code, /^[A-HJKMNP-Z2-9]{4}$/);
     assert.match(code, /[2-9]/);
   }
+});
+
+const ENTITY_REL = 'wiki/glim/entities/zq-lib.md';
+const entityPage = (reading = 'Zq-lib parses screens.') => pageNote({ kind: 'entity', topic: 'code', summary: "'The zq-lib parser.'", body: ["## Agent's reading", reading] });
+
+test('propose with page and text offers a page change, and keep writes the page and its log line', t => {
+  const v = makeVault(t, { config: { proposals: 'ask' } });
+  const sid = started(v);
+  const o = offered(v.propose(sid, { page: ENTITY_REL, text: entityPage() }));
+  assert.match(o.text, /^\*\*Keep this page change\?\*\* wiki\/glim\/entities\/zq-lib\.md · new\n/);
+  assert.match(o.text, /Zq-lib parses screens\./);
+  assert.ok(!v.exists(ENTITY_REL));
+  const k = keepAllowed(v, sid, o.id, o.text);
+  assert.equal(k.code, 0, k.stderr);
+  assert.equal(v.read(ENTITY_REL).replace(/\r\n/g, '\n'), entityPage());
+  assert.match(v.read('log.md'), /wrote page glim\/zq-lib · session /);
+  assert.match(v.read('index.md'), /\[\[wiki\/glim\/entities\/zq-lib\|zq-lib\]\]/);
+});
+
+test('a page change offers a diff, and keep refuses once the page changed since the offer', t => {
+  const v = makeVault(t, { config: { proposals: 'ask' } });
+  v.write(ENTITY_REL, entityPage());
+  const sid = started(v);
+  const o = offered(v.propose(sid, { page: ENTITY_REL, text: entityPage('Zq-lib parses screens and themes.') }));
+  assert.match(o.text, /^\*\*Keep this page change\?\*\* wiki\/glim\/entities\/zq-lib\.md · change\n/);
+  assert.match(o.text, /^-Zq-lib parses screens\.$/m);
+  assert.match(o.text, /^\+Zq-lib parses screens and themes\.$/m);
+  v.write(ENTITY_REL, entityPage('The user rewrote this.'));
+  const k = keepAllowed(v, sid, o.id, o.text);
+  assert.equal(k.code, 1);
+  assert.match(k.stderr, /^Not kept: wiki\/glim\/entities\/zq-lib\.md changed since the offer/);
+  assert.match(v.read(ENTITY_REL), /The user rewrote this\./);
+});
+
+test('a page change keeps the line endings of the page it changes', t => {
+  const v = makeVault(t, { config: { proposals: 'ask' } });
+  v.write(ENTITY_REL, entityPage().replace(/\n/g, '\r\n'));
+  const sid = started(v);
+  const o = offered(v.propose(sid, { page: ENTITY_REL, text: entityPage('Zq-lib parses screens and themes.') }));
+  assert.doesNotMatch(o.text, /\r/);
+  assert.equal(keepAllowed(v, sid, o.id, o.text).code, 0);
+  assert.equal(v.read(ENTITY_REL), entityPage('Zq-lib parses screens and themes.').replace(/\n/g, '\r\n'));
+});
+
+test('a page change keeps the byte order mark of the page it changes', t => {
+  const v = makeVault(t, { config: { proposals: 'ask' } });
+  v.write(ENTITY_REL, `\uFEFF${entityPage()}`);
+  const sid = started(v);
+  const o = offered(v.propose(sid, { page: ENTITY_REL, text: entityPage('Zq-lib parses screens and themes.') }));
+  assert.equal(keepAllowed(v, sid, o.id, o.text).code, 0);
+  assert.equal(v.read(ENTITY_REL), `\uFEFF${entityPage('Zq-lib parses screens and themes.')}`);
+});
+
+const WHERE = 'Not proposed: page must be a page under wiki/, like wiki/<domain>/<folder>/<slug>.md.\n';
+
+test('a page path with a backslash or a . or .. segment is refused, so nothing is written outside wiki/<domain>/', t => {
+  const v = makeVault(t, { config: { proposals: 'ask' } });
+  const sid = started(v);
+  for (const page of ['wiki/glim/..\\..\\tools/evil.md', 'wiki/glim/entities\\..\\..\\..\\evil.md', 'wiki/glim/../glim/evil.md', 'wiki/glim/./evil.md']) {
+    const r = v.propose(sid, { page, text: entityPage() });
+    assert.equal(r.code, 1, `${page}: ${r.stdout}`);
+    assert.equal(r.stderr, WHERE, page);
+  }
+  assert.ok(!v.exists('tools/evil.md'));
+  assert.ok(!fs.existsSync(v.at('..', 'evil.md')));
+});
+
+test("a page change is refused when another note already has the page's key", t => {
+  const v = makeVault(t, { config: { proposals: 'ask' } });
+  v.write('wiki/glim/rules/zq-lib.md', ruleNote({ keywords: ['zq'] }));
+  const sid = started(v);
+  const r = v.propose(sid, { page: ENTITY_REL, text: entityPage() });
+  assert.equal(r.code, 1, r.stdout);
+  assert.equal(r.stderr, 'Not proposed: wiki/glim/rules/zq-lib.md already exists. Pick another slug, or leave that note to the user.\n');
+  assert.ok(!v.exists(ENTITY_REL));
+});
+
+test('a page change is refused when a line it adds ends in white space, which the offer would not show', t => {
+  const v = makeVault(t, { config: { proposals: 'ask' } });
+  const sid = started(v);
+  const fresh = v.propose(sid, { page: ENTITY_REL, text: entityPage('Zq-lib parses screens.  ') });
+  assert.equal(fresh.code, 1, fresh.stdout);
+  assert.equal(fresh.stderr, "Not proposed: line 12 of text ends in white space, which the offer can't show. Take it off, then propose again.\n");
+  v.write(ENTITY_REL, entityPage('Zq-lib parses screens.  ').replace('created:', 'author: user\ncreated:'));
+  const notes = entityPage('Zq-lib parses screens.  ').replace('created:', 'author: user\ncreated:').replace(/\n$/, '\n\n## Agent notes\n\nIt parses themes too.\n');
+  const o = offered(v.propose(sid, { page: ENTITY_REL, text: notes }));
+  assert.equal(keepAllowed(v, sid, o.id, o.text).code, 0);
+  assert.equal(v.read(ENTITY_REL), notes, "the user's own trailing white space stays as it was");
+});
+
+test('a changed page whose diff must pass pages.maxOfferChars is refused before the diff is built', t => {
+  const v = makeVault(t, { config: { proposals: 'ask', pages: { maxOfferChars: 600 } } });
+  v.write(ENTITY_REL, entityPage());
+  const sid = started(v);
+  const r = v.propose(sid, { page: ENTITY_REL, text: entityPage(Array.from({ length: 40 }, (_, i) => `Reading line ${i}.`).join('\n')) });
+  assert.equal(r.code, 1, r.stdout);
+  assert.match(r.stderr, /^Not proposed: the offer for wiki\/glim\/entities\/zq-lib\.md comes to at least \d+ characters, over pages\.maxOfferChars \(600\)\. Split the change/);
+});
+
+test('a page change is refused when it would be a rule, has a note error, or its lines pass pages.maxOfferChars', t => {
+  const v = makeVault(t, { config: { proposals: 'ask', pages: { maxOfferChars: 600 } } });
+  const sid = started(v);
+  assert.match(v.propose(sid, { page: ENTITY_REL, text: ruleNote() }).stderr, /^Not proposed: .*rule/);
+  assert.match(v.propose(sid, { page: 'notes/x.md', text: entityPage() }).stderr, /^Not proposed: page must be a page under wiki\//);
+  const long = v.propose(sid, { page: ENTITY_REL, text: entityPage('A long reading. '.repeat(60)) });
+  assert.equal(long.code, 1);
+  assert.match(long.stderr, /pages\.maxOfferChars/);
+  assert.ok(!v.exists(ENTITY_REL));
+});
+
+test('a page change is refused for the links lint reports: one by key, a slug two notes share, and one to no note', t => {
+  const v = makeVault(t, { config: { proposals: 'ask' } });
+  v.write('wiki/glim/rules/the-thing.md', ruleNote({ keywords: ['thing'] }));
+  v.write('wiki/glim/rules/twin.md', ruleNote({ keywords: ['twin'] }));
+  v.write('wiki/global/rules/twin.md', ruleNote({ domain: 'global', keywords: ['twin'] }));
+  const sid = started(v);
+  const refused = link => v.propose(sid, { page: ENTITY_REL, text: entityPage(`Zq-lib parses screens, as ${link} says.`) });
+  const byKey = refused('[[glim/the-thing]]');
+  assert.equal(byKey.code, 1, byKey.stdout);
+  assert.equal(byKey.stderr, 'Not proposed: wiki/glim/entities/zq-lib.md links [[glim/the-thing]], a note at wiki/glim/rules/the-thing.md. Link it by that path, as [[wiki/glim/rules/the-thing|the-thing]].\n');
+  assert.equal(refused('[[twin]]').stderr, 'Not proposed: wiki/glim/entities/zq-lib.md links [[twin]], which names more than one note. Write its path from the vault root: [[wiki/glim/rules/twin]] or [[wiki/global/rules/twin]].\n');
+  assert.equal(refused('[[wiki/glim/rules/no-such-rule|no-such-rule]]').stderr, 'Not proposed: wiki/glim/entities/zq-lib.md links [[wiki/glim/rules/no-such-rule]], which has no note.\n');
+  assert.ok(!v.exists(ENTITY_REL));
+  offered(refused('[[wiki/glim/rules/the-thing|the-thing]]'));
+});
+
+test("a page change may link a note this session holds an offer for, and isn't refused for a link the page already had", t => {
+  const v = makeVault(t, { config: { proposals: 'ask' } });
+  v.write(ENTITY_REL, entityPage('Zq-lib parses screens, as [[glim/old-rule]] said.'));
+  const sid = started(v);
+  assert.match(v.propose(sid, { ...rule(), hold: true }).stdout, /^Held `o-[0-9a-f]{8}`/);
+  const rules = '## Rules\n- [[wiki/glim/rules/tidy-names|tidy-names]]';
+  const text = entityPage(`Zq-lib parses screens, as [[glim/old-rule]] said.\n\n${rules}`);
+  assert.match(v.propose(sid, { page: ENTITY_REL, text, hold: true }).stdout, /^Held `o-[0-9a-f]{8}`/);
+  const out = v.propose(sid, { release: true });
+  assert.equal(out.code, 0, out.stderr);
+  const [, page] = out.stdout.split(/\n\n(?=Offered)/).map(offerOf).filter(Boolean);
+  const other = started(v);
+  const elsewhere = v.propose(other, { page: 'wiki/glim/entities/zq-kit.md', text: entityPage(`Zq-kit wraps zq-lib.\n\n${rules}`) });
+  assert.equal(elsewhere.stderr, 'Not proposed: wiki/glim/entities/zq-kit.md links [[wiki/glim/rules/tidy-names]], which has no note.\n', "another session's offer isn't this one's");
+  const k = keepAllowed(v, sid, page.id, page.text);
+  assert.equal(k.code, 0, k.stderr);
+  assert.equal(v.read(ENTITY_REL), text);
+});
+
+test("a link already in a user's page doesn't stop an Agent notes line, but one the line adds is refused", t => {
+  const v = makeVault(t, { config: { proposals: 'ask' } });
+  const page = entityPage('Zq-lib parses screens, as [[glim/old-rule]] said.').replace('created:', 'author: user\ncreated:');
+  v.write(ENTITY_REL, page);
+  const sid = started(v);
+  const notes = line => page.replace(/\n$/, `\n\n## Agent notes\n\n${line}\n`);
+  offered(v.propose(sid, { page: ENTITY_REL, text: notes('It parses themes too.') }));
+  assert.equal(v.propose(sid, { page: ENTITY_REL, text: notes('See [[glim/gone]].') }).stderr, 'Not proposed: wiki/glim/entities/zq-lib.md links [[glim/gone]], which has no note.\n');
+});
+
+test('a page change is an offer under corrections and held until release', t => {
+  const v = makeVault(t);
+  const sid = started(v);
+  const held = v.propose(sid, { page: ENTITY_REL, text: entityPage(), hold: true });
+  assert.match(held.stdout, /^Held `o-[0-9a-f]{8}`/);
+  const out = v.propose(sid, { release: true });
+  assert.equal(out.code, 0, out.stderr);
+  const o = offerOf(out.stdout.slice(out.stdout.indexOf('Offered')));
+  assert.ok(o, out.stdout);
+  assert.ok(!v.exists(ENTITY_REL));
+});
+
+const OLD_RULE = 'wiki/glim/rules/the-thing.md';
+const reword = (o = {}) => ({ change: 'reword', key: 'glim/the-thing', do: 'Do the thing twice.', basis: 'stated', quote: 'call them by their screen', ...o });
+
+test('a reword offer shows the old and new text, and once kept changes the Do line and adds an Evidence line', async t => {
+  const v = makeVault(t, { config: { proposals: 'ask' } });
+  v.write(OLD_RULE, ruleNote({ keywords: ['thing'] }));
+  const sid = started(v);
+  const o = offered(v.propose(sid, reword()));
+  assert.match(o.text, /^\*\*Change this rule\?\*\* glim\/the-thing\n/);
+  assert.match(o.text, /Do the thing\./);
+  assert.match(o.text, /Do the thing twice\./);
+  assert.match(v.read(OLD_RULE), /\*\*Do:\*\* Do the thing\.\r?\n/);
+  const k = keepAllowed(v, sid, o.id, o.text);
+  assert.equal(k.code, 0, k.stderr);
+  const after = v.read(OLD_RULE);
+  assert.match(after, /\*\*Do:\*\* Do the thing twice\.\r?\n/);
+  assert.match(after, /\*\*Not:\*\* Skip the thing\.\r?\n/);
+  assert.match(after, /"do the thing" \(a-00000001\)/);
+  assert.match(after, /· stated · session [0-9a-f]{8} · "call them by their screen" \(a-[0-9a-f]{8}\)/);
+  const [, id] = after.match(/"call them by their screen" \((a-[0-9a-f]{8})\)/);
+  const [row] = inboxRows(v);
+  assert.deepEqual([row.id, row.note, row.change, row.consent], [id, 'glim/the-thing', 'reword', 'prompt'], "the line's id names the row that records the user's consent to the change");
+  assert.deepEqual(await lintFound(v, /Evidence line/), []);
+});
+
+test('a reword of an always rule with no keywords or applies_to is offered, and once kept the rule stays always', t => {
+  const v = makeVault(t, { config: { proposals: 'ask' } });
+  v.write(OLD_RULE, ruleNote({ always: true }));
+  const sid = started(v);
+  const o = offered(v.propose(sid, reword()));
+  assert.equal(o.text.split('\n').slice(0, 3).join('\n'), '**Change this rule?** glim/the-thing\nWas: Do: Do the thing. Not: Skip the thing.\nNow: Do: Do the thing twice. Not: Skip the thing.');
+  const k = keepAllowed(v, sid, o.id, o.text);
+  assert.equal(k.code, 0, k.stderr);
+  const after = v.read(OLD_RULE);
+  assert.match(after, /^always: true\r?$/m);
+  assert.match(after, /\*\*Do:\*\* Do the thing twice\.\r?\n/);
+});
+
+test('a reword that gives an always rule its first keywords names the empty scope it had', t => {
+  const v = makeVault(t, { config: { proposals: 'ask' } });
+  v.write(OLD_RULE, ruleNote({ always: true }));
+  const sid = started(v);
+  const o = offered(v.propose(sid, reword({ do: undefined, keywords: ['thing'] })));
+  assert.equal(o.text.split('\n').slice(3, 5).join('\n'), 'Was: no keywords or applies_to\nNow: Keywords: thing');
+});
+
+test('change without key, key without change, and a change other than reword are refused', t => {
+  const v = makeVault(t, { config: { proposals: 'ask' } });
+  v.write(OLD_RULE, ruleNote({ keywords: ['thing'] }));
+  const sid = started(v);
+  const { key, ...noKey } = reword();
+  assert.match(v.propose(sid, noKey).stderr, /^Not proposed: change needs key/);
+  assert.equal(v.propose(sid, { ...rule(), key: 'glim/the-thing' }).code, 1);
+  const rename = v.propose(sid, reword({ change: 'rename' }));
+  assert.equal(rename.code, 1);
+  assert.equal(rename.stderr, 'Not proposed: change must be reword.\n');
+  assert.match(v.propose(sid, reword({ key: 'glim/no-such-rule' })).stderr, /glim\/no-such-rule/);
 });

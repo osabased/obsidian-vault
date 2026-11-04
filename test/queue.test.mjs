@@ -4,7 +4,7 @@ import { promisify } from 'node:util';
 import { pathToFileURL } from 'node:url';
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { makeVault, sessionId, userTurn, assistantTurn, recordedCall, keepAllowed, offerOf, prompt, cleanEnv, sectionOf } from './fixture.mjs';
+import { makeVault, sessionId, userTurn, assistantTurn, recordedCall, keepAllowed, offerOf, prompt, cleanEnv, sectionOf, pageNote, ruleNote } from './fixture.mjs';
 import { today } from '../tools/lib/vault.mjs';
 
 // Offers no one answered go to the review queue in raw/queue/ once their session has gone quiet: the sweep at another
@@ -240,6 +240,92 @@ test('(8) queue.mjs draft refuses basis stated, inferred and pick, and writes a 
   assert.equal(row.quote, null);
   assert.ok(!v.exists('wiki/glim/rules/tidy-names.md'));
   assert.deepEqual(await queueLint(v), []);
+});
+
+test('queue.mjs draft takes a page change with no basis, and the entry offered again writes the page once kept', async t => {
+  const v = makeVault(t, { config: { proposals: 'ask' } });
+  const sid = sessionId();
+  v.startSession(sid, { cwd: v.root, transcript: v.transcript(sid, typed(['call them by their screen'])) });
+  const env = { CLAUDE_CODE_SESSION_ID: sid };
+  const rel = 'wiki/glim/entities/zq-lib.md';
+  const text = pageNote({ kind: 'entity', summary: "'The zq-lib parser.'", body: ["## Agent's reading", 'Zq-lib parses screens.'] });
+  const r = v.run('queue.mjs', ['draft'], { input: JSON.stringify({ page: rel, text }), env });
+  assert.equal(r.code, 0, r.stderr);
+  const [row] = queueRows(v);
+  assert.equal(row.why, 'drafted');
+  assert.equal(row.kind, 'page');
+  assert.equal(row.fields.page, rel);
+  assert.ok(!v.exists(rel));
+  assert.deepEqual(await queueLint(v), []);
+  const o = offered(v.propose(sid, { queued: row.id }));
+  assert.match(o.text, /^\*\*Keep this page change\?\*\* wiki\/glim\/entities\/zq-lib\.md · new\n/);
+  const k = keepAllowed(v, sid, o.id, o.text);
+  assert.equal(k.code, 0, k.stderr);
+  assert.equal(v.read(rel).replace(/\r\n/g, '\n'), text);
+});
+
+const zqPage = reading => pageNote({ kind: 'entity', summary: "'The zq-lib parser.'", body: ["## Agent's reading", reading] });
+
+function draftedChange(t) {
+  const v = makeVault(t, { config: { proposals: 'ask' } });
+  const rel = 'wiki/glim/entities/zq-lib.md';
+  v.write(rel, zqPage('Zq-lib parses screens.'));
+  const sid = sessionId();
+  v.startSession(sid, { cwd: v.root, transcript: v.transcript(sid, typed(['call them by their screen'])) });
+  const text = zqPage('Zq-lib parses screens and themes.');
+  const r = v.run('queue.mjs', ['draft'], { input: JSON.stringify({ page: rel, text }), env: { CLAUDE_CODE_SESSION_ID: sid } });
+  assert.equal(r.code, 0, r.stderr);
+  const [row] = queueRows(v);
+  assert.match(row.fields.base, /^[0-9a-f]{64}$/);
+  return { v, sid, rel, text, row };
+}
+
+test('a drafted change to an existing page, offered again from the queue, writes the page once kept and closes the entry', t => {
+  const { v, sid, rel, text, row } = draftedChange(t);
+  const o = offered(v.propose(sid, { queued: row.id }));
+  assert.match(o.text, /^\*\*Keep this page change\?\*\* wiki\/glim\/entities\/zq-lib\.md · change\n/);
+  const k = keepAllowed(v, sid, o.id, o.text);
+  assert.equal(k.code, 0, k.stderr);
+  assert.equal(v.read(rel), text);
+  const decisions = queueRows(v).filter(r => r.decides);
+  assert.deepEqual(decisions.map(d => [d.decides, d.decision, d.offer]), [[row.id, 'kept', o.id]]);
+});
+
+test('a drafted page change is refused once the page changed since the draft, when offered again and at keep', t => {
+  const { v, sid, rel, row } = draftedChange(t);
+  v.write(rel, zqPage('The user rewrote this.'));
+  const stale = v.propose(sid, { queued: row.id });
+  assert.equal(stale.code, 1, stale.stdout);
+  assert.equal(stale.stderr, `Not proposed: ${rel} changed since \`${row.id}\` was made from it, so it would undo that change. Drop \`${row.id}\` and draft the change again from the page as it is now.\n`);
+
+  v.write(rel, zqPage('Zq-lib parses screens.'));
+  const o = offered(v.propose(sid, { queued: row.id }));
+  v.write(rel, zqPage('The user rewrote this.'));
+  const k = keepAllowed(v, sid, o.id, o.text);
+  assert.equal(k.code, 1);
+  assert.match(k.stderr, /^Not kept: wiki\/glim\/entities\/zq-lib\.md changed since the offer/);
+  assert.match(v.read(rel), /The user rewrote this\./);
+  assert.deepEqual(queueRows(v).filter(r => r.decides), []);
+});
+
+test('queue.mjs draft takes a reword, and the entry offered again changes the rule once kept', async t => {
+  const v = makeVault(t, { config: { proposals: 'ask' } });
+  v.write('wiki/glim/rules/the-thing.md', ruleNote({ keywords: ['thing'] }));
+  const sid = sessionId();
+  v.startSession(sid, { cwd: v.root, transcript: v.transcript(sid, typed(['call them by their screen'])) });
+  const env = { CLAUDE_CODE_SESSION_ID: sid };
+  const input = { change: 'reword', key: 'glim/the-thing', do: 'Do the thing twice.', basis: 'reading', reading: 'The user did the thing twice in each screen.' };
+  const r = v.run('queue.mjs', ['draft'], { input: JSON.stringify(input), env });
+  assert.equal(r.code, 0, r.stderr);
+  const [row] = queueRows(v);
+  assert.equal(row.kind, 'reword');
+  assert.equal(row.key, 'glim/the-thing');
+  assert.deepEqual(await queueLint(v), []);
+  const o = offered(v.propose(sid, { queued: row.id }));
+  assert.match(o.text, /^\*\*Change this rule\?\*\* glim\/the-thing\n/);
+  const k = keepAllowed(v, sid, o.id, o.text);
+  assert.equal(k.code, 0, k.stderr);
+  assert.match(v.read('wiki/glim/rules/the-thing.md'), /\*\*Do:\*\* Do the thing twice\.\r?\n/);
 });
 
 test('queue.mjs lists open entries oldest first, marks unattended ones, and later and drop append decision rows', async t => {
