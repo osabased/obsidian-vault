@@ -10,11 +10,9 @@ const WHEN = 'when the user corrects you or says how they want things, in a way 
 // Gotchas and page changes are held until the task is done, so the user answers them together at the end. Under off the
 // agent proposes only what the user asks to keep, so it holds nothing. The vault folder writes pages directly, so its
 // note leaves out holding a page change.
-const [HOLD_RULE, HOLD_PAGE, RELEASE] = [
-  "When something only worked after a failure caused by an API, version or tool your training gets wrong, or a dated source shows it, hold a knowledge rule with the vault's `propose` tool and `hold: true`.",
-  "Hold a page change the same way when a library needs more than a rule's line.",
-  'When the task is done, call `propose` with `release: true` and end your final reply with what it returns.',
-];
+const HOLD_RULE = "When something only worked after a failure caused by an API, version or tool your training gets wrong, or a dated source shows it, hold a knowledge rule with the vault's `propose` tool and `hold: true`.";
+const HOLD_PAGE = "Hold a page change the same way when a library needs more than a rule's line.";
+const RELEASE = 'When the task is done, call `propose` with `release: true` and end your final reply with what it returns.';
 const HOLD = [HOLD_RULE, HOLD_PAGE, RELEASE].join(' ');
 const VAULT_HOLD = [HOLD_RULE, RELEASE].join(' ');
 

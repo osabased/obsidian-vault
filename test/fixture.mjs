@@ -218,7 +218,8 @@ export const sessionId = () => `a1b2c3d4-0000-4000-8000-${String(++sessions).pad
 export const editFile = (v, sid, rel, { tool = 'Edit', text = 'set x to 1', abs, cwd, agent, timeout } = {}) => v.edit(sid, tool, {
   file_path: abs ?? path.join(v.project, ...rel.split('/')), ...(tool === 'Write' ? { content: text } : { old_string: 'a', new_string: text }),
 }, { cwd, agent, timeout });
-export const prompt = (v, sid, text, { cwd = v.project } = {}) => v.hook('prompt', { session_id: sid, cwd, prompt: text, hook_event_name: 'UserPromptSubmit' });
+export const editVault = (v, sid, rel, tool, input, cwd = v.root) => v.edit(sid, tool, { file_path: v.at(...rel.split('/')), ...input }, { cwd });
+export const prompt = (v, sid, text,{ cwd = v.project } = {}) => v.hook('prompt', { session_id: sid, cwd, prompt: text, hook_event_name: 'UserPromptSubmit' });
 
 // Rules on three topics that share no words, globs or keywords with each other or the perf notes, so proposing them at
 // once fails only if the proposes race.
@@ -280,6 +281,8 @@ export const pageNote = ({ domain = 'glim', kind = 'topic', topic = 'code', summ
   ...(keywords.length ? list('keywords', keywords) : []), ...(applies_to.length ? list('applies_to', applies_to) : []), ...extra,
   'created: 2026-10-01', 'updated: 2026-10-01', '---', '', ...body, '',
 ].join('\n');
+
+export const zqEntityPage = (reading = 'Zq-lib parses screens.') => pageNote({ kind: 'entity', summary: "'The zq-lib parser.'", body: ["## Agent's reading", reading] });
 
 export const sourcePage = ({ source, dated, body = ['## You said', '', "## Agent's reading", '', '## Rules'], ...opts }) => pageNote({
   ...opts, kind: 'source', extra: [`source: ${source}`, ...(dated ? [`source_date: ${dated}`] : [])], body,

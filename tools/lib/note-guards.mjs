@@ -1,5 +1,4 @@
-import { parse } from './frontmatter.mjs';
-import { parseNote, agentNotesSpan, authoredByUser, AGENT_NOTES, TOP_HEADING } from './rules.mjs';
+import { parseNote, agentNotesSpan, AGENT_NOTES, TOP_HEADING, wroteByUser } from './rules.mjs';
 
 // The checks the edit hook and a page offer share: what a change may do to a page the user wrote, and to a rule.
 
@@ -34,30 +33,35 @@ function bodyNotesAdded(before, after) {
 
 // A frontmatter line can read as a heading or a fence, so the section is found in the body, and the frontmatter must
 // stay as it was.
-const frontmatter = text => {
-  const { body, ok } = parse(text);
-  return ok ? text.slice(0, text.length - body.length).replace(/\n$/, '') : '';
-};
-const onlyNotesAdded = (before, after) => frontmatter(before) === frontmatter(after) && bodyNotesAdded(parse(before).body, parse(after).body);
+const frontmatter = (text, note) => (note.ok ? text.slice(0, text.length - note.body.length).replace(/\n$/, '') : '');
+const onlyNotesAdded = (before, after, was, now) => frontmatter(before, was) === frontmatter(after, now) && bodyNotesAdded(was.body, now.body);
 
 export const usersOwn = rel => `${rel} is the user's own writing, so it stays as they wrote it. Add notes as new lines under ## Agent notes, and change nothing else in the file.`;
 
-export function userNoteGuard(rel, before, after) {
-  if (authoredByUser(after) && !authoredByUser(before)) {
+// was and now are the parsed before and after, for a caller that has them already. A before of null passes as '' with a
+// was of null.
+export function userNoteGuard(rel, before, after, was = parseNote(before, rel), now = parseNote(after, rel)) {
+  if (wroteByUser(now) && !wroteByUser(was)) {
     return `${rel} would be marked author: user. The user sets author: user themselves; the agent doesn't make a page theirs.`;
   }
-  if (!authoredByUser(before) || after === before || onlyNotesAdded(before, after)) return null;
+  if (!wroteByUser(was) || after === before || onlyNotesAdded(before, after, was, now)) return null;
   return usersOwn(rel);
 }
 
+// The text of a file before and after an edit, with each parsed: before is null for a new file, and after null when the
+// change can't be followed.
+export const changeOf = (rel, before, after) => ({
+  before,
+  after,
+  was: before === null ? null : parseNote(before, rel),
+  now: after === null ? null : parseNote(after, rel),
+});
+
 // What the user agrees to when a rule is kept: its frontmatter and its Do, Not and Because. Lines added elsewhere, as
-// Evidence is, change neither. before is null for a new file, and after null when the change can't be followed, which
-// counts as a change to a rule.
-export function ruleChange(rel, before, after) {
-  const was = before === null ? null : parseNote(before, rel);
+// Evidence is, change neither. A change that can't be followed counts as a change to a rule.
+export function ruleChange(rel, { before, after, was, now }) {
   if (after === null) return was?.type === 'rule' ? 'changed' : before === null && /^wiki\/[^/]+\/rules\/[^/]+\.md$/i.test(rel) ? 'new' : null;
-  const now = parseNote(after, rel);
   if (was?.type !== 'rule') return now.type === 'rule' ? 'new' : null;
-  const same = frontmatter(before) === frontmatter(after) && ['do', 'not', 'because'].every(k => was[k] === now[k]);
+  const same = frontmatter(before, was) === frontmatter(after, now) && ['do', 'not', 'because'].every(k => was[k] === now[k]);
   return same ? null : 'changed';
 }

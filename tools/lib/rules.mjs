@@ -14,6 +14,8 @@ export const LIST_FIELDS = ['applies_to', 'triggers', 'keywords', 'tools'];
 // compare equal.
 export const KEY_RE = /^[\p{Ll}\p{Lm}\p{Lo}\p{Nd}\p{M}-]+\/[\p{Ll}\p{Lm}\p{Lo}\p{Nd}\p{M}-]+$/u;
 export const BASES = { taste: ['stated', 'inferred', 'pick', 'reading'], knowledge: ['stated', 'failure', 'source'] };
+export const PAGE_WHERE = 'page must be a page under wiki/, like wiki/<domain>/<folder>/<slug>.md.';
+export const rulePath = key => `wiki/${key.replace('/', '/rules/')}.md`;
 export const PAGE_KINDS = ['topic', 'concept', 'entity', 'synthesis', 'source'];
 const FOLDERS = { topic: 'topics', concept: 'concepts', entity: 'entities', synthesis: 'syntheses', source: 'sources' };
 // The folder of its domain a note's type and kind put it in, or null for a page with no kind lint knows.
@@ -106,8 +108,10 @@ const asList = v => (v === null || v === undefined ? [] : Array.isArray(v) ? v.f
 // Obsidian writes a list-type property as a list even when it holds one link.
 const single = v => (Array.isArray(v) && v.length === 1 ? v[0] : v);
 
+export const leadPattern = name => `^[ \\t]*(?:\\*\\*)?${name}(?::\\*\\*|\\*\\*:|:)`;
+
 function field(lead, name) {
-  const m = lead.match(new RegExp(`^[ \\t]*(?:\\*\\*)?${name}(?::\\*\\*|\\*\\*:|:)[ \\t]*(.*)$`, 'm'));
+  const m = lead.match(new RegExp(`${leadPattern(name)}[ \\t]*(.*)$`, 'm'));
   return m ? m[1].trim() : '';
 }
 
@@ -306,7 +310,7 @@ export function undelivered(n) {
   return noteErrors(n)[0] ?? null;
 }
 
-const isLive = n => n.type === 'rule' && !n.superseded_by && !undelivered(n);
+export const isLive = n => n.type === 'rule' && !n.superseded_by && !undelivered(n);
 export const isTopicPage = n => n.type === 'page' && n.kind === 'topic';
 export const isSourcePage = n => n.type === 'page' && n.kind === 'source';
 
@@ -609,7 +613,7 @@ export function renderActive(rules) {
 
 // A note is linked by its path from the vault root. Only superseded_by can name a key with no note, and only a rule
 // takes it, so that link points where the rule would go.
-export const linkTo = (key, rel = `wiki/${key.replace('/', '/rules/')}.md`) => `[[${rel.replace(/\.md$/i, '')}|${key.split('/').at(-1)}]]`;
+export const linkTo = (key, rel = rulePath(key)) => `[[${rel.replace(/\.md$/i, '')}|${key.split('/').at(-1)}]]`;
 
 // Obsidian writes a bare [[slug]] when no other note has that name, and the tools write a note's path from the vault
 // root. A key, or a path through a folder of the domain the note isn't in, still names the note.
@@ -652,6 +656,8 @@ export const sectionLines = (n, title) => sectionNamed(n, title).split(/\r?\n/).
 
 const byUser = a => typeof a === 'string' && a.trim().toLowerCase() === 'user';
 export const isUserPage = n => n.type === 'page' && byUser(n.author);
+// Any note marked author: user, as the edit guard reads it; null for a note that doesn't exist yet.
+export const wroteByUser = n => byUser(n?.author);
 // The edit guard and lint --fix read the file as it is, so any note marked author: user counts, a malformed one too.
 export const authoredByUser = text => byUser(single(parse(text).data.author));
 

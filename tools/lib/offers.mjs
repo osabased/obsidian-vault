@@ -65,6 +65,9 @@ export function makeOffer({ kind, sid, entry, key, fields, lines, hold = false, 
 
 export const heldOffers = sid => allOffers().filter(o => o.session === String(sid) && o.state === 'held');
 
+const OPEN = new Set(['held', 'pending', 'used']);
+export const openOffers = sid => allOffers().filter(o => o.session === String(sid) && OPEN.has(o.state));
+
 // typed is counted again at release, so a code the user types after the final reply passes codeConsent.
 export function releaseOffers(sid, typed) {
   return offersLocked(() => heldOffers(sid).sort((a, b) => a.at.localeCompare(b.at)).map(o => {
