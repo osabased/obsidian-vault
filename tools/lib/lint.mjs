@@ -3,12 +3,12 @@ import path from 'node:path';
 import { isBuiltin } from 'node:module';
 import {
   config, vaultPath, plural, today, daysBetween, datedFiles, filesIn, pickRows, proposalRows, rewriteText, writeText, lf, readJson, readJsonSafe, toPosix, memo, statePath, isVaultOnly, isMarkerName, clock, inVaultFolder,
-  PROPOSAL_MODES,
+  PROPOSAL_MODES, aboveZero,
 } from './vault.mjs';
 import { editsFile, sentToHook, hookMatchers, listedAgents, typedFor, hasAgent, AGENT_NAME } from './agents.mjs';
 import {
   vaultFile, loadNotes, noteErrors, ruleText, ruleTextParts, liveRules, knownDomain, alwaysSize, isUrl, validDay, normTopic, topicNotes, rawFile, toKey, resolver, linksUnder, noteLinks, byTopic, isTopicPage, isSourcePage, PAGE_KINDS, joinList,
-  hasSection, sectionLines, footnotes, youSaid, linkedKeys, clip, citedSources, evidenceQuotes, keyOf, kindFolder, kindLabel, linkTo, parseNote, noteLinkSpans, maxChars, bundleOf, locate,
+  hasSection, sectionLines, footnotes, youSaid, linkedKeys, clip, citedSources, evidenceQuotes, keyOf, kindFolder, kindPlace, linkTo, parseNote, noteLinkSpans, maxChars, bundleOf, locate,
   filled, isMap, sourceItem, authoredByUser, isUserPage, parsedFile, notTextError, manifestNames,
 } from './rules.mjs';
 import { hasFormat, reachOf, compileFor } from './compile.mjs';
@@ -92,8 +92,7 @@ export function lint(notes = loadNotes(), chains = sourceChains()) {
     else if (!knownDomain(n.domain)) add('error', n.rel, `${n.domain} isn't a domain in vault.config.json`);
     const folder = kindFolder(n);
     if (n.depth > 1 && folder && n.folder !== folder) {
-      const what = n.type === 'rule' ? 'rule' : kindLabel(n.kind);
-      add('warn', n.rel, `${/^[aeiou]/.test(what) ? 'an' : 'a'} ${what} goes in wiki/${n.domain}/${folder}/`);
+      add('warn', n.rel, kindPlace(n, n.domain));
     }
     for (const e of noteErrors(n)) add('error', n.rel, e);
     for (const e of toolErrors(n)) add('error', n.rel, e);
@@ -293,8 +292,8 @@ const QUEUE_FIELDS = [
   ['unattended', ['subagent', 'headless', 'left'], true],
 ];
 
-// A stated quote is the user's words, which propose checked as the offer was made; a row written by hand never was. Only
-// the first kept or dropped row closes an entry, so a second one is a sign of a race or a hand edit.
+// A stated or inferred quote is the user's words, which propose checked as the offer was made; a row written by hand
+// never was. Only the first kept or dropped row closes an entry, so a second one is a sign of a race or a hand edit.
 function lintQueue(add) {
   const files = datedFiles('queue');
   const all = files.flatMap(f => f.rows);
@@ -318,7 +317,7 @@ function lintQueue(add) {
         if (optional && r[field] === null) continue;
         if (!values.includes(r[field])) add('warn', file, `${r.id} has ${field} ${JSON.stringify(r[field])}, which is none of ${joinList(values, 'or')}`);
       }
-      if (r.fields?.basis !== 'stated' || typeof r.quote !== 'string' || !r.transcript || !fs.existsSync(r.transcript)) continue;
+      if (!['stated', 'inferred'].includes(r.fields?.basis) || typeof r.quote !== 'string' || !r.transcript || !fs.existsSync(r.transcript)) continue;
       if (!typedAt.has(r.transcript)) typedAt.set(r.transcript, typedFor({ agent: r.agent, transcript: r.transcript }));
       const typed = typedAt.get(r.transcript);
       if (typed && !saidIn(r.quote, typed)) add('warn', file, `${r.id} quotes "${r.quote}", which isn't in what the user typed in session ${sessionName(String(r.session), r.agent)}`);
@@ -373,6 +372,12 @@ export function lintConfig(add) {
   }
   if (c.compile !== undefined && (!isMap(c.compile) || (c.compile.maxBytes !== undefined && !(Number.isInteger(c.compile.maxBytes) && c.compile.maxBytes > 0)))) {
     bad('compile.maxBytes must be a whole number of bytes above 0');
+  }
+  if (c.queue !== undefined && (!isMap(c.queue) || (c.queue.sweepAfterHours !== undefined && !aboveZero(c.queue.sweepAfterHours)))) {
+    bad('queue.sweepAfterHours must be a number of hours above 0');
+  }
+  if (c.pages !== undefined && (!isMap(c.pages) || (c.pages.maxOfferChars !== undefined && !aboveZero(c.pages.maxOfferChars, true)))) {
+    bad('pages.maxOfferChars must be a whole number of characters above 0');
   }
   for (const [d, x] of Object.entries(isMap(c.domains) ? c.domains : {})) {
     if (x?.feeds !== undefined) add('warn', 'vault.config.json', `${d}.feeds does nothing yet: no feed parser ships, so refresh reads no feeds`);

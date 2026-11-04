@@ -1,6 +1,6 @@
 import {
   vaultPath, writeSettled, appendJsonl, appendLog, inboxFile, proposalRows, pickRows, statePath, withLock, today, localDay, toPosix, guarded,
-  shortHash, isVaultOnly, sessionReach, cwdOf, proposalMode, inVaultFolder, newId, readPlain, restore,
+  shortHash, isVaultOnly, sessionReach, cwdOf, proposalMode, inVaultFolder, newId, readPlain, restore, queueRows,
 } from './vault.mjs';
 import {
   KEY_RE, BASES, PAGE_WHERE, wrongBasis, parseNote, noteErrors, ruleText, ruleTextParts, loadNotes, readNote, liveRules, isLive, mentions, isUrl, validDay, byKey, normTopic, domainTopics, vaultFile, joinList,
@@ -13,10 +13,11 @@ import { callerEntry, PASS, marked, markMany, wasShown, carryMarkers, proposeDom
 import { setField, setList, yamlList, yamlScalar } from './frontmatter.mjs';
 import { pageChange, writePage } from './propose-page.mjs';
 import { subjectRows, laterRows, endedBy, otherLabels } from './picks.mjs';
-import { refuse, line, lines, Refused } from './input.mjs';
+import { refuse, line, lines } from './input.mjs';
 import { typedFor, shortName } from './agents.mjs';
-import { makeOffer, offerText, offerReply, consentOf, declined, releaseOffers, claimOffer, keptOffer } from './offers.mjs';
+import { makeOffer, offerText, offerReply, consentOf, declined, releaseOffers, claimOffer, keptOffer, keptKeys, allOffers } from './offers.mjs';
 import { entryOf, queueEntry, appendEntry, closeEntry, queueLocked } from './queue.mjs';
+import { addDomain } from './add-domain.mjs';
 
 const EVIDENCE_FIELDS = ['basis', 'quote', 'page', 'pick', 'reading', 'error', 'fix', 'file', 'source', 'source_date'];
 // Every field the code below reads, so a field it doesn't read is refused rather than dropped.
@@ -284,9 +285,13 @@ function withEvidence(text, entry) {
 // repeat backs may have changed since. A held change waits for release whatever the mode. An entry from the review
 // queue is offered again in every mode, since it went there for the user's review, and a subagent's waits there for it.
 const writesAtOnce = (kind, domain, folder) => kind !== 'page' && !inVaultFolder(folder) && proposalMode(domain) === 'corrections';
+const offNote = domain => `proposals is off for ${domain}: propose a rule only when the user asks you to keep one, with their words asking as asked.`;
+// Evidence moves a knowledge rule's as_of up, so held evidence for one rule is still what the user agreed to once other
+// evidence for it is written: the rule's Do, Not and Because are what its offer showed them.
+const undated = (kind, text) => (kind === 'evidence' ? text.replace(/^(.*?) As of \d{4}-\d{2}-\d{2}\./, '$1') : text);
 function consent(f, domain, kind, key, offer) {
   if (f.kept) {
-    if (offerText(offer, f.kept.code) !== f.kept.text) refuse("the vault changed since the offer, so it isn't what the user agreed to. Propose it again.");
+    if (undated(kind, offerText(offer, f.kept.code)) !== undated(kind, f.kept.text)) refuse("the vault changed since the offer, so it isn't what the user agreed to. Propose it again.");
     return null;
   }
   const mode = proposalMode(domain);
@@ -299,7 +304,7 @@ function consent(f, domain, kind, key, offer) {
   }
   // A filter with no power to write: an offer the user didn't ask for raises no prompt.
   if (!vault && mode === 'off') {
-    if (!f.asked) refuse(`proposals is off for ${domain}: propose a rule only when the user asks you to keep one, with their words asking as asked.`);
+    if (!f.asked) refuse(offNote(domain));
     if (!inLatest(f.session, f.asked)) refuse("asked isn't in the user's latest message. Wait for the user to ask for the rule, and pass their words as asked once they do.");
   }
   return { kind, key, lines: offer };
@@ -347,40 +352,59 @@ const where = f => {
 
 const RELEASE_HEAD = 'Call `keep` for each offer below, then say in your final reply what was kept.';
 
+// The sweep queues what a session held and never released, so a release after it names the entries to propose again.
+function nothingHeld(sid) {
+  const rows = queueRows();
+  const swept = allOffers().filter(o => o.session === String(sid) && o.state === 'queued').map(o => o.queued_as ?? `u-${o.id.slice(2)}`)
+    .filter(u => { const { entry, decided } = entryOf(u, rows); return entry?.why === 'unreleased' && !decided; });
+  if (!swept.length) return 'Nothing is held in this session.';
+  const one = swept.length === 1;
+  return `Nothing is held in this session: what it held went to the review queue as ${joinList(swept.sort().map(u => `\`${u}\``), 'and')}. Propose ${one ? 'it' : 'each'} again with \`queued\` set to its id.`;
+}
+
 // Held offers are released together once the task is done. Rules a project session holds where the mode writes at once
 // are written now; the rest go to the user as offers. The mode is read now, since the user may have changed it since the
-// rule was held.
+// rule was held, and off offers only what the user asked to keep. Each offer is written or refused on its own, so one
+// that fails can't take the replies of those already written with it.
 function releaseHeld(sid, session, p) {
   if (p.release !== true) refuse('release must be true.');
   if (Object.keys(p).length > 1) refuse('release takes no other field. Hold each rule on its own, then release them together.');
   const held = releaseOffers(sid, typedFor(session)?.length ?? null);
-  if (!held.length) return 'Nothing is held in this session.';
+  if (!held.length) return nothingHeld(sid);
   const written = [];
   const offered = [];
   for (const o of held) {
-    if (!writesAtOnce(o.kind, o.key.split('/')[0], session.cwd)) offered.push(o);
-    else if (claimOffer(o.id)) {
-      try {
-        written.push(proposeRule(sid, o.fields, { kept: { text: o.text, code: o.code, offer: o.id } }));
-        keptOffer(o.id);
-      } catch (e) {
-        if (!(e instanceof Refused)) throw e;
-        written.push(`Not written \`${o.id}\`: ${e.message}`);
-      }
+    const domain = o.key.split('/')[0];
+    if (!writesAtOnce(o.kind, domain, session.cwd)) {
+      if (inVaultFolder(session.cwd) || proposalMode(domain) !== 'off' || o.asked) offered.push(o);
+      else if (claimOffer(o.id)) written.push(`Not offered \`${o.id}\`: ${offNote(domain)}`);
+      continue;
     }
+    if (!claimOffer(o.id)) continue;
+    try {
+      written.push(proposeRule(sid, o.fields, { kept: { text: o.text, code: o.code, offer: o.id, day: o.checked ?? localDay(o.at) } }));
+    } catch (e) {
+      written.push(`Not written \`${o.id}\`: ${e.message}`);
+      continue;
+    }
+    // The note is written by now, so a failure to mark the offer costs only its state.
+    guarded('release', () => keptOffer(o.id));
   }
   const blocks = offered.map(offerReply);
   return [...written, ...(blocks.length && consentOf(session) === 'prompt' ? [RELEASE_HEAD] : []), ...blocks].join('\n\n');
 }
 
-// An entry is proposed again from its own fields, and its quote checked against the session it was typed in.
+// An entry is proposed again from its own fields, and its quote checked against the session it was typed in. A rule
+// entry also takes the fields its refusals ask for, repeats and slug, which replace its own.
+const REDO = ['repeats', 'slug'];
 function fromQueue(p) {
-  if (Object.keys(p).some(k => !['queued', 'asked'].includes(k))) refuse("queued takes no other field than asked: the entry's own fields are proposed again.");
+  if (Object.keys(p).some(k => !['queued', 'asked', ...REDO].includes(k))) refuse("queued takes no other field than asked, and repeats or slug for a rule entry: the entry's own fields are proposed again.");
   const id = line(p, 'queued');
   const { entry, decided } = entryOf(id);
   if (!entry) refuse(`there's no entry \`${id}\` in raw/queue/.`);
   if (decided) refuse(`\`${id}\` was already ${decided}.`);
-  if (!['rule', 'evidence', 'page', 'reword'].includes(entry.kind)) refuse(`\`${id}\` is a ${entry.kind} entry, which propose doesn't take.`);
+  if (!['rule', 'evidence', 'page', 'reword', 'domain'].includes(entry.kind)) refuse(`\`${id}\` is a ${entry.kind} entry, which propose doesn't take.`);
+  if (entry.kind !== 'rule' && REDO.some(k => Object.hasOwn(p, k))) refuse(`repeats and slug are for a rule entry, and \`${id}\` is a ${entry.kind} entry.`);
   return entry;
 }
 
@@ -423,7 +447,7 @@ function offered(f, session, offer, { fields, quote, queued, noun }) {
     return f.queueAs.reply(id);
   }
   if (consentOf(session) === 'prompt' && declined(f.sid, offerText(offer.lines, null))) refuse(`the user denied keeping this ${noun} at the prompt in this session. Don't offer it again unless they ask.`);
-  const extra = { quote, checked: queued?.checked ?? today() };
+  const extra = { quote, checked: queued?.checked ?? today(), ...(f.asked ? { asked: true } : {}) };
   return makeOffer({ ...offer, sid: f.sid, entry: session, fields, hold: f.hold, extra }).reply;
 }
 
@@ -503,7 +527,7 @@ function reword(sid, session, p, opts) {
     ...base, domain: old.domain, slug: old.slug, kind: old.kind, topic: old.topic, basis,
     do: given('do'), not: given('not'), because: given('because', (q, k) => line(q, k, false)),
     applies_to: given('applies_to', lines), keywords: given('keywords', lines),
-    tools: old.tools, always: old.always, day: today(), id: newId('a'),
+    tools: old.tools, always: old.always, day: kept?.day || today(), id: newId('a'),
   };
   if (!differs(old, f)) refuse(`the reword leaves ${key} as it is. Give the new do, not, because, applies_to or keywords.`);
   checkChannel(f);
@@ -554,15 +578,18 @@ export const changeKind = p => (Object.hasOwn(p, 'text') ? 'page' : Object.hasOw
 // or a function that reads it. kept is how the user agreed to the offer keep writes: { consent: 'prompt' }, or
 // { consent: 'code', approved } with their typed reply, and the offer's id, text and code to check it against. queueAs
 // sends the rule to the review queue instead of offering it: { why, unattended, reply } gives the entry's reasons and
-// what to say once it is queued.
-export function proposeRule(sid, p, { kept = null, queueAs = null } = {}) {
+// what to say once it is queued. kept.day is the day the offer was made, so a keep after midnight writes what was offered.
+// mainWorktree is lib/git.mjs's, passed in by the script for a domain entry from the queue, as addDomain takes it.
+export function proposeRule(sid, p, { kept = null, queueAs = null, mainWorktree = null } = {}) {
   const session = sessionOf(sid);
   if (typeof p === 'function') p = p();
   // A subagent's rules wait in the queue, so the session's held offers and the queue's entries are left to the main agent.
   for (const k of ['release', 'queued']) if (queueAs && p && Object.hasOwn(p, k)) refuse(`a subagent's rules wait in the review queue for the user, so ${k} is for the main session.`);
   if (p && Object.hasOwn(p, 'release')) return releaseHeld(sid, session, p);
   const queued = p && Object.hasOwn(p, 'queued') ? fromQueue(p) : null;
-  if (queued) p = { ...queued.fields, ...(Object.hasOwn(p, 'asked') ? { asked: p.asked } : {}) };
+  if (queued?.kind === 'domain') return addDomain(sid, queued.fields, { queued, mainWorktree });
+  const redo = queued ? Object.fromEntries(REDO.filter(k => Object.hasOwn(p, k)).map(k => [k, p[k]])) : {};
+  if (queued) p = { ...queued.fields, ...redo, ...(Object.hasOwn(p, 'asked') ? { asked: p.asked } : {}) };
   const opts = { kept, queueAs, queued };
   const kind = changeKind(p);
   if (kind === 'page') return proposePage(sid, session, p, opts);
@@ -596,10 +623,10 @@ export function proposeRule(sid, p, { kept = null, queueAs = null } = {}) {
   const e = evidence(f, p);
   if (queued && !e.pick) Object.assign(e, { day: queued.checked, session: sessionName(queued.session, queued.agent) });
   checkQuote(queued ? { agent: queued.agent, transcript: queued.transcript } : session, e, queued);
-  if (f.kind === 'knowledge') f.as_of = e.date ?? today();
 
   const at = new Date().toISOString();
-  Object.assign(f, { day: today(), id: newId('a') });
+  Object.assign(f, { day: kept?.day || today(), id: newId('a') });
+  if (f.kind === 'knowledge') f.as_of = e.date ?? e.day ?? f.day;
   const text = noteText(f, e);
   const rel = rulePath(key);
   const n = parseNote(text, rel);
@@ -619,7 +646,11 @@ export function proposeRule(sid, p, { kept = null, queueAs = null } = {}) {
     if (f.repeats) return done(addEvidence(f, e, scope, rules, same, row, notes));
     const taken = readNote(key, notes);
     if (taken) refuse(`${taken.rel} already exists. Pick another slug, or leave that note to the user.`);
-    const overlaps = checkRepeats(f, ruleText(n), scope, rules, same, notes);
+    // The rules this session wrote from its own offers, earlier in a release or by an earlier keep, were offered beside
+    // this one, so only a rule written elsewhere since the offer makes its keep refuse.
+    const own = kept ? keptKeys(sid) : new Set();
+    const listed = own.size ? Object.fromEntries(Object.entries(rules).filter(([k]) => !own.has(k))) : rules;
+    const overlaps = checkRepeats(f, ruleText(n), scope, listed, own.has(same?.note) ? null : same, notes);
     const offer = consent(f, f.domain, 'rule', key, [`**Keep this rule?** ${key}: ${ruleText(n)}`, where(f)]);
     if (offer) return { offer };
     const file = vaultPath(...rel.split('/'));
@@ -634,5 +665,5 @@ export function proposeRule(sid, p, { kept = null, queueAs = null } = {}) {
     return done([`Wrote ${rel}. ${sameFiles(f, n, notes, rules)}End your reply with these ${['two', 'three'][reply.length - 2]} lines as they are:`, '', ...reply].join('\n'));
   });
   const { asked, hold, ...given } = p;
-  return settle(f, session, out, { fields: queued ? { queued: queued.id } : given, quote: offerQuote(e), queued, noun: 'rule' });
+  return settle(f, session, out, { fields: queued ? { queued: queued.id, ...redo } : given, quote: offerQuote(e), queued, noun: 'rule' });
 }

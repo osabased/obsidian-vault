@@ -213,7 +213,7 @@ function queueDrops() {
   const rows = queueRows();
   const keyOf = new Map(rows.filter(r => !r.decides).map(r => [r.id, r.key]));
   return newestFirst(rows.filter(r => r.decides && r.decision === 'dropped'))
-    .map(r => `- ${r.decides} · ${keyOf.get(r.decides) ?? 'no entry'} · dropped ${localDay(r.at)} in session ${sessionName(String(r.session))}`);
+    .map(r => `- ${r.decides} · ${keyOf.get(r.decides) ?? 'no entry'} · dropped ${localDay(r.at)} in session ${sessionName(String(r.session), r.agent)}`);
 }
 
 const status = () => [

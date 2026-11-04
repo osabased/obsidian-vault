@@ -41,7 +41,9 @@ export async function prompt(event, agent) {
   const sid = event.session;
   if (!sid) return null;
   turnStarted(sid);
-  touchSession(event, undefined, agent.name, { prompted: true });
+  // An adapter that can tell a prompt the user didn't type sets typed false, so only the user's own message counts as
+  // writing past an offer.
+  touchSession(event, undefined, agent.name, { prompted: event.typed !== false });
   // A Deny at the prompt leaves the keep's record unallowed, which only a prompt agent's records mean.
   if (agent.consent === 'prompt') guarded('denied offers', () => markDenied(sid));
   const said = String(event.text ?? '');

@@ -1,6 +1,6 @@
 import fs from 'node:fs';
 import { vaultPath, writeSettled, appendLog, config, plainText, plainLayout, restore, inside } from './vault.mjs';
-import { KEY_RE, PAGE_WHERE, parseNote, noteErrors, noteLinks, vaultFile, knownDomain, joinList, loadNotes, rulePath } from './rules.mjs';
+import { KEY_RE, PAGE_WHERE, parseNote, noteErrors, noteLinks, vaultFile, knownDomain, joinList, loadNotes, rulePath, kindFolder, kindPlace, PAGE_KINDS } from './rules.mjs';
 import { userNoteGuard } from './note-guards.mjs';
 import { lintLinks, linkIndex, markdownFiles } from './lint.mjs';
 import { openOffers } from './offers.mjs';
@@ -11,7 +11,9 @@ import { refuse, line } from './input.mjs';
 // file the offer was made against, comes only from a stored offer or a review queue entry, so keep can tell the page
 // changed since, and an entry offered again can tell the page changed since it was made.
 
-const PAGE_PATH = /^wiki\/([^/]+)\/[^/]+\/([^/]+)\.md$/i;
+const PAGE_PATH = /^wiki\/([^/]+)\/([^/]+)\/([^/]+)\.md$/i;
+
+const KIND_FOLDERS = PAGE_KINDS.map(kind => kindFolder({ type: 'page', kind }));
 
 const PAGE_FIELDS = ['page', 'text', 'hold', 'asked'];
 
@@ -170,13 +172,15 @@ function offerLines(rel, before, after) {
 export function pageChange(p, { sid, domains, vault, kept, queued = null, base: expected = null }) {
   const unknown = Object.keys(p).find(k => !PAGE_FIELDS.includes(k));
   if (unknown) refuse(`${unknown} isn't a field of a page change, which takes ${joinList(PAGE_FIELDS, 'and')}.`);
-  const page = line(p, 'page');
+  const page = line(p, 'page').normalize('NFC');
   if (typeof p.text !== 'string' || !p.text.trim()) refuse("text is missing: give the page's whole new text.");
-  const rel = vaultFile(page) ?? page;
+  // keep compares the lines it is passed after turning every line ending into \n, so the offer holds none but \n.
+  const text = p.text.replace(/\r\n?/g, '\n');
+  const rel = (vaultFile(page) ?? page).normalize('NFC');
   const m = rel.match(PAGE_PATH);
   // path.join takes a backslash as a separator on Windows, so a folder like ..\.. would leave wiki/.
   if (!m || rel.includes('\\') || rel.split('/').some(s => s === '.' || s === '..')) refuse(PAGE_WHERE);
-  const [, domain, slug] = m;
+  const [, domain, folder, slug] = m;
   if (!knownDomain(domain) || (!vault && !domains.includes(domain))) refuse(`the page's domain must be ${joinList(domains, 'or')}.`);
   const key = `${domain}/${slug}`;
   if (!KEY_RE.test(key)) refuse('slug must be lowercase-kebab-case.');
@@ -191,12 +195,17 @@ export function pageChange(p, { sid, domains, vault, kept, queued = null, base: 
   if (kept && expected !== base) refuse(`${rel} changed since the offer, so it isn't what the user agreed to. Propose the change again.`);
   if (queued && expected !== base) refuse(`${rel} changed since \`${queued.id}\` was made from it, so it would undo that change. Drop \`${queued.id}\` and draft the change again from the page as it is now.`);
   const { text: before = null, ...layout } = raw ? plainLayout(raw.toString('utf8')) : { eol: '\n', bom: false };
-  const after = plainText(p.text);
+  const after = plainText(text);
   if (before === after) refuse(`${rel} already holds this text.`);
   const was = before === null ? null : parseNote(before, rel);
   if (was?.type === 'rule') refuse(`${rel} is a rule. Change it with change and key.`);
   const n = parseNote(after, rel);
   if (n.type === 'rule') refuse(`the text would make ${rel} a rule. Propose a rule with do and not instead.`);
+  const wanted = kindFolder(n);
+  if (wanted ? folder !== wanted : !KIND_FOLDERS.includes(folder)) {
+    if (!wanted) refuse(PAGE_WHERE);
+    refuse(`${kindPlace(n, domain)}, not ${rel}.`);
+  }
   const guard = userNoteGuard(rel, before ?? '', after);
   if (guard) refuse(guard);
   const [err] = noteErrors(n);

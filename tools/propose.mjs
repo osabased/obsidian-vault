@@ -3,6 +3,7 @@ import { proposeRule } from './lib/propose-rule.mjs';
 import { UsageError, readInput, failure, renderHelp, schemaOf, schemaArg } from './lib/input.mjs';
 import { currentSession } from './lib/agents.mjs';
 import { readCall } from './lib/calls.mjs';
+import { mainWorktree } from './lib/git.mjs';
 
 const RUN = 'usage: node tools/propose.mjs [session-id] [call-id] < rule.json';
 const USAGE = `${RUN}\n       node tools/propose.mjs --help lists the fields of rule.json`;
@@ -36,7 +37,7 @@ const fields = () => [
   { name: 'asked', type: S, help: ["the user's words asking you to keep the rule, as they typed them in their latest message. Needed outside", 'the vault folder when proposals is off for the domain.'] },
   { name: 'hold', type: 'boolean', help: ['true holds the offer until you release it'] },
   { name: 'release', type: 'boolean', help: ['true, alone: returns every offer this session holds'] },
-  { name: 'queued', type: S, help: ['alone: the id of a review queue entry (u-) to offer again'] },
+  { name: 'queued', type: S, help: ['the id of a review queue entry (u-) to offer again; besides it, only asked, and repeats or slug for a rule entry'] },
   { name: 'text', type: S, help: ["with page: a page change, the page's whole new text. Always an offer"] },
   { name: 'change', type: S, label: 'change, key', enum: ['reword'], help: ["reword, with the rule's key: replaces the do, not, because, applies_to or keywords you give;", 'it needs a basis like a new rule'] },
   { name: 'key', type: S, describe: 'see change' },
@@ -47,12 +48,12 @@ const help = () => renderHelp([RUN, '', 'rule.json is an object with these field
   'If the rule may repeat ones in the vault, propose.mjs lists them and refuses once. If it repeats one, propose',
   'it again with repeats set to that rule; if not, propose it again as it is.',
   '',
-  "A knowledge rule's as_of is set for you: the source_date for a source, today otherwise. With repeats, it moves up when that day is later.",
+  "A knowledge rule's as_of is set for you: the source_date for a source, the day it was first proposed otherwise. With repeats, it moves up when that day is later.",
 ], 13);
 
 const SUMMARY = {
-  prompt: 'Proposes a taste or knowledge rule to the taste vault, or new evidence for a rule it has. Under corrections it writes at once; under ask or off it returns an offer to pass to `keep`, and nothing is written until the user allows it.',
-  code: "Proposes a taste or knowledge rule to the taste vault, or new evidence for a rule it has. Under corrections it writes at once; under ask or off it returns an offer to end your reply with, which `keep` writes once the user's next message has its code.",
+  prompt: "Proposes a taste or knowledge rule to the taste vault, or new evidence for a rule it has. Under corrections a project session's unheld rule is written at once; anything else returns an offer to pass to `keep`, and nothing is written until the user allows it. A subagent's proposals go to the review queue.",
+  code: "Proposes a taste or knowledge rule to the taste vault, or new evidence for a rule it has. Under corrections a project session's unheld rule is written at once; anything else returns an offer to end your reply with, which `keep` writes once the user's next message has its code. A subagent's proposals go to the review queue.",
 };
 
 const args = process.argv.slice(2);
@@ -66,7 +67,7 @@ try {
     const queueAs = readCall(args[1])?.subagent
       ? { why: 'unattended', unattended: 'subagent', reply: id => `Queued \`${id}\` for the user's review; nothing is written. Tell your caller what you queued.` }
       : null;
-    console.log(proposeRule(args[0] ?? currentSession()?.id, readInput, { queueAs }));
+    console.log(proposeRule(args[0] ?? currentSession()?.id, readInput, { queueAs, mainWorktree }));
   }
 } catch (e) {
   const f = failure(e, 'propose', USAGE, 'Not proposed');

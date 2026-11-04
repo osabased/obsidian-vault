@@ -72,15 +72,23 @@ function mtime(file) {
   try { return fs.statSync(file).mtimeMs; } catch { return 0; }
 }
 
+// A keep's record is the only sign of a Deny, so it stays while its offer is pending: the sweep reads it to mark the
+// offer denied rather than queue it. The offer's file is read directly, since offers.mjs imports this module.
+const waiting = offer => typeof offer === 'string' && readJsonSafe(statePath('offers', `${safeId(offer)}.json`))?.state === 'pending';
+
 export function pruneCalls(maxAgeMs = 2 * 864e5) {
   const dir = stateDir('calls');
   const old = (file, at) => olderThan(Number.isFinite(at) ? at : mtime(file), maxAgeMs);
   locked(() => {
     for (const e of fs.readdirSync(dir, { withFileTypes: true })) {
       const file = `${dir}/${e.name}`;
-      if (e.isFile() && e.name.endsWith('.json') && old(file, Date.parse(readJsonSafe(file)?.at))) removeDir(file);
+      if (!e.isFile() || !e.name.endsWith('.json')) continue;
+      const rec = readJsonSafe(file);
+      if (old(file, Date.parse(rec?.at)) && !waiting(rec?.offer)) removeDir(file);
     }
     const offers = stateDir('calls', 'offers');
-    for (const name of fs.readdirSync(offers)) if (old(`${offers}/${name}`, NaN)) removeDir(`${offers}/${name}`);
+    for (const name of fs.readdirSync(offers)) {
+      if (old(`${offers}/${name}`, NaN) && !waiting(name.replace(/\.json$/, ''))) removeDir(`${offers}/${name}`);
+    }
   });
 }

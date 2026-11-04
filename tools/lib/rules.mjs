@@ -382,6 +382,11 @@ export function livePages(notes = loadNotes()) {
 }
 
 export const kindLabel = kind => (PAGE_KINDS.includes(kind) ? `${kind} page` : 'page');
+// Where lint and a page change say a note of its type and kind goes, for a note kindFolder gives a folder.
+export const kindPlace = (n, domain) => {
+  const what = n.type === 'rule' ? 'rule' : kindLabel(n.kind);
+  return `${/^[aeiou]/.test(what) ? 'an' : 'a'} ${what} goes in wiki/${domain}/${kindFolder(n)}/`;
+};
 
 // A bare line leaves out the summary, for the pages past what a refusal describes.
 export const pageLine = (k, p, bare = false) => `- ${k} (${kindLabel(p.kind)}): ${p.summary && !bare ? `${clip(sentence(p.summary), 150)} ` : ''}${toPosix(vaultPath(...p.rel.split('/')))}${labelled(p)}`;

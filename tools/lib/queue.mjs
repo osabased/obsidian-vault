@@ -1,5 +1,5 @@
-import { config, statePath, withLock, appendJsonl, queueFile, queueRows, readJsonSafe, writeText, vaultPath, safeId, today, localDay, newId, olderThan } from './vault.mjs';
-import { registry } from './sessions.mjs';
+import { config, statePath, withLock, appendJsonl, queueFile, queueRows, writeText, vaultPath, today, localDay, newId, olderThan } from './vault.mjs';
+import { registryEntry } from './sessions.mjs';
 import { shortName } from './agents.mjs';
 import { allOffers, offersLocked, saveOffer, consentOf, plainText } from './offers.mjs';
 import { keepCallFor } from './calls.mjs';
@@ -7,7 +7,8 @@ import { keepCallFor } from './calls.mjs';
 // The review queue: entries the user hasn't seen or answered, in raw/queue/, and decision rows that name them. Rows are
 // never edited, so an entry is open until a kept or dropped row names it; a later row only records it was seen. Every write
 // to raw/queue/ and queue.md takes queue.lock, so queue.md is rendered from the rows as they are once the write is done.
-// A caller holding offers.lock or propose.lock may take it, never the other way round.
+// A caller holding offers.lock, propose.lock or build.lock may take it, never the other way round; build takes it only
+// when it is free at once.
 export const queueLocked = (fn, waitMs = 5000) => withLock(statePath('queue.lock'), fn, { waitMs });
 
 export const CLOSING = ['kept', 'dropped'];
@@ -28,9 +29,9 @@ export function openEntries(rows = queueRows()) {
   return rows.filter(r => !r.decides && typeof r.id === 'string' && !closed.has(r.id)).sort((a, b) => String(a.at).localeCompare(String(b.at)));
 }
 
-export function queueEntry({ id, kind, why, unattended, from, session, entry, domain, key, fields, text, quote, checked }) {
+export function queueEntry({ id, kind, why, unattended, from, session, entry, agent = null, domain, key, fields, text, quote, checked }) {
   return {
-    id, at: new Date().toISOString(), kind, why, unattended, from, session: String(session), agent: entry?.agent ?? null,
+    id, at: new Date().toISOString(), kind, why, unattended, from, session: String(session), agent: entry?.agent ?? agent,
     transcript: entry?.transcript ?? null, cwd: entry?.cwd ?? null, domain, key, fields, text, quote: quote ?? null, checked,
   };
 }
@@ -44,7 +45,7 @@ export const appendEntry = (row, name) => queueLocked(() => addEntry(row, name))
 
 // For a caller already holding queue.lock, which checked the entry is open under it.
 export function closeEntry({ id, decision, offer = null, sid, agentName }) {
-  const row = { id: newId('d'), at: new Date().toISOString(), decides: id, decision, offer, session: String(sid) };
+  const row = { id: newId('d'), at: new Date().toISOString(), decides: id, decision, offer, session: String(sid), agent: agentName ?? null };
   appendJsonl(queueFile(shortName(sid, agentName)), [row]);
   writeQueue();
   return row;
@@ -69,25 +70,32 @@ function why(o, entry) {
 }
 
 // Reads only .state/offers/ and the registry, never a transcript, so it fits in a session start's deadline. The caller's
-// own offers are never its to sweep, and a session not quiet yet may still answer its own. waitMs caps the wait for each
-// lock, so a session start can leave the sweep to the next one. Most starts find nothing to sweep, so the locks and the
-// queue's rows are taken only once a read without them finds an offer.
+// own offers are never its to sweep, and a session not quiet yet may still answer its own, as may one whose registry
+// entry can't be read. waitMs caps the wait for both locks together, so a session start can leave the sweep to the next
+// one. Most starts find nothing to sweep, so the locks and the queue's rows are taken only once a read without them finds
+// an offer.
 export function sweep(self, { waitMs = 5000 } = {}) {
   const hours = config().queue.sweepAfterHours;
   const registries = new Map();
   const registered = sid => {
-    if (!registries.has(sid)) registries.set(sid, readJsonSafe(registry(safeId(sid))));
+    if (!registries.has(sid)) {
+      let read = null;
+      try { read = { entry: registryEntry(sid) }; } catch {}
+      registries.set(sid, read);
+    }
     return registries.get(sid);
   };
-  const due = o => o.session !== String(self) && o.kind !== 'mode' && ['held', 'pending'].includes(o.state) && quietSince(registered(o.session), hours);
+  const quiet = sid => { const read = registered(sid); return read !== null && quietSince(read.entry, hours); };
+  const due = o => o.session !== String(self) && o.kind !== 'mode' && ['held', 'pending'].includes(o.state) && quiet(o.session);
   if (!allOffers().some(due)) return 0;
   const added = new Map();
   const queued = [];
+  const giveUp = Date.now() + waitMs;
   offersLocked(() => queueLocked(() => {
     const ids = new Set(queueRows().map(r => r.id));
     for (const o of allOffers().filter(due)) {
-      const entry = registered(o.session);
-      if (o.state === 'pending' && consentOf(entry) === 'prompt' && keepCallFor(o.id)?.allowed === null) {
+      const { entry } = registered(o.session);
+      if (o.state === 'pending' && consentOf(entry ?? { agent: o.agent }) === 'prompt' && keepCallFor(o.id)?.allowed === null) {
         saveOffer({ ...o, state: 'denied' });
         continue;
       }
@@ -96,9 +104,9 @@ export function sweep(self, { waitMs = 5000 } = {}) {
       const [reason, unattended] = why(o, entry);
       if (!ids.has(id)) {
         const domain = o.kind === 'domain' ? o.key : o.key.split('/')[0];
-        const file = shortName(o.session, entry?.agent);
+        const file = shortName(o.session, entry?.agent ?? o.agent);
         added.set(file, [...(added.get(file) ?? []), queueEntry({
-          id, kind: o.kind, why: reason, unattended, from: o.id, session: o.session, entry, domain, key: o.key, fields: o.fields,
+          id, kind: o.kind, why: reason, unattended, from: o.id, session: o.session, entry, agent: o.agent ?? null, domain, key: o.key, fields: o.fields,
           text: plainText(o), quote: o.quote, checked: o.checked ?? (localDay(o.at) || today()),
         })]);
         ids.add(id);
@@ -109,7 +117,7 @@ export function sweep(self, { waitMs = 5000 } = {}) {
     for (const [file, rows] of added) appendJsonl(queueFile(file), rows);
     queued.forEach(saveOffer);
     if (added.size) writeQueue();
-  }, waitMs), waitMs);
+  }, Math.max(0, giveUp - Date.now())), waitMs);
   return [...added.values()].reduce((n, rows) => n + rows.length, 0);
 }
 
