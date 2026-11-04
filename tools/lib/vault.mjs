@@ -511,6 +511,13 @@ function tryLock(file, token, staleMs) {
 
 // A propose holds the lock for about 6 s at 3,000 notes, and three at once run one after another, so a waiter gives up
 // only after a minute, and a live holder's lock goes stale at half that.
+export const newId = prefix => `${prefix}-${crypto.randomBytes(4).toString('hex')}`;
+
+// For work a later run redoes, such as a build or a sweep: another process holding its lock is not an error.
+export function skipIfLocked(fn) {
+  try { return fn(); } catch (e) { if (e?.code !== 'ELOCKED') throw e; }
+}
+
 export function withLock(file, fn, { waitMs = 60_000, staleMs = 30_000 } = {}) {
   const token = `${process.pid}:${crypto.randomBytes(6).toString('hex')}`;
   fs.mkdirSync(path.dirname(file), { recursive: true });

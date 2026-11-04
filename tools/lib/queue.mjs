@@ -1,8 +1,7 @@
-import crypto from 'node:crypto';
-import { config, statePath, withLock, appendJsonl, queueFile, queueRows, readJsonSafe, writeText, vaultPath, safeId, today, localDay } from './vault.mjs';
+import { config, statePath, withLock, appendJsonl, queueFile, queueRows, readJsonSafe, writeText, vaultPath, safeId, today, localDay, newId } from './vault.mjs';
 import { registry } from './sessions.mjs';
 import { shortName } from './agents.mjs';
-import { allOffers, offersLocked, saveOffer, consentOf } from './offers.mjs';
+import { allOffers, offersLocked, saveOffer, consentOf, plainText } from './offers.mjs';
 import { keepCallFor } from './calls.mjs';
 
 // The review queue: entries the user hasn't seen or answered, in raw/queue/, and decision rows that name them. Rows are
@@ -11,16 +10,21 @@ import { keepCallFor } from './calls.mjs';
 // A caller holding offers.lock or propose.lock may take it, never the other way round.
 export const queueLocked = (fn, waitMs = 5000) => withLock(statePath('queue.lock'), fn, { waitMs });
 
-export const newId = prefix => `${prefix}-${crypto.randomBytes(4).toString('hex')}`;
+export const CLOSING = ['kept', 'dropped'];
+
+// Each closed entry's id, with the decision of the last row that closed it.
+function closedBy(rows) {
+  const closed = new Map();
+  for (const r of rows) if (r.decides && CLOSING.includes(r.decision)) closed.set(r.decides, r.decision);
+  return closed;
+}
 
 export function entryOf(id, rows = queueRows()) {
-  const entry = rows.find(r => r.id === id && !r.decides) ?? null;
-  const ends = rows.filter(r => r.decides === id && ['kept', 'dropped'].includes(r.decision));
-  return { entry, decided: ends.at(-1)?.decision ?? null };
+  return { entry: rows.find(r => r.id === id && !r.decides) ?? null, decided: closedBy(rows).get(id) ?? null };
 }
 
 export function openEntries(rows = queueRows()) {
-  const closed = new Set(rows.filter(r => r.decides && ['kept', 'dropped'].includes(r.decision)).map(r => r.decides));
+  const closed = closedBy(rows);
   return rows.filter(r => !r.decides && typeof r.id === 'string' && !closed.has(r.id)).sort((a, b) => String(a.at).localeCompare(String(b.at)));
 }
 
@@ -66,16 +70,23 @@ function why(o, entry) {
 
 // Reads only .state/offers/ and the registry, never a transcript, so it fits in a session start's deadline. The caller's
 // own offers are never its to sweep, and a session not quiet yet may still answer its own. waitMs caps the wait for each
-// lock, so a session start can leave the sweep to the next one.
+// lock, so a session start can leave the sweep to the next one. Most starts find nothing to sweep, so the locks and the
+// queue's rows are taken only once a read without them finds an offer.
 export function sweep(self, { waitMs = 5000 } = {}) {
   const hours = config().queue.sweepAfterHours;
-  let moved = 0;
+  const registries = new Map();
+  const registered = sid => {
+    if (!registries.has(sid)) registries.set(sid, readJsonSafe(registry(safeId(sid))));
+    return registries.get(sid);
+  };
+  const due = o => o.session !== String(self) && o.kind !== 'mode' && ['held', 'pending'].includes(o.state) && quietSince(registered(o.session), hours);
+  if (!allOffers().some(due)) return 0;
+  const added = new Map();
+  const queued = [];
   offersLocked(() => queueLocked(() => {
     const ids = new Set(queueRows().map(r => r.id));
-    for (const o of allOffers()) {
-      if (o.session === String(self) || o.kind === 'mode' || !['held', 'pending'].includes(o.state)) continue;
-      const entry = readJsonSafe(registry(safeId(o.session)));
-      if (!quietSince(entry, hours)) continue;
+    for (const o of allOffers().filter(due)) {
+      const entry = registered(o.session);
       if (o.state === 'pending' && consentOf(entry) === 'prompt' && keepCallFor(o.id)?.allowed === null) {
         saveOffer({ ...o, state: 'denied' });
         continue;
@@ -84,19 +95,22 @@ export function sweep(self, { waitMs = 5000 } = {}) {
       const id = o.fields?.queued ?? `u-${o.id.slice(2)}`;
       const [reason, unattended] = why(o, entry);
       if (!ids.has(id)) {
-        const text = o.code ? o.text.split('\n').slice(0, -1).join('\n') : o.text;
         const domain = o.kind === 'domain' ? o.key : o.key.split('/')[0];
-        addEntry(queueEntry({
-          id, kind: o.kind, why: reason, unattended, from: o.id, session: o.session, entry, domain, key: o.key, fields: o.fields, text,
-          quote: o.quote, checked: o.checked ?? (localDay(o.at) || today()),
-        }), shortName(o.session, entry?.agent));
+        const file = shortName(o.session, entry?.agent);
+        added.set(file, [...(added.get(file) ?? []), queueEntry({
+          id, kind: o.kind, why: reason, unattended, from: o.id, session: o.session, entry, domain, key: o.key, fields: o.fields,
+          text: plainText(o), quote: o.quote, checked: o.checked ?? (localDay(o.at) || today()),
+        })]);
         ids.add(id);
-        moved++;
       }
-      saveOffer({ ...o, state: 'queued', queued_as: id });
+      queued.push({ ...o, state: 'queued', queued_as: id });
     }
+    // The rows go first, so an offer is never marked queued without its entry.
+    for (const [file, rows] of added) appendJsonl(queueFile(file), rows);
+    queued.forEach(saveOffer);
+    if (added.size) writeQueue();
   }, waitMs), waitMs);
-  return moved;
+  return [...added.values()].reduce((n, rows) => n + rows.length, 0);
 }
 
 export function renderQueue(rows = queueRows()) {

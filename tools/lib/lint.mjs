@@ -21,6 +21,7 @@ import { build } from './build.mjs';
 import { transcriptFor, sessionsByName, sessionName } from './sessions.mjs';
 import { saidIn, quoteTexts, userPageTexts } from './quotes.mjs';
 import { loadExtractor } from './extractors.mjs';
+import { CLOSING } from './queue.mjs';
 import {
   KINDS, LOCATORS, hashFile, lineCount, clockTime, parseLocator, anchorsIn, derivedAnchors, manifestLine, sourceProblems, refSources,
   sourceChains, noteCitations, knowledgeDays, newerCopies, copyStem,
@@ -267,12 +268,14 @@ function lintQueue(add) {
   const all = files.flatMap(f => f.rows);
   const entries = new Set(all.filter(r => !r.decides).map(r => r.id));
   const closedBy = new Map();
+  // An entry's transcript is its session's, and a session leaves many entries.
+  const typedAt = new Map();
   for (const { file, rows } of files) {
     for (const r of rows) {
       if (r.decides !== undefined) {
         if (!entries.has(r.decides)) add('warn', file, `${r.id} decides ${r.decides}, which has no entry`);
         if (!['kept', 'dropped', 'later'].includes(r.decision)) add('warn', file, `${r.id} records decision ${JSON.stringify(r.decision)}, which is neither kept, dropped nor later`);
-        else if (r.decision !== 'later') {
+        else if (CLOSING.includes(r.decision)) {
           if (closedBy.has(r.decides)) add('warn', file, `${r.id} closes ${r.decides}, which ${closedBy.get(r.decides)} already closed`);
           else closedBy.set(r.decides, r.id);
         }
@@ -284,7 +287,8 @@ function lintQueue(add) {
         if (!values.includes(r[field])) add('warn', file, `${r.id} has ${field} ${JSON.stringify(r[field])}, which is none of ${joinList(values, 'or')}`);
       }
       if (r.fields?.basis !== 'stated' || typeof r.quote !== 'string' || !r.transcript || !fs.existsSync(r.transcript)) continue;
-      const typed = typedFor({ agent: r.agent, transcript: r.transcript });
+      if (!typedAt.has(r.transcript)) typedAt.set(r.transcript, typedFor({ agent: r.agent, transcript: r.transcript }));
+      const typed = typedAt.get(r.transcript);
       if (typed && !saidIn(r.quote, typed)) add('warn', file, `${r.id} quotes "${r.quote}", which isn't in what the user typed in session ${sessionName(String(r.session), r.agent)}`);
     }
   }
