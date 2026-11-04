@@ -314,3 +314,40 @@ test('review status logs its lint tally', t => {
   assert.match(tally, /^\d+ errors?, \d+ warnings?$/);
   assert.deepEqual(logged(v), [`lint · ${tally}`]);
 });
+
+const library = (name, body = []) => page({ kind: 'entity', extra: ['package:', '  ecosystem: npm', `  name: ${name}`], body: ['A library.', '', ...body] });
+
+test('lint warns on two entity pages that name one package', async t => {
+  const v = makeVault(t);
+  v.write('wiki/glim/entities/zq-lib.md', library('zq-lib'));
+  v.write('wiki/global/entities/zq.md', library('zq-lib'));
+  v.write('wiki/glim/entities/other.md', library('other-lib'));
+  const found = await lintFound(v, /package/);
+  assert.equal(found.length, 2, JSON.stringify(found));
+  assert.ok(found.every(f => f.level === 'warn' && /npm\/zq-lib/.test(f.msg)));
+  assert.deepEqual(found.map(f => f.file).sort(), ['wiki/glim/entities/zq-lib.md', 'wiki/global/entities/zq.md']);
+});
+
+test('lint warns on a package that is not an ecosystem and a name', async t => {
+  const v = makeVault(t);
+  v.write('wiki/glim/entities/zq-lib.md', page({ kind: 'entity', extra: ['package: zq-lib'] }));
+  assert.equal((await lintFound(v, /package/)).length, 1);
+});
+
+test('lint warns on a ## Gotchas or ## Docs read line in another form', async t => {
+  const v = makeVault(t);
+  v.write('raw/refs/zq.md', 'zq docs');
+  v.write('wiki/glim/entities/zq-lib.md', library('zq-lib', [
+    '## Gotchas',
+    '- 2026-11-03 · session 1a2b3c4d · `src/api/client.ts` · error: "zq: no screen" · fixed by: naming the screen · [[wiki/glim/entities/zq-lib|zq-lib]]',
+    '- 2026-11-03 · session 1a2b3c4d · `src/x.ts` · error: "boom" · fixed by: a retry',
+    '- It breaks on Tuesdays.',
+    '',
+    '## Docs read',
+    '- https://example.com/zq · fetched 2026-11-03',
+    '- raw/refs/zq.md · fetched 2026-11-02',
+    '- the zq docs',
+  ]));
+  const found = await lintFound(v, /## Gotchas|## Docs read/);
+  assert.deepEqual(found.map(f => f.msg.match(/It breaks on Tuesdays|the zq docs/)?.[0]).sort(), ['It breaks on Tuesdays', 'the zq docs']);
+});

@@ -8,7 +8,7 @@ import {
 import { editsFile, sentToHook, hookMatchers, listedAgents, typedFor, hasAgent, AGENT_NAME } from './agents.mjs';
 import {
   vaultFile, loadNotes, noteErrors, ruleText, ruleTextParts, liveRules, knownDomain, alwaysSize, isUrl, validDay, normTopic, topicNotes, rawFile, toKey, resolver, linksUnder, noteLinks, byTopic, isTopicPage, isSourcePage, PAGE_KINDS, joinList,
-  hasSection, footnotes, youSaid, linkedKeys, clip, citedSources, evidenceQuotes, keyOf, kindFolder, kindLabel, linkTo, parseNote, noteLinkSpans, maxChars, bundleOf, locate,
+  hasSection, sectionLines, footnotes, youSaid, linkedKeys, clip, citedSources, evidenceQuotes, keyOf, kindFolder, kindLabel, linkTo, parseNote, noteLinkSpans, maxChars, bundleOf, locate,
   filled, isMap, sourceItem, authoredByUser, isUserPage, parsedFile, notTextError, manifestNames,
 } from './rules.mjs';
 import { hasFormat, reachOf, compileFor } from './compile.mjs';
@@ -142,6 +142,7 @@ export function lint(notes = loadNotes(), chains = sourceChains()) {
   lintTopicPages(notes, add);
   lintOrphans(notes, resolve, add);
   lintPicks(add);
+  lintPackages(notes, add);
   lintInbox(add);
   lintQueue(add);
   lintSources(add, chains);
@@ -240,6 +241,41 @@ function lintPicks(add) {
       }
       if (typeof r.sheet === 'string' && r.sheet && !fs.existsSync(vaultPath(r.sheet))) add('warn', file, `${r.id} names sheet ${r.sheet}, which doesn't exist`);
     }
+  }
+}
+
+const GOTCHA = /^- \d{4}-\d\d-\d\d · session [^\s·]+ · `[^`]+` · error: ".+" · fixed by: \S/;
+const DOC_READ = /^- (?:https?:\/\/\S+|raw\/refs\/\S+) · fetched \d{4}-\d\d-\d\d$/;
+const LINE_FORMS = [
+  ['Gotchas', GOTCHA, '- <date> · session <id> · `<file>` · error: "<as printed>" · fixed by: <the fix>'],
+  ['Docs read', DOC_READ, '- <URL or raw/refs/ file> · fetched <date>'],
+];
+
+// An entity page names its library as OSV does, one page per library, and its Gotchas and Docs read lines keep a form
+// a later session can check.
+function lintPackages(notes, add) {
+  const byPackage = new Map();
+  for (const n of Object.values(notes)) {
+    if (n.type !== 'page') continue;
+    const p = n.data.package;
+    if (p !== undefined) {
+      if (!isMap(p) || typeof p.ecosystem !== 'string' || !p.ecosystem.trim() || typeof p.name !== 'string' || !p.name.trim()) {
+        add('warn', n.rel, 'package must be an ecosystem and a name, as in OSV: package: { ecosystem: npm, name: <name> }');
+      } else {
+        const id = `${p.ecosystem.trim()}/${p.name.trim()}`;
+        byPackage.set(id, [...(byPackage.get(id) ?? []), n.rel]);
+      }
+    }
+    if (n.kind !== 'entity') continue;
+    for (const [title, form, shape] of LINE_FORMS) {
+      for (const l of sectionLines(n, title)) {
+        if (l.trim() && !form.test(l.trimEnd())) add('warn', n.rel, `a ## ${title} line reads "${clip(l.trim(), 80)}", not ${shape}`);
+      }
+    }
+  }
+  for (const [id, rels] of byPackage) {
+    if (rels.length < 2) continue;
+    for (const rel of rels) add('warn', rel, `${id} is also the package of ${joinList(rels.filter(r => r !== rel), 'and')}. Keep one entity page per library`);
   }
 }
 
@@ -636,7 +672,7 @@ const toolErrors = n => (n.tools ?? []).filter(x => /^\S+$/.test(x)).flatMap(x =
   : !listedAgents().length ? [`tools names ${x}, but agents in vault.config.json lists no agent, so lint can't tell whether an edit hook is sent it`]
   : [`tools names ${x}, which the edit hook's matcher, ${hookMatchers()}, never sends to the hook, so it would never bring the rule up`]));
 
-function lintLinks(n, noteAt, named, md, add) {
+export function lintLinks(n, noteAt, named, md, add) {
   for (const target of noteLinks(n)) {
     if (!target || /\.(?!md$)[^./]+$/i.test(target)) continue;
     const rel = target.replace(/\\/g, '/').replace(/^\.?\//, '').replace(/\.md$/i, '').toLowerCase();
@@ -651,7 +687,7 @@ function lintLinks(n, noteAt, named, md, add) {
   }
 }
 
-function markdownFiles() {
+export function markdownFiles() {
   const paths = new Set(filesIn(vaultPath(), '.md').map(f => f.slice(0, -3).toLowerCase()));
   return { paths, names: new Set([...paths].map(f => f.split('/').at(-1))) };
 }

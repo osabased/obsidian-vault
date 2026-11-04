@@ -13,14 +13,14 @@ const S = 'string';
 const row = (label, help, indent) => ({ label, help, ...(indent && { indent }) });
 
 const fields = () => [
-  { name: 'domain', type: S, required: true, help: ["this session's domain (in the vault folder, any domain that isn't vaultOnly), or global for every project;", 'a session in a folder no domain reaches proposes to global only'] },
-  { name: 'slug', type: S, required: true, help: ['lowercase-kebab-case'] },
+  { name: 'domain', type: S, help: ["this session's domain (in the vault folder, any domain that isn't vaultOnly), or global for every project;", 'a session in a folder no domain reaches proposes to global only'] },
+  { name: 'slug', type: S, help: ['lowercase-kebab-case'] },
   { name: 'kind', type: S, enum: ['taste', 'knowledge'], help: ['"taste" (the default), or "knowledge" for a fact about an API, version or tool', "that your training gets wrong or doesn't know"] },
-  { name: 'do', type: S, label: 'do, not', required: true, help: ['one line each'] },
-  { name: 'not', type: S, required: true },
+  { name: 'do', type: S, label: 'do, not', help: ['one line each'] },
+  { name: 'not', type: S },
   { name: 'because', type: S, help: ["the user's reason, or for knowledge the cause; empty rather than invented"] },
-  { name: 'topic', type: S, required: true, help: ["a short topic; reuse one the domain's rules or pages have, or one of its listed topics:", ...topicLines()] },
-  { name: 'basis', type: S, enum: ['stated', 'inferred', 'pick', 'reading', 'failure', 'source'], required: true, help: ['and what to cite for it, written into the note as given:'] },
+  { name: 'topic', type: S, help: ["a short topic; reuse one the domain's rules or pages have, or one of its listed topics:", ...topicLines()] },
+  { name: 'basis', type: S, enum: ['stated', 'inferred', 'pick', 'reading', 'failure', 'source'], help: ['and what to cite for it, written into the note as given:'] },
   row('stated', ["the user's words state the rule. quote: their words, as they typed them in this session", 'page: instead of a session, the vault path of a page of the user\'s own, one with author: user,', 'like wiki/<domain>/<folder>/<slug>.md. quote: their words on that page; propose.mjs refuses one it', "doesn't hold. The page's frontmatter and its ## Agent notes aren't the user's words."], 2),
   row('inferred', ['taste only: you generalized a correction. quote: the words you generalized, as the user typed them', 'A quote may leave words out with …; propose.mjs refuses one the user never typed in this session.'], 2),
   row('pick', ["taste only: the user's recorded answer from an earlier session backs the rule.", 'pick: the id of a row in raw/picks/ (q-).', "The row's own words are cited; a row backs one rule. A provisional, replaced or confirmed pick backs none."], 2),
@@ -37,6 +37,9 @@ const fields = () => [
   { name: 'hold', type: 'boolean', help: ['true holds the offer until you release it'] },
   { name: 'release', type: 'boolean', help: ['true, alone: returns every offer this session holds'] },
   { name: 'queued', type: S, help: ['alone: the id of a review queue entry (u-) to offer again'] },
+  { name: 'text', type: S, help: ["with page: a page change, the page's whole new text. Always an offer"] },
+  { name: 'change', type: S, label: 'change, key', enum: ['reword'], help: ["reword, with the rule's key: replaces the do, not, because, applies_to or keywords you give;", 'it needs a basis like a new rule'] },
+  { name: 'key', type: S, describe: 'see change' },
 ];
 
 const help = () => renderHelp([RUN, '', 'rule.json is an object with these fields:'], fields(), [

@@ -648,6 +648,7 @@ export const linksUnder = (n, title) => targets(sections(n).slice(1).find(s => h
 
 const sectionNamed = (n, title) => sections(n).slice(1).find(s => heading(s).toLowerCase() === title.toLowerCase()) ?? '';
 export const hasSection = (n, title) => sectionNamed(n, title) !== '';
+export const sectionLines = (n, title) => sectionNamed(n, title).split(/\r?\n/).slice(1);
 
 const byUser = a => typeof a === 'string' && a.trim().toLowerCase() === 'user';
 export const isUserPage = n => n.type === 'page' && byUser(n.author);

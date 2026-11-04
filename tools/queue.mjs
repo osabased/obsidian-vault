@@ -33,12 +33,13 @@ function show(id) {
   return [lineOf(entry), ...(decided ? [`It was ${decided}.`] : []), '', entry.text, '', JSON.stringify(entry.fields, null, 2)].join('\n');
 }
 
-// A draft is the agent's own: it can't plant words as the user's, nor spend a pick the user never saw offered.
+// A draft is the agent's own: it can't plant words as the user's, nor spend a pick the user never saw offered. A page
+// change cites no one, so it takes no basis.
 function draft(sid) {
   sessionOf(sid);
   const p = readInput();
   for (const k of ['hold', 'release', 'queued']) if (Object.hasOwn(p, k)) refuse(`a draft is one rule's fields; ${k} isn't one of them.`);
-  if (!['reading', 'source', 'failure'].includes(p.basis)) refuse(`a draft takes basis reading, source or failure, so basis ${p.basis} is refused.`);
+  if (!Object.hasOwn(p, 'text') && !['reading', 'source', 'failure'].includes(p.basis)) refuse(`a draft takes basis reading, source or failure, so basis ${p.basis} is refused.`);
   return proposeRule(sid, p, { queueAs: { why: 'drafted', unattended: null, reply: id => `Drafted \`${id}\` into the review queue; nothing is written.` } });
 }
 

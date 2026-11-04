@@ -8,12 +8,15 @@ import { joinList } from './rules.mjs';
 const WHEN = 'when the user corrects you or says how they want things, in a way that should hold in later sessions too (a taste rule)';
 
 // Gotchas and page changes are held until the task is done, so the user answers them together at the end. Under off the
-// agent proposes only what the user asks to keep, so it holds nothing.
-const HOLD = [
+// agent proposes only what the user asks to keep, so it holds nothing. The vault folder writes pages directly, so its
+// note leaves out holding a page change.
+const [HOLD_RULE, HOLD_PAGE, RELEASE] = [
   "When something only worked after a failure caused by an API, version or tool your training gets wrong, or a dated source shows it, hold a knowledge rule with the vault's `propose` tool and `hold: true`.",
   "Hold a page change the same way when a library needs more than a rule's line.",
   'When the task is done, call `propose` with `release: true` and end your final reply with what it returns.',
-].join(' ');
+];
+const HOLD = [HOLD_RULE, HOLD_PAGE, RELEASE].join(' ');
+const VAULT_HOLD = [HOLD_RULE, RELEASE].join(' ');
 
 // What the agent does under each mode of the proposals setting, for taste rules.
 const WHAT = {
@@ -23,9 +26,9 @@ const WHAT = {
 };
 
 // One sentence when every domain the session proposes to has one mode, else one per mode naming its domains. A session
-// in the vault folder proposes as in corrections whatever the mode.
+// in the vault folder offers as in ask whatever the mode.
 export function modeLines(domains, vaultFolder = false) {
-  if (vaultFolder) return `${WHAT.corrections} ${HOLD}`;
+  if (vaultFolder) return `${WHAT.ask} ${VAULT_HOLD}`;
   const byMode = domainsByMode(domains);
   const taste = byMode.size === 1 ? WHAT[[...byMode.keys()][0]] : [...byMode].map(([mode, ds]) => `For ${joinList(ds, 'and')} rules, ${WHAT[mode]}`).join(' ');
   return [...byMode.keys()].some(m => m !== 'off') ? `${taste} ${HOLD}` : taste;

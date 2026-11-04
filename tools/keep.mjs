@@ -23,7 +23,7 @@ const SUMMARY = {
   code: "Keeps an offer that propose, domain or proposals returned, and writes it once the user's next message has the offer's code.",
 };
 
-const NOUN = { rule: 'rule', evidence: 'rule', domain: 'domain', mode: 'setting' };
+const NOUN = { rule: 'rule', evidence: 'rule', reword: 'rule', page: 'page', domain: 'domain', mode: 'setting' };
 
 function notPending(o) {
   if (o.state === 'kept') return `offer \`${o.id}\` was already kept. Nothing more was written.`;

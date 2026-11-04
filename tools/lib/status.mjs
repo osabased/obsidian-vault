@@ -2,10 +2,10 @@ import { domainsByMode, inVaultFolder, plural } from './vault.mjs';
 import { proposeDomains } from './sessions.mjs';
 import { joinList } from './rules.mjs';
 
-// The modes propose.mjs keeps to for a session: those of the domains it may propose to, or corrections when it began in
-// the vault folder. A start with no session to register can't propose, and shows its folder's.
+// The modes propose.mjs keeps to for a session: those of the domains it may propose to, or ask when it began in the
+// vault folder, which offers whatever the mode. A start with no session to register can't propose, and shows its folder's.
 function proposalModes(reach, entry) {
-  if (entry ? inVaultFolder(entry.cwd) : reach.vaultFolder) return new Map([['corrections', []]]);
+  if (entry ? inVaultFolder(entry.cwd) : reach.vaultFolder) return new Map([['ask', []]]);
   return domainsByMode(entry ? ['global', ...proposeDomains(entry)] : reach.own);
 }
 
