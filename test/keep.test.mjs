@@ -1,7 +1,7 @@
 import fs from 'node:fs';
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { makeVault, sessionId, userTurn, assistantTurn, ruleNote, pageNote, recordedCall, keepAllowed, offerOf, lintFound } from './fixture.mjs';
+import { makeVault, sessionId, userTurn, assistantTurn, ruleNote, zqEntityPage as entityPage, recordedCall, keepAllowed, offerOf, lintFound } from './fixture.mjs';
 import { codexInput, codexRollout } from './codex.mjs';
 
 // Outside the vault folder in ask and off, propose.mjs, domain.mjs and proposals.mjs only offer, and keep.mjs writes the
@@ -363,7 +363,6 @@ test('Codex: every code is four characters with at least one digit', async t => 
 });
 
 const ENTITY_REL = 'wiki/glim/entities/zq-lib.md';
-const entityPage = (reading = 'Zq-lib parses screens.') => pageNote({ kind: 'entity', topic: 'code', summary: "'The zq-lib parser.'", body: ["## Agent's reading", reading] });
 
 test('propose with page and text offers a page change, and keep writes the page and its log line', t => {
   const v = makeVault(t, { config: { proposals: 'ask' } });
@@ -584,4 +583,20 @@ test('change without key, key without change, and a change other than reword are
   assert.equal(rename.code, 1);
   assert.equal(rename.stderr, 'Not proposed: change must be reword.\n');
   assert.match(v.propose(sid, reword({ key: 'glim/no-such-rule' })).stderr, /glim\/no-such-rule/);
+});
+
+// A ## comment in the frontmatter reads as the body's first section if the frontmatter isn't found behind the mark.
+test('a reword of a note that starts with a byte order mark replaces its Do line, keeps its frontmatter and keeps the mark', t => {
+  const v = makeVault(t, { config: { proposals: 'ask' } });
+  const note = `﻿${ruleNote({ keywords: ['thing'], extra: ['## kept by hand'] })}`;
+  v.write(OLD_RULE, note);
+  const sid = started(v);
+  const o = offered(v.propose(sid, reword()));
+  const k = keepAllowed(v, sid, o.id, o.text);
+  assert.equal(k.code, 0, k.stderr);
+  const after = v.read(OLD_RULE);
+  assert.ok(after.startsWith('﻿---\n'), 'the byte order mark stays');
+  const front = s => s.slice(0, s.indexOf('\n---\n') + 5).replace(/^updated: .*$/m, 'updated:');
+  assert.equal(front(after), front(note), 'the frontmatter keeps its lines, updated aside');
+  assert.match(after, /\n---\n\n\*\*Do:\*\* Do the thing twice\.\n\*\*Not:\*\* Skip the thing\.\n/);
 });

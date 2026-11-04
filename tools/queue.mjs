@@ -1,5 +1,5 @@
 import { localDay } from './lib/vault.mjs';
-import { proposeRule } from './lib/propose-rule.mjs';
+import { proposeRule, changeKind } from './lib/propose-rule.mjs';
 import { entryOf, openEntries, decide } from './lib/queue.mjs';
 import { callerEntry } from './lib/sessions.mjs';
 import { currentSession } from './lib/agents.mjs';
@@ -39,7 +39,7 @@ function draft(sid) {
   sessionOf(sid);
   const p = readInput();
   for (const k of ['hold', 'release', 'queued']) if (Object.hasOwn(p, k)) refuse(`a draft is one rule's fields; ${k} isn't one of them.`);
-  if (!Object.hasOwn(p, 'text') && !['reading', 'source', 'failure'].includes(p.basis)) refuse(`a draft takes basis reading, source or failure, so basis ${p.basis} is refused.`);
+  if (changeKind(p) !== 'page' && !['reading', 'source', 'failure'].includes(p.basis)) refuse(`a draft takes basis reading, source or failure, so basis ${p.basis} is refused.`);
   return proposeRule(sid, p, { queueAs: { why: 'drafted', unattended: null, reply: id => `Drafted \`${id}\` into the review queue; nothing is written.` } });
 }
 

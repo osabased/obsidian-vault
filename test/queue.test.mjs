@@ -4,7 +4,7 @@ import { promisify } from 'node:util';
 import { pathToFileURL } from 'node:url';
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { makeVault, sessionId, userTurn, assistantTurn, recordedCall, keepAllowed, offerOf, prompt, cleanEnv, sectionOf, pageNote, ruleNote } from './fixture.mjs';
+import { makeVault, sessionId, userTurn, assistantTurn, recordedCall, keepAllowed, offerOf, prompt, cleanEnv, sectionOf, zqEntityPage as zqPage, ruleNote } from './fixture.mjs';
 import { today } from '../tools/lib/vault.mjs';
 
 // Offers no one answered go to the review queue in raw/queue/ once their session has gone quiet: the sweep at another
@@ -248,7 +248,7 @@ test('queue.mjs draft takes a page change with no basis, and the entry offered a
   v.startSession(sid, { cwd: v.root, transcript: v.transcript(sid, typed(['call them by their screen'])) });
   const env = { CLAUDE_CODE_SESSION_ID: sid };
   const rel = 'wiki/glim/entities/zq-lib.md';
-  const text = pageNote({ kind: 'entity', summary: "'The zq-lib parser.'", body: ["## Agent's reading", 'Zq-lib parses screens.'] });
+  const text = zqPage();
   const r = v.run('queue.mjs', ['draft'], { input: JSON.stringify({ page: rel, text }), env });
   assert.equal(r.code, 0, r.stderr);
   const [row] = queueRows(v);
@@ -263,8 +263,6 @@ test('queue.mjs draft takes a page change with no basis, and the entry offered a
   assert.equal(k.code, 0, k.stderr);
   assert.equal(v.read(rel).replace(/\r\n/g, '\n'), text);
 });
-
-const zqPage = reading => pageNote({ kind: 'entity', summary: "'The zq-lib parser.'", body: ["## Agent's reading", reading] });
 
 function draftedChange(t) {
   const v = makeVault(t, { config: { proposals: 'ask' } });

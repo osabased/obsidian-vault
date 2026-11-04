@@ -51,9 +51,7 @@ export function lint(notes = loadNotes(), chains = sourceChains()) {
     return days.length && days.every(validDay) ? days.sort()[0] : null;
   };
   const keys = new Set(notes.map(n => n.key));
-  const named = new Map();
-  for (const n of notes) named.set(n.slug, [...(named.get(n.slug) ?? []), n]);
-  const noteAt = new Map(notes.map(n => [n.key, n]));
+  const { noteAt, named } = linkIndex(notes);
   const resolve = resolver(notes);
   const md = markdownFiles();
   const rulesOf = page => [...new Set(linksUnder(page, 'Rules').map(resolve))].map(k => noteAt.get(k)).filter(r => r?.type === 'rule');
@@ -258,13 +256,11 @@ function lintPackages(notes, add) {
   for (const n of Object.values(notes)) {
     if (n.type !== 'page') continue;
     const p = n.data.package;
-    if (p !== undefined) {
-      if (!isMap(p) || typeof p.ecosystem !== 'string' || !p.ecosystem.trim() || typeof p.name !== 'string' || !p.name.trim()) {
-        add('warn', n.rel, 'package must be an ecosystem and a name, as in OSV: package: { ecosystem: npm, name: <name> }');
-      } else {
-        const id = `${p.ecosystem.trim()}/${p.name.trim()}`;
-        byPackage.set(id, [...(byPackage.get(id) ?? []), n.rel]);
-      }
+    const named = isMap(p) && typeof p.ecosystem === 'string' && p.ecosystem.trim() && typeof p.name === 'string' && p.name.trim();
+    if (p !== undefined && !named) add('warn', n.rel, 'package must be an ecosystem and a name, as in OSV: package: { ecosystem: npm, name: <name> }');
+    else if (named) {
+      const id = `${p.ecosystem.trim()}/${p.name.trim()}`;
+      byPackage.set(id, [...(byPackage.get(id) ?? []), n.rel]);
     }
     if (n.kind !== 'entity') continue;
     for (const [title, form, shape] of LINE_FORMS) {
@@ -687,8 +683,15 @@ export function lintLinks(n, noteAt, named, md, add) {
   }
 }
 
-export function markdownFiles() {
-  const paths = new Set(filesIn(vaultPath(), '.md').map(f => f.slice(0, -3).toLowerCase()));
+export function linkIndex(notes) {
+  const named = new Map();
+  for (const n of notes) named.set(n.slug, [...(named.get(n.slug) ?? []), n]);
+  return { noteAt: new Map(notes.map(n => [n.key, n])), named };
+}
+
+// extra are paths not on disk yet, from the vault root, lowercase and without .md, that links may name too.
+export function markdownFiles(extra = []) {
+  const paths = new Set([...filesIn(vaultPath(), '.md').map(f => f.slice(0, -3).toLowerCase()), ...extra]);
   return { paths, names: new Set([...paths].map(f => f.split('/').at(-1))) };
 }
 

@@ -356,6 +356,8 @@ export const yamlQuote = s => (/[\r\n]/.test(s)
 
 export const yamlScalar = s => (plainSafe(s) ? s : yamlQuote(s));
 
+export const yamlList = (name, xs) => (xs.length ? [`${name}:`, ...xs.map(x => `  - ${yamlQuote(x)}`)] : [`${name}: []`]);
+
 // Where a value written after `key: ` ends: after its closing quote, or where a comment starts in a plain one.
 function valueEnd(rest) {
   const q = rest[0];
@@ -364,10 +366,6 @@ function valueEnd(rest) {
   return end < 0 ? rest.length : end;
 }
 
-// Sets a scalar on the line parse reads it from, the last one with its key, keeping the line's ending and a trailing
-// comment, which is the user's note. The old value goes whole, quotes too. The new one is written plain when it reads
-// back as itself and was plain before, single-quoted otherwise. Text without frontmatter, without the key, or whose
-// key holds a nested block comes back as it was.
 // A top-level list's lines are the key's line and the indented or `-` lines below it. A key that isn't there is added
 // before the closing line.
 export function setList(text, key, items) {
@@ -376,7 +374,7 @@ export function setList(text, key, items) {
   if (end < 1) return text;
   const eol = lines[0].endsWith('\r') ? '\r' : '';
   const bare = l => l.replace(/\r$/, '');
-  const written = (items.length ? [`${key}:`, ...items.map(x => `  - ${yamlQuote(x)}`)] : [`${key}: []`]).map(l => `${l}${eol}`);
+  const written = yamlList(key, items).map(l => `${l}${eol}`);
   const at = lines.findIndex((l, i) => i > 0 && i < end && bare(l).match(KV)?.[1] === key);
   if (at < 0) {
     lines.splice(end, 0, ...written);
@@ -388,6 +386,10 @@ export function setList(text, key, items) {
   return lines.join('\n');
 }
 
+// Sets a scalar on the line parse reads it from, the last one with its key, keeping the line's ending and a trailing
+// comment, which is the user's note. The old value goes whole, quotes too. The new one is written plain when it reads
+// back as itself and was plain before, single-quoted otherwise. Text without frontmatter, without the key, or whose
+// key holds a nested block comes back as it was.
 export function setField(text, key, val) {
   const lines = text.split('\n');
   const end = closing(lines);

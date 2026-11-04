@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
-import { makeVault, ruleNote, denied, sessionId } from './fixture.mjs';
+import { makeVault, ruleNote, denied, sessionId, editVault } from './fixture.mjs';
 
 const SID = '9f8e7d6c-0000-4000-8000-000000000002';
 const PAGE_REL = 'wiki/glim/source-shop.md';
@@ -22,7 +22,7 @@ function vault(t, files = { [PAGE_REL]: PAGE }) {
   return v;
 }
 
-const edit = (v, tool, rel, toolInput) => v.edit(SID, tool, { file_path: v.at(...rel.split('/')), ...toolInput }, { cwd: v.root });
+const edit = (v, tool, rel, toolInput) => editVault(v, SID, rel, tool, toolInput);
 
 test("an edit that removes the user's words is refused once, and the same edit retried goes through", t => {
   const v = vault(t);
@@ -109,7 +109,7 @@ test('an old_string with straight quotes still finds curly ones, as the Edit too
 });
 
 const NEW_RULE = 'wiki/glim/rules/x.md';
-const write = (v, sid, rel, cwd) => v.edit(sid, 'Write', { file_path: v.at(...rel.split('/')), content: ruleNote() }, { cwd });
+const write = (v, sid, rel, cwd) => editVault(v, sid, rel, 'Write', { content: ruleNote() }, cwd);
 
 test("a new rule file from a session outside the vault folder is refused with the way to propose it, and so is a rule that exists", t => {
   const v = vault(t, { 'wiki/glim/rules/old.md': ruleNote() });
@@ -121,7 +121,7 @@ test("a new rule file from a session outside the vault folder is refused with th
 });
 
 const TOPIC_RULE = 'wiki/glim/topics/x.md';
-const asRule = (v, sid, cwd) => v.edit(sid, 'Edit', { file_path: v.at(...PAGE_REL.split('/')), old_string: 'type: page', new_string: 'type: rule' }, { cwd });
+const asRule = (v, sid, cwd) => editVault(v, sid, PAGE_REL, 'Edit', { old_string: 'type: page', new_string: 'type: rule' }, cwd);
 
 test('a note outside rules/ that is a rule once written is refused, whether new or a page turned into one', t => {
   const v = vault(t);
@@ -130,14 +130,14 @@ test('a note outside rules/ that is a rule once written is refused, whether new 
 });
 
 const ENTITY = 'wiki/global/entities/x.md';
-const writePage = (v, sid, rel, cwd, content = PAGE) => v.edit(sid, 'Write', { file_path: v.at(...rel.split('/')), content }, { cwd });
+const writePage = (v, sid, rel, cwd, content = PAGE) => editVault(v, sid, rel, 'Write', { content }, cwd);
 
 test('from a project session, a Write to a page under wiki/ is refused and pointed to propose, new or not', t => {
   const v = vault(t);
   assert.equal(denied(writePage(v, SID, ENTITY, v.project)),
     "`wiki/global/entities/x.md` is a vault page. Outside the vault folder, pages change only through the vault's `propose` tool with `page` and `text`, so the user agrees to each change.");
   assert.ok(denied(writePage(v, SID, ENTITY, v.project)), 'the refusal repeats; it is not a one-time gate');
-  const more = v.edit(SID, 'Edit', { file_path: v.at(...PAGE_REL.split('/')), old_string: READING, new_string: `${READING} More.` }, { cwd: v.project });
+  const more = editVault(v, SID, PAGE_REL, 'Edit', { old_string: READING, new_string: `${READING} More.` }, v.project);
   assert.match(denied(more) ?? '', /^`wiki\/glim\/source-shop\.md` is a vault page\./);
 });
 
@@ -150,7 +150,7 @@ test('from a project session, an edit to a rule that exists is refused too, even
 });
 
 const RULE = 'wiki/glim/rules/old.md';
-const ruleEdit = (v, sid, change, cwd = v.root) => v.edit(sid, 'Edit', { file_path: v.at(...RULE.split('/')), ...change }, { cwd });
+const ruleEdit = (v, sid, change, cwd) => editVault(v, sid, RULE, 'Edit', change, cwd);
 
 test("from a vault-folder session, a change to a rule's Do, Not, Because or frontmatter is refused, and an added Evidence line is not", t => {
   const v = vault(t, { [RULE]: ruleNote({ keywords: ['widgetz'] }) });
@@ -169,7 +169,7 @@ test("from a vault-folder session, a change to a rule's Do, Not, Because or fron
 test('from a vault-folder session, a Write that changes a rule\'s Do or frontmatter is refused, and one that only adds an Evidence line is not', t => {
   const evidence = '- 2026-10-02 · stated · session 1a2b3c4d · "and again" (a-00000002)';
   const original = ruleNote();
-  const writeRule = (v, content) => v.edit(SID, 'Write', { file_path: v.at(...RULE.split('/')), content }, { cwd: v.root });
+  const writeRule = (v, content) => editVault(v, SID, RULE, 'Write', { content });
   const crlf = s => `﻿${s.replace(/\n/g, '\r\n')}`;
   for (const [name, wrap] of [['LF', s => s], ['CRLF with a byte order mark', crlf]]) {
     const v = vault(t, { [RULE]: wrap(original) });
@@ -184,13 +184,13 @@ test('from a vault-folder session, a Write that changes a rule\'s Do or frontmat
 test('from a vault-folder session, an existing wiki note that cannot be read is refused rather than let through', t => {
   const v = vault(t);
   fs.mkdirSync(v.at('wiki', 'glim', 'rules', 'unreadable.md'), { recursive: true });
-  const out = v.edit(SID, 'Write', { file_path: v.at('wiki', 'glim', 'rules', 'unreadable.md'), content: ruleNote({ doLine: 'Do the other thing.' }) }, { cwd: v.root });
+  const out = editVault(v, SID, 'wiki/glim/rules/unreadable.md', 'Write', { content: ruleNote({ doLine: 'Do the other thing.' }) });
   assert.match(denied(out) ?? '', /^`wiki\/glim\/rules\/unreadable\.md` is a rule\./);
 });
 
 test('from a vault-folder session, queue.md is refused as a generated file, as active.md is', t => {
   const v = vault(t, { 'queue.md': 'generated\n', 'active.md': 'generated\n' });
-  const write = rel => v.edit(SID, 'Write', { file_path: v.at(rel), content: 'by hand\n' }, { cwd: v.root });
+  const write = rel => editVault(v, SID, rel, 'Write', { content: 'by hand\n' });
   assert.match(denied(write('active.md')) ?? '', /is generated from the notes/);
   assert.equal(denied(write('queue.md')), 'queue.md is generated from the entries in raw/queue/. Use tools/queue.mjs instead.');
 });

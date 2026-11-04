@@ -1,7 +1,7 @@
 import fs from 'node:fs';
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { makeVault, pageNote, denied, lintFound } from './fixture.mjs';
+import { makeVault, pageNote, denied, lintFound, editVault } from './fixture.mjs';
 
 const SID = '9f8e7d6c-0000-4000-8000-000000000003';
 const REL = 'wiki/glim/concepts/journal.md';
@@ -17,7 +17,7 @@ function vault(t, { text = mine(), rel = REL } = {}) {
 }
 
 // Only a session in the vault folder edits a page by hand; elsewhere a page changes through an offer.
-const edit = (v, tool, toolInput, rel = REL) => v.edit(SID, tool, { file_path: v.at(...rel.split('/')), ...toolInput }, { cwd: v.root });
+const edit = (v, tool, toolInput, rel = REL) => editVault(v, SID, rel, tool, toolInput);
 const change = (old_string, new_string) => ({ old_string, new_string });
 
 // The journal preset's page is the user's own, with an empty ## Agent notes section.

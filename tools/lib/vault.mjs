@@ -275,6 +275,10 @@ export const removeDir = dir => fs.rmSync(dir, { recursive: true, force: true, m
 export const lf = s => String(s ?? '').replace(/\r\n/g, '\n');
 // A BOM is the editor's, not the text's, so the guards and triggers read text without it.
 export const plainText = s => lf(s).replace(/^\uFEFF/, '');
+// The tools edit a file's plain text, and restore puts back its line endings and byte order mark once on write.
+export const plainLayout = s => ({ text: plainText(s), eol: s.includes('\r\n') ? '\r\n' : '\n', bom: s.startsWith('\uFEFF') });
+export const readPlain = file => plainLayout(fs.readFileSync(file, 'utf8'));
+export const restore = (text, { eol, bom }) => `${bom ? '\uFEFF' : ''}${eol === '\n' ? text : text.replace(/\n/g, eol)}`;
 export const writeJson = (file, data) => writeText(file, `${JSON.stringify(data, null, 2)}\n`);
 
 // The hooks wait out delivery.settleSeconds after a save because Obsidian saves half-typed notes;
