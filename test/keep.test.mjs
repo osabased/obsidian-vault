@@ -352,6 +352,19 @@ test('Codex: lines that are not the offer leave it pending, so a keep with the r
   assert.match(keep(v, s.sid, null, { id: o.id, offer: o.text }).stderr, /^Not kept: offer `o-[0-9a-f]{8}` was already kept\./);
 });
 
+test('Codex: a keep of an offer the user denied says so, and writes nothing', t => {
+  const v = codexVault(t);
+  const s = codexStarted(v);
+  const o = offered(v.propose(s.sid, rule()));
+  s.said(['call them by their screen', agentSays(o.text), `keep ${codeOf(o.text)}`]);
+  const file = `.state/offers/${o.id}.json`;
+  v.write(file, JSON.stringify({ ...JSON.parse(v.read(file)), state: 'denied' }));
+  const k = keep(v, s.sid, null, { id: o.id, offer: o.text });
+  assert.equal(k.code, 1);
+  assert.equal(k.stderr, `Not kept: the user denied keeping offer \`${o.id}\` at the prompt in this session. Don't offer it again unless they ask.\n`);
+  assert.ok(!v.exists('wiki/glim/rules/tidy-names.md'));
+});
+
 test('Codex: every code is four characters with at least one digit', async t => {
   const v = codexVault(t);
   const { makeOffer } = await v.import('lib/offers.mjs');

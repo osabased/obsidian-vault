@@ -32,7 +32,7 @@ export const offerText = (lines, code) => [...lines, ...(code ? [`Reply "keep ${
 export const plainText = o => (o.code ? o.text.slice(0, o.text.lastIndexOf('\n')) : o.text);
 
 const REPLY = {
-  held: id => `Held \`${id}\`; nothing is written yet. Don't show it now. Release it with the others when the task is done.`,
+  held: (id, replaced, key) => `Held \`${id}\`; nothing is written yet. ${replaced.length ? `It replaces ${replaced.map(r => `\`${r}\``).join(' and ')}, held for ${key}: if that one changed anything this one doesn't, hold one change with both. ` : ''}Don't show it now. Release it with the others when the task is done.`,
   prompt: id => `Offered \`${id}\`; nothing is written yet. Call the vault's \`keep\` tool now with id \`${id}\` and offer set to the lines below, exactly. The user allows or denies it at the prompt; a Deny ends this proposal, so don't offer it again unless they ask.`,
   code: id => `Offered \`${id}\`; nothing is written yet. End your reply with the lines below as they are. If the user's next message has the code, call \`keep\` with id \`${id}\` and offer set to these lines.`,
 };
@@ -44,26 +44,37 @@ export const offerReply = o => `${REPLY[o.code ? 'code' : 'prompt'](o.id)}\n\n${
 const PURGED = new Set(['kept', 'used', 'superseded', 'denied', 'queued']);
 const purged = o => (PURGED.has(o.state) || o.kind === 'mode') && olderThan(o.at, MAX_AGE);
 
+// Held evidence for one rule is kept apart unless it is the same evidence, since each backs the rule on its own. Any other
+// held change with the key replaces the one before, and the reply names it so the agent can fold the two into one.
+const replaces = (o, offer) => o.state === 'pending' || offer.state === 'pending' || o.kind !== 'evidence' || plainText(o) === plainText(offer);
+
 // extra carries what the review queue needs if the offer goes there: the quote that passed its check, the day it was
 // checked, and what release does with a held offer.
 export function makeOffer({ kind, sid, entry, key, fields, lines, hold = false, extra = {} }) {
   const code = consentOf(entry) === 'code' ? newCode() : null;
   const text = offerText(lines, code);
   const offer = {
-    id: newId('o'), kind, session: String(sid), key, fields, text,
+    id: newId('o'), kind, session: String(sid), agent: entry?.agent ?? null, key, fields, text,
     typed: typedFor(entry)?.length ?? null, code, at: new Date().toISOString(), state: hold ? 'held' : 'pending', ...extra,
   };
+  const replaced = [];
   offersLocked(() => {
     for (const o of allOffers()) {
       if (purged(o)) removeDir(offerFile(o.id));
-      else if (['pending', 'held'].includes(o.state) && o.session === offer.session && o.kind === kind && o.key === key) writeJson(offerFile(o.id), { ...o, state: 'superseded' });
+      else if (['pending', 'held'].includes(o.state) && o.session === offer.session && o.kind === kind && o.key === key && replaces(o, offer)) {
+        writeJson(offerFile(o.id), { ...o, state: 'superseded' });
+        if (hold && o.state === 'held') replaced.push(o.id);
+      }
     }
     writeJson(offerFile(offer.id), offer);
   });
-  return { id: offer.id, text, code, reply: hold ? REPLY.held(offer.id) : offerReply(offer) };
+  return { id: offer.id, text, code, reply: hold ? REPLY.held(offer.id, replaced, key) : offerReply(offer) };
 }
 
 export const heldOffers = sid => allOffers().filter(o => o.session === String(sid) && o.state === 'held');
+
+// The keys of the rules this session wrote or changed from its own offers.
+export const keptKeys = sid => new Set(allOffers().filter(o => o.session === String(sid) && o.state === 'kept' && ['rule', 'reword'].includes(o.kind)).map(o => o.key));
 
 const OPEN = new Set(['held', 'pending', 'used']);
 export const openOffers = sid => allOffers().filter(o => o.session === String(sid) && OPEN.has(o.state));
@@ -93,11 +104,16 @@ export const saveOffer = o => writeJson(offerFile(o.id), o);
 
 export const readOffer = id => (typeof id === 'string' && id ? readJsonSafe(offerFile(id)) : null);
 
+// The sweep and the prompt hook read a keep recorded and not yet allowed as a Deny, which is also how a prompt still
+// waiting for the user's answer looks. Once the user allows the very call they recorded, the offer was never denied.
+export const keepable = (o, call = null) => o?.state === 'pending' || (o?.state === 'denied' && call !== null && keepCallFor(o.id)?.call === call);
+
 // Moves an offer on from pending once, so two keeps of one offer can't both write. False when it had already moved.
-export function claimOffer(id) {
+// call is the allowed keep call now running, for an offer marked denied while its prompt was open.
+export function claimOffer(id, call = null) {
   return offersLocked(() => {
     const o = readOffer(id);
-    if (o?.state !== 'pending') return false;
+    if (!keepable(o, call)) return false;
     writeJson(offerFile(id), { ...o, state: 'used' });
     return true;
   });

@@ -37,6 +37,9 @@ export const DEFAULTS = {
 const strings = xs => (Array.isArray(xs) ? xs.filter(x => typeof x === 'string' && x.trim()) : []);
 const local = () => readJsonSafe(vaultPath('vault.local.json')) ?? {};
 
+export const aboveZero = (x, whole = false) => typeof x === 'number' && (whole ? Number.isInteger(x) : Number.isFinite(x)) && x > 0;
+const POSITIVE = [['queue', 'sweepAfterHours', false], ['pages', 'maxOfferChars', true]];
+
 // Paths differ per machine, so they come from the untracked vault.local.json; a file lint finds broken gives none.
 let loaded;
 export function config() {
@@ -48,6 +51,8 @@ export function config() {
     // The agents whose tool names lint checks, in the order a script looks for its own session, each a folder in tools/adapters/.
     const agents = Array.isArray(c.agents) ? c.agents : ['claude-code'];
     loaded = { domains, extractors, agents, proposals: c.proposals, quiet: strings(mine.quiet).filter(g => validGlob(g)), ...Object.fromEntries(Object.entries(DEFAULTS).map(([k, d]) => [k, { ...d, ...c[k] }])) };
+    // Lint reports these; until the user fixes one, its default keeps the sweep off live sessions and the page cap on.
+    for (const [k, f, whole] of POSITIVE) if (!aboveZero(loaded[k][f], whole)) loaded[k][f] = DEFAULTS[k][f];
   }
   return loaded;
 }

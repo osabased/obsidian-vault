@@ -1,10 +1,11 @@
 import { callerEntry, PASS } from './lib/sessions.mjs';
 import { typedFor, currentSession } from './lib/agents.mjs';
 import { useCall } from './lib/calls.mjs';
-import { readOffer, claimOffer, keptOffer, codeConsent, consentOf } from './lib/offers.mjs';
+import { readOffer, claimOffer, keptOffer, keepable, codeConsent, consentOf } from './lib/offers.mjs';
 import { proposeRule } from './lib/propose-rule.mjs';
 import { addDomain } from './lib/add-domain.mjs';
 import { mainWorktree } from './lib/git.mjs';
+import { localDay } from './lib/vault.mjs';
 import { setMode } from './lib/set-mode.mjs';
 import { UsageError, readInput, refuse, failure, line, renderHelp, schemaOf, schemaArg } from './lib/input.mjs';
 
@@ -33,6 +34,7 @@ function notPending(o) {
     return `Offer \`${o.id}\` went to the review queue as \`${u}\`. Propose it again with \`queued: "${u}"\`.`;
   }
   if (o.state === 'superseded') return `offer \`${o.id}\` was replaced by a later offer of the same ${NOUN[o.kind] ?? 'change'}. Keep that one.`;
+  if (o.state === 'denied') return `the user denied keeping offer \`${o.id}\` at the prompt in this session. Don't offer it again unless they ask.`;
   return `offer \`${o.id}\` was already tried once. Propose it again.`;
 }
 
@@ -54,8 +56,8 @@ function keep(sid, input, call) {
   if (typeof p.offer !== 'string' || !p.offer.trim()) refuse('offer is missing: pass the lines the offer was returned with.');
   const o = readOffer(id);
   if (!o || o.session !== String(sid)) refuse(`there's no offer \`${id}\` in this session. Propose it again.`);
-  if (o.state !== 'pending') refuse(notPending(o));
-  if (prompted && !claimOffer(id)) refuse(notPending(readOffer(id) ?? o));
+  if (!keepable(o, prompted ? call : null)) refuse(notPending(o));
+  if (prompted && !claimOffer(id, call)) refuse(notPending(readOffer(id) ?? o));
   if (p.offer.replace(/\r\n?/g, '\n').trimEnd() !== o.text) {
     refuse(prompted
       ? `offer isn't the text propose returned for \`${id}\`, so the user didn't agree to what keep would write. Propose it again.`
@@ -68,7 +70,7 @@ function keep(sid, input, call) {
     kept = { consent: 'code', approved: typedFor(entry)[o.typed] };
     if (!claimOffer(id)) refuse(notPending(readOffer(id) ?? o));
   }
-  Object.assign(kept, { text: o.text, code: o.code, offer: o.id });
+  Object.assign(kept, { text: o.text, code: o.code, offer: o.id, day: o.checked ?? localDay(o.at) });
   const out = o.kind === 'domain' ? addDomain(sid, o.fields, { kept, mainWorktree })
     : o.kind === 'mode' ? setMode(sid, o.fields, { kept })
     : proposeRule(sid, o.fields, { kept });

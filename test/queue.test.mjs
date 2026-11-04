@@ -6,6 +6,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { makeVault, sessionId, userTurn, assistantTurn, recordedCall, keepAllowed, offerOf, prompt, cleanEnv, sectionOf, zqEntityPage as zqPage, ruleNote } from './fixture.mjs';
 import { today } from '../tools/lib/vault.mjs';
+import { codexInput } from './codex.mjs';
 
 // Offers no one answered go to the review queue in raw/queue/ once their session has gone quiet: the sweep at another
 // session's start reads .state/offers/ and the session registry, never a transcript. A Deny is the user's no and isn't
@@ -334,11 +335,17 @@ test('queue.mjs lists open entries oldest first, marks unattended ones, and late
   quiet(v, a);
   const sid = sessionId();
   v.startSession(sid, { cwd: v.root });
+  // The newer entry first in the file, so only the sort by at lists the older one first.
+  const [file] = fs.readdirSync(v.at('raw', 'queue'));
+  const now = Date.now();
+  const dated = queueRows(v).map(r => ({ ...r, at: new Date(r.from === first.id ? now : now - 3600e3).toISOString() }));
+  v.write(`raw/queue/${file}`, dated.sort((x, y) => y.at.localeCompare(x.at)).map(r => `${JSON.stringify(r)}\n`).join(''));
   const env = { CLAUDE_CODE_SESSION_ID: sid };
   const list = v.run('queue.mjs', ['list'], { env });
   assert.equal(list.code, 0, list.stderr);
   const lines = list.stdout.trim().split('\n');
   assert.equal(lines.length, 2, list.stdout);
+  assert.deepEqual(lines.map(l => l.split(' · ')[0]), [`u-${second.slice(2)}`, `u-${first.id.slice(2)}`], 'oldest first');
   assert.match(lines.join('\n'), new RegExp(`u-${first.id.slice(2)}.*unattended: left`));
   assert.doesNotMatch(lines.find(l => l.includes(second.slice(2))), /unattended/);
   const u = `u-${first.id.slice(2)}`;
@@ -448,8 +455,8 @@ test('under off, a queued entry is offered again with the words of the user aski
   assert.equal(bare.code, 1);
   assert.match(bare.stderr, /proposals is off for glim/);
   offered(v.propose(b, { queued: u, asked: 'keep the widget naming rule' }));
-  const other = v.propose(b, { queued: u, slug: 'x' });
-  assert.equal(other.stderr, "Not proposed: queued takes no other field than asked: the entry's own fields are proposed again.\n");
+  const other = v.propose(b, { queued: u, do: 'x' });
+  assert.equal(other.stderr, "Not proposed: queued takes no other field than asked, and repeats or slug for a rule entry: the entry's own fields are proposed again.\n");
 });
 
 test('under corrections, and in the vault folder, an entry proposed again with queued is an offer for the user, not a write', async t => {
@@ -501,6 +508,7 @@ test('lint warns on queue rows of the wrong shape, decisions with no entry or a 
     entry({}),
     entry({ id: 'u-zz', kind: 'bogus', why: 'bored', unattended: 'away' }),
     entry({ id: 'u-0000000b', quote: 'name them after the moon', fields: rule({ quote: 'name them after the moon' }) }),
+    entry({ id: 'u-0000000d', quote: 'name them after the sun', fields: rule({ basis: 'inferred', quote: 'name them after the sun' }) }),
     decision({}),
     decision({ id: 'd-0000000b', decision: 'kept' }),
     decision({ id: 'd-0000000c', decides: 'u-0000000f', decision: 'maybe' }),
@@ -512,6 +520,7 @@ test('lint warns on queue rows of the wrong shape, decisions with no entry or a 
     'd-0000000c decides u-0000000f, which has no entry',
     'd-0000000c records decision "maybe", which is neither kept, dropped nor later',
     'u-0000000b quotes "name them after the moon", which isn\'t in what the user typed in session ' + a.slice(0, 8),
+    'u-0000000d quotes "name them after the sun", which isn\'t in what the user typed in session ' + a.slice(0, 8),
     'u-zz has why "bored", which is none of unreleased, skipped, ignored, unattended or drafted',
     'u-zz has kind "bogus", which is none of rule, evidence, page, reword, retire, domain or move',
     'u-zz has unattended "away", which is none of subagent, headless or left',
@@ -531,4 +540,117 @@ test('review.mjs status lists the entries dropped from the queue with the sessio
   const r = v.run('review.mjs', ['status']);
   assert.equal(r.code, 0, r.stderr);
   assert.deepEqual(sectionOf(r.stdout, 'Review queue entries dropped'), [`- ${u} · glim/tidy-names · dropped ${today()} in session ${sid.slice(0, 8)}`]);
+});
+
+test('a Deny whose call record is past pruneCalls age is still not queued while its offer waits', async t => {
+  const v = makeVault(t, { config: { proposals: 'ask' } });
+  const a = started(v);
+  const o = offered(v.propose(a, rule()));
+  recordedCall(v, a, { offer: o.id, allow: false, input: { id: o.id, offer: o.text } });
+  // The user denied and left without typing again; three days pass before the next session starts.
+  const old = new Date(Date.now() - 3 * 864e5);
+  for (const dir of [v.at('.state', 'calls'), v.at('.state', 'calls', 'offers')]) {
+    for (const name of fs.readdirSync(dir).filter(n => n.endsWith('.json'))) {
+      const file = `${dir}/${name}`;
+      const rec = JSON.parse(fs.readFileSync(file, 'utf8'));
+      if (rec.at) fs.writeFileSync(file, JSON.stringify({ ...rec, at: old.toISOString() }));
+      fs.utimesSync(file, old, old);
+    }
+  }
+  quiet(v, a, 72);
+  (await v.import('lib/calls.mjs')).pruneCalls();
+  started(v);
+  assert.deepEqual(queueRows(v), []);
+  assert.equal(offerAt(v, o.id).state, 'denied');
+  (await v.import('lib/calls.mjs')).pruneCalls();
+  assert.deepEqual(fs.readdirSync(v.at('.state', 'calls')).filter(n => n.endsWith('.json')), [], 'a decided offer frees its call record');
+  assert.deepEqual(fs.readdirSync(v.at('.state', 'calls', 'offers')), []);
+});
+
+test('build leaves queue.md to the holder of queue.lock, and writes it once the lock is free', async t => {
+  const v = makeVault(t, { config: { proposals: 'ask' } });
+  v.write('queue.md', 'stale\n');
+  // A live holder's lock, which goes stale only after 30 s.
+  v.write('.state/queue.lock', `${process.pid}:held`, { settled: false });
+  const { build } = await v.import('lib/build.mjs');
+  const written = build();
+  assert.equal(v.read('queue.md'), 'stale\n');
+  assert.ok(!written.includes('queue.md'), written.join(', '));
+  assert.ok(v.exists('index.md'));
+  fs.rmSync(v.at('.state', 'queue.lock'));
+  assert.ok(build().includes('queue.md'));
+  assert.match(v.read('queue.md'), /^# Review queue/);
+});
+
+test("a registry the sweep can't read counts as live, so its session's offers wait, and tidy keeps it", async t => {
+  const v = makeVault(t, { config: { proposals: 'ask' } });
+  const a = started(v);
+  const o = offered(v.propose(a, rule()));
+  quiet(v, a);
+  v.write(`.state/sessions/${a}.json`, '{"session": "half written');
+  started(v);
+  assert.deepEqual(queueRows(v), []);
+  assert.equal(offerAt(v, o.id).state, 'pending');
+  (await v.import('lib/sessions.mjs')).tidy({ full: true });
+  assert.ok(v.exists(`.state/sessions/${a}.json`), 'tidy pruned a registry it could not read');
+});
+
+test("the sweep's wait for queue.lock is what remains of one deadline, not a second wait", async t => {
+  const v = makeVault(t, { config: { proposals: 'ask' } });
+  const a = started(v);
+  offered(v.propose(a, rule()));
+  quiet(v, a);
+  v.write('.state/offers.lock', `${process.pid}:held`, { settled: false });
+  v.write('.state/queue.lock', `${process.pid}:held`, { settled: false });
+  // The sweep blocks this process while it waits, so another one frees offers.lock partway through.
+  const free = `setTimeout(() => require('fs').rmSync(${JSON.stringify(v.at('.state', 'offers.lock'))}, { force: true }), 1000)`;
+  const child = execFile(process.execPath, ['-e', free]);
+  const exited = new Promise(resolve => child.on('exit', resolve));
+  const { sweep } = await v.import('lib/queue.mjs');
+  const t0 = Date.now();
+  assert.throws(() => sweep(sessionId(), { waitMs: 1600 }), { code: 'ELOCKED' });
+  const took = Date.now() - t0;
+  await exited;
+  assert.ok(took < 2200, `the sweep waited ${took} ms`);
+  fs.rmSync(v.at('.state', 'queue.lock'));
+});
+
+test('a task notification or a message from another session is not a typed message, so an offer before it stays ignored', t => {
+  const v = makeVault(t, { config: { proposals: 'ask' } });
+  const a = started(v);
+  const o = offered(v.propose(a, rule()));
+  prompt(v, a, '<task-notification>\n<task-id>b1x2y3z4w</task-id>\n<status>completed</status>\n</task-notification>');
+  prompt(v, a, 'Another Claude session sent a message:\n<cross-session-message from="local_1">done</cross-session-message>');
+  prompt(v, a, 'Another Claude session sent a message:\n<agent-message from="worker">done</agent-message>');
+  assert.equal(registryOf(v, a).last_prompt, undefined);
+  quiet(v, a);
+  started(v);
+  assert.deepEqual(queueRows(v).map(r => [r.from, r.why, r.unattended]), [[o.id, 'ignored', 'left']]);
+});
+
+test("queue rows keep the session's agent, so a Codex session is named by its last 8 characters once its registry is gone", t => {
+  const v = makeVault(t, { config: { proposals: 'ask', agents: ['claude-code', 'codex'] } });
+  const a = started(v);
+  const o = offered(v.propose(a, rule()));
+  const offer = offerAt(v, o.id);
+  assert.equal(offer.agent, 'claude-code');
+  // An offer from a Codex session whose registry tidy removed: the entry takes the agent the offer recorded.
+  const c = sessionId();
+  const cOffer = { ...offer, id: 'o-c0dec0de', session: c, agent: 'codex', key: 'glim/codex-names' };
+  v.write(`.state/offers/${cOffer.id}.json`, JSON.stringify(cOffer));
+  quiet(v, a);
+  const codex = sessionId();
+  v.hook('session-start', codexInput('SessionStart', { session_id: codex, cwd: v.root }), { agent: 'codex' });
+  const entry = entries(v).find(r => r.from === cOffer.id);
+  assert.equal(entry?.agent, 'codex');
+  assert.ok(v.exists(`raw/queue/${today()}-${c.slice(-8)}.jsonl`));
+  const u = `u-${o.id.slice(2)}`;
+  assert.equal(v.run('queue.mjs', ['drop', u, codex], { env: { CODEX_THREAD_ID: codex } }).code, 0);
+  const [d] = queueRows(v).filter(r => r.decides);
+  assert.equal(d.agent, 'codex');
+  assert.ok(v.exists(`raw/queue/${today()}-${codex.slice(-8)}.jsonl`));
+  fs.rmSync(v.at('.state', 'sessions', `${codex}.json`));
+  const r = v.run('review.mjs', ['status']);
+  assert.equal(r.code, 0, r.stderr);
+  assert.deepEqual(sectionOf(r.stdout, 'Review queue entries dropped'), [`- ${u} · glim/tidy-names · dropped ${today()} in session ${codex.slice(-8)}`]);
 });

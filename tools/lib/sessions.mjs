@@ -1,7 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import {
-  config, vaultPath, statePath, stateDir, readJsonSafe, writeJson, appendJsonl, safeId, shortHash, logError, guarded, hookErrors, errorsLog, domainsFor, sessionReach, toPosix, inVaultFolder, isVaultOnly, olderThan,
+  config, vaultPath, statePath, stateDir, readJson, readJsonSafe, writeJson, appendJsonl, safeId, shortHash, logError, guarded, hookErrors, errorsLog, domainsFor, sessionReach, toPosix, inVaultFolder, isVaultOnly, olderThan,
 } from './vault.mjs';
 import { noteTimes } from './cache.mjs';
 import { sessionIds, shortName } from './agents.mjs';
@@ -10,6 +10,10 @@ import { refuse } from './input.mjs';
 const DAY = 86400e3;
 
 export const registry = id => statePath('sessions', `${id}.json`);
+
+// A session's registry entry, or null when it has none. Any other failure to read or parse it throws, so a caller that
+// takes a missing entry for a session gone never takes an unreadable one for it.
+export const registryEntry = sid => readJson(registry(safeId(sid)), null);
 
 // Scripts take the session id as an argument, so one session can't write under another's.
 export function ownEntry(sid) {
@@ -386,6 +390,9 @@ function prune(id, room) {
 const changedAt = file => fs.statSync(file, { throwIfNoEntry: false })?.mtimeMs ?? 0;
 const markersChanged = id => Math.max(...KINDS.flatMap(kind => [changedAt(vaultPath('.state', kind, id)), changedAt(vaultPath('.state', kind, id, BATCH))]));
 
+// A registry that can't be read counts as seen now, so tidy never prunes a live session over a bad read.
+const seenAt = id => { try { return Date.parse(registryEntry(id)?.last_seen); } catch { return Date.now(); } };
+
 // Nothing marks a session's end, so each day's first session start clears sessions idle for 30 days:
 // by last_seen when registered, otherwise by when their markers last changed. Session start removes at most
 // delivery.tidyMaxMarkers marker files a run and tries again at the next, so a long backlog can't hold it up; /lint
@@ -398,7 +405,7 @@ export function tidy({ full = false } = {}) {
   const registered = new Set(registeredIds());
   for (const id of new Set([...registered, ...KINDS.flatMap(kind => fs.readdirSync(stateDir(kind)))])) {
     try {
-      const seen = registered.has(id) ? Date.parse(readJsonSafe(registry(id))?.last_seen) : markersChanged(id);
+      const seen = registered.has(id) ? seenAt(id) : markersChanged(id);
       if (!olderThan(seen, 30 * DAY)) continue;
       if (room <= 0) { finished = false; break; }
       const r = prune(id, room);
