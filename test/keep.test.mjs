@@ -296,6 +296,28 @@ test('Codex: a reply without the code, after a reply without the offer, or two m
   assert.ok(!v.exists('wiki/glim/rules/tidy-names.md'));
 });
 
+test('Codex: an offer held, three typed messages, released, then one message with its code is kept', t => {
+  const v = codexVault(t);
+  const s = codexStarted(v);
+  const held = v.propose(s.sid, rule({ hold: true }));
+  assert.equal(held.code, 0, held.stderr);
+  const id = /^Held `(o-[0-9a-f]{8})`/.exec(held.stdout)?.[1];
+  assert.ok(id, held.stdout);
+  const before = ['call them by their screen', agentSays('On it.'), 'also fix the header', agentSays('Done.'), 'and the footer', agentSays('Done.'), 'thanks'];
+  s.said(before);
+  const rel = v.propose(s.sid, { release: true });
+  assert.equal(rel.code, 0, rel.stderr);
+  const o = offerOf(rel.stdout);
+  assert.equal(o?.id, id, rel.stdout);
+  assert.match(rel.stdout, /^Offered `o-[0-9a-f]{8}`; nothing is written yet\. End your reply with the lines below as they are\./);
+  s.said([...before, agentSays(`All done.
+
+${o.text}`), `keep ${codeOf(o.text)}`]);
+  const k = keep(v, s.sid, null, { id, offer: o.text });
+  assert.equal(k.code, 0, k.stderr);
+  assert.ok(v.exists('wiki/glim/rules/tidy-names.md'));
+});
+
 test('Codex: proposals and domain go offer then code', t => {
   const v = codexVault(t);
   const s = codexStarted(v, ['switch rules to off']);

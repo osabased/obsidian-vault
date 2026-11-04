@@ -37,6 +37,11 @@ const NOUN = { rule: 'rule', evidence: 'rule', domain: 'domain', mode: 'setting'
 
 function notPending(o) {
   if (o.state === 'kept') return `offer \`${o.id}\` was already kept. Nothing more was written.`;
+  if (o.state === 'held') return `offer \`${o.id}\` is held. Call \`propose\` with \`release: true\` first.`;
+  if (o.state === 'queued') {
+    const u = o.queued_as ?? `u-${o.id.slice(2)}`;
+    return `Offer \`${o.id}\` went to the review queue as \`${u}\`. Propose it again with \`queued: "${u}"\`.`;
+  }
   if (o.state === 'superseded') return `offer \`${o.id}\` was replaced by a later offer of the same ${NOUN[o.kind] ?? 'change'}. Keep that one.`;
   return `offer \`${o.id}\` was already tried once. Propose it again.`;
 }
@@ -73,7 +78,7 @@ function keep(sid, input, call) {
     kept = { consent: 'code', approved: typedFor(entry)[o.typed] };
     if (!claimOffer(id)) refuse(notPending(readOffer(id) ?? o));
   }
-  Object.assign(kept, { text: o.text, code: o.code });
+  Object.assign(kept, { text: o.text, code: o.code, offer: o.id });
   const out = o.kind === 'domain' ? addDomain(sid, o.fields, { kept, mainWorktree })
     : o.kind === 'mode' ? setMode(sid, o.fields, { kept })
     : proposeRule(sid, o.fields, { kept });

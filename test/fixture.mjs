@@ -242,11 +242,11 @@ export function proposeAtOnce(v, rules, { timeout } = {}) {
 // at the prompt, through the fixture vault's own lib/calls.mjs. input is the call's input as the hook saw it, which the
 // script must then be given. Returns the call id.
 let calls = 0;
-export function recordedCall(v, sid, { tool = 'keep', offer = null, allow = true, input = {} } = {}) {
+export function recordedCall(v, sid, { tool = 'keep', offer = null, allow = true, input = {}, subagent = null } = {}) {
   const call = `toolu_fixture${String(++calls).padStart(8, '0')}`;
   const lib = pathToFileURL(v.at('tools', 'lib', 'calls.mjs')).href;
   const code = `const c = await import(${JSON.stringify(lib)}); const a = JSON.parse(process.argv[1]); c.recordCall(a); if (a.allow) c.allowCall(a.call);`;
-  execFileSync(process.execPath, ['--input-type=module', '-e', code, JSON.stringify({ call, session: sid, subagent: null, tool, offer, allow, input })], { env: cleanEnv() });
+  execFileSync(process.execPath, ['--input-type=module', '-e', code, JSON.stringify({ call, session: sid, subagent, tool, offer, allow, input })], { env: cleanEnv() });
   return call;
 }
 

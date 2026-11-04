@@ -14,14 +14,15 @@ import { saidIn, normText, quoteTexts, userPageTexts, inLatest } from './quotes.
 import { ownEntry, marked, markMany, wasShown, carryMarkers, proposeDomains, sessionName } from './sessions.mjs';
 import { setField, yamlQuote, yamlScalar } from './frontmatter.mjs';
 import { subjectRows, laterRows, endedBy, otherLabels } from './picks.mjs';
-import { refuse, line, lines } from './input.mjs';
+import { refuse, line, lines, Refused } from './input.mjs';
 import { typedFor, shortName } from './agents.mjs';
-import { makeOffer, offerText, consentOf, declined } from './offers.mjs';
+import { makeOffer, offerText, consentOf, declined, releaseOffers, claimOffer, keptOffer, REPLY } from './offers.mjs';
+import { entryOf, queueEntry, appendEntry, closeEntry, queueLocked, newId } from './queue.mjs';
 
 // Every field the code below reads, so a field it doesn't read is refused rather than dropped.
 const FIELDS = new Set([
   'domain', 'slug', 'kind', 'do', 'not', 'because', 'topic', 'basis', 'quote', 'page', 'pick', 'reading', 'error', 'fix', 'file',
-  'source', 'source_date', 'keywords', 'applies_to', 'triggers', 'always', 'repeats', 'asked',
+  'source', 'source_date', 'keywords', 'applies_to', 'triggers', 'always', 'repeats', 'asked', 'hold', 'release', 'queued',
 ]);
 
 const PASS = "The vault's tools pass the session id themselves. From a shell, pass it as the first argument, or run this from the agent's own shell, which sets its session variable.";
@@ -78,7 +79,7 @@ function evidence(f, p) {
   return { kind: 'source', said: quote, date, source: cited, cite: `${cited} · dated ${date} · "${quote}"` };
 }
 
-function checkQuote(session, e) {
+function checkQuote(session, e, queued) {
   if (e.page) {
     const texts = userPageTexts(e.page);
     if (!texts) refuse(`${e.page} isn't an author: user page. Only a page the user marked author: user holds their words.`);
@@ -97,6 +98,8 @@ function checkQuote(session, e) {
   }
   if (e.pick || !['stated', 'correction'].includes(e.kind)) return;
   const typed = typedFor(session);
+  // The entry kept the words that passed the check when it was made, as an inbox row does once its transcript is gone.
+  if (!typed && queued && saidIn(e.said, [queued.quote ?? ''])) return;
   if (!typed) {
     refuse("the taste vault has no transcript for this session, so it can't check the quote is the user's words. Give your own reading with basis reading instead.");
   }
@@ -261,20 +264,23 @@ function withEvidence(text, entry) {
 
 // Outside the vault folder, where /ingest goes through each rule with the user, ask and off only offer the rule once
 // every other check has passed, and keep writes it once the user agrees, so what the user agrees to is what gets written.
-// Kept, the offer's text must still be what these fields give: the rule a repeat backs may have changed since.
+// Kept, the offer's text must still be what these fields give: the rule a repeat backs may have changed since. A held
+// rule waits for release whatever the mode, and a queued one waits for the user's review.
 function consent(f, domain, kind, key, offer) {
   if (f.kept) {
     if (offerText(offer, f.kept.code) !== f.kept.text) refuse("the vault changed since the offer, so it isn't what the user agreed to. Propose it again.");
     return null;
   }
   const mode = proposalMode(domain);
-  if (mode === 'corrections' || inVaultFolder(f.folder)) return null;
+  const vault = inVaultFolder(f.folder);
+  const writes = mode === 'corrections' || vault;
+  if (writes && !f.hold && !f.queueAs) return null;
   // Checked before the offer, which no answer could approve without a transcript.
-  if ((mode === 'off' || consentOf(f.session) === 'code') && !typedFor(f.session)) {
+  if (!writes && !f.queueAs && (mode === 'off' || consentOf(f.session) === 'code') && !typedFor(f.session)) {
     refuse("the taste vault has no transcript for this session, so it can't check the user agreed. Ask the user to write the rule in Obsidian.");
   }
   // A filter with no power to write: an offer the user didn't ask for raises no prompt.
-  if (mode === 'off') {
+  if (!vault && mode === 'off') {
     if (!f.asked) refuse(`proposals is off for ${domain}: propose a rule only when the user asks you to keep one, with their words asking as asked.`);
     if (!inLatest(f.session, f.asked)) refuse("asked isn't in the user's latest message. Wait for the user to ask for the rule, and pass their words as asked once they do.");
   }
@@ -320,18 +326,65 @@ const where = f => {
   return `${parts[0].toUpperCase()}${parts.slice(1)}`;
 };
 
+const RELEASE_HEAD = 'Call `keep` for each offer below, then say in your final reply what was kept.';
+
+// Held offers are released together once the task is done. Where the mode writes at once they are written now; the rest
+// go to the user as offers. The mode is read now, since the user may have changed it since the rule was held.
+function releaseHeld(sid, session, p) {
+  if (p.release !== true) refuse('release must be true.');
+  if (Object.keys(p).length > 1) refuse('release takes no other field. Hold each rule on its own, then release them together.');
+  const held = releaseOffers(sid, typedFor(session)?.length ?? null);
+  if (!held.length) return 'Nothing is held in this session.';
+  const written = [];
+  const offered = [];
+  for (const o of held) {
+    if (proposalMode(o.key.split('/')[0]) !== 'corrections' && !inVaultFolder(session.cwd)) offered.push(o);
+    else if (claimOffer(o.id)) {
+      try {
+        written.push(proposeRule(sid, o.fields, { kept: { text: o.text, code: o.code, offer: o.id } }));
+        keptOffer(o.id);
+      } catch (e) {
+        if (!(e instanceof Refused)) throw e;
+        written.push(`Not written \`${o.id}\`: ${e.message}`);
+      }
+    }
+  }
+  const blocks = offered.map(o => `${REPLY[o.code ? 'code' : 'prompt'](o.id)}\n\n${o.text}`);
+  return [...written, ...(blocks.length && consentOf(session) === 'prompt' ? [RELEASE_HEAD] : []), ...blocks].join('\n\n');
+}
+
+// An entry is proposed again from its own fields, and its quote checked against the session it was typed in.
+function fromQueue(p) {
+  if (Object.keys(p).some(k => !['queued', 'asked'].includes(k))) refuse("queued takes no other field than asked: the entry's own fields are proposed again.");
+  const id = line(p, 'queued');
+  const { entry, decided } = entryOf(id);
+  if (!entry) refuse(`there's no entry \`${id}\` in raw/queue/.`);
+  if (decided) refuse(`\`${id}\` was already ${decided}.`);
+  if (!['rule', 'evidence'].includes(entry.kind)) refuse(`\`${id}\` is a ${entry.kind} entry, which propose doesn't take.`);
+  return entry;
+}
+
 // The input is read after the session is checked, so a script run from the wrong place says that first: p is the input,
 // or a function that reads it. kept is how the user agreed to the offer keep writes: { consent: 'prompt' }, or
-// { consent: 'code', approved } with their typed reply, and the offer's text and code to check it against.
-export function proposeRule(sid, p, { kept = null } = {}) {
+// { consent: 'code', approved } with their typed reply, and the offer's id, text and code to check it against. queueAs
+// sends the rule to the review queue instead of offering it: { why, unattended, reply } gives the entry's reasons and
+// what to say once it is queued.
+export function proposeRule(sid, p, { kept = null, queueAs = null } = {}) {
   const session = sessionOf(sid);
   if (typeof p === 'function') p = p();
+  // A subagent's rules wait in the queue, so the session's held offers and the queue's entries are left to the main agent.
+  for (const k of ['release', 'queued']) if (queueAs && p && Object.hasOwn(p, k)) refuse(`a subagent's rules wait in the review queue for the user, so ${k} is for the main session.`);
+  if (p && Object.hasOwn(p, 'release')) return releaseHeld(sid, session, p);
+  const queued = p && Object.hasOwn(p, 'queued') ? fromQueue(p) : null;
+  if (queued) p = { ...queued.fields, ...(Object.hasOwn(p, 'asked') ? { asked: p.asked } : {}) };
   const unknown = Object.keys(p).find(k => !FIELDS.has(k));
   if (unknown) refuse(`${unknown} isn't a field propose.mjs takes. Fields like requires and tools are added to the note by hand. The \`propose\` tool's schema lists the fields.`);
   const domains = [...session.domains, 'global'];
   // Slugs compare in NFC, so a slug typed with combining accents names the same note as its composed spelling.
   const f = { sid, name: shortName(sid, session.agent), domain: line(p, 'domain').normalize('NFC'), slug: line(p, 'slug').normalize('NFC') };
-  Object.assign(f, { session, folder: session.cwd, asked: line(p, 'asked', false), kept });
+  Object.assign(f, { session, folder: session.cwd, asked: line(p, 'asked', false), kept, queueAs, queued: queued?.id ?? null });
+  f.hold = p.hold ?? false;
+  if (typeof f.hold !== 'boolean') refuse('hold must be true or false.');
   // A vault-only domain isn't offered, and the note's own check says why it takes no rule.
   if (!domains.includes(f.domain) && !isVaultOnly(f.domain)) {
     refuse(`domain must be ${joinList(domains, 'or')}. For a rule that holds only in projects of a kind no domain covers, suggest a new domain to the user, and once they agree start it with the vault's \`domain\` tool.`);
@@ -354,7 +407,8 @@ export function proposeRule(sid, p, { kept = null } = {}) {
   f.repeats = line(p, 'repeats', false).normalize('NFC');
   if (f.repeats && !KEY_RE.test(f.repeats)) refuse('repeats must be a rule key like example-ui/flat-buttons.');
   const e = evidence(f, p);
-  checkQuote(session, e);
+  if (queued && !e.pick) Object.assign(e, { day: queued.checked, session: sessionName(queued.session, queued.agent) });
+  checkQuote(queued ? { agent: queued.agent, transcript: queued.transcript } : session, e, queued);
   if (f.kind === 'knowledge') f.as_of = e.date ?? today();
 
   const at = new Date().toISOString();
@@ -368,7 +422,10 @@ export function proposeRule(sid, p, { kept = null } = {}) {
   const cap = maxChars(n.kind);
   if (ruleText(n).length > cap) refuse(`${ruleTextParts(n)} come to ${ruleText(n).length} characters; keep them under ${cap} together.`);
 
-  const out = withLock(statePath('propose.lock'), () => {
+  // Under queue.lock too for a queued entry, so a drop can't land between the check and the kept row.
+  const out = withLock(statePath('propose.lock'), () => (queued ? queueLocked : fn => fn())(() => {
+    const decided = queued && entryOf(queued.id).decided;
+    if (decided) refuse(`\`${queued.id}\` was already ${decided}.`);
     const rows = proposalRows();
     // Any later session can re-propose a recorded answer, so each one backs a single rule.
     const earlier = e.pick && rows.find(r => r.pick === e.pick);
@@ -379,12 +436,19 @@ export function proposeRule(sid, p, { kept = null } = {}) {
     // Read under the lock, so a proposal written meanwhile is on the list.
     const notes = loadNotes();
     const rules = liveRules(notes);
+    // A queued entry's row names the session the words were typed in, so lint finds them there or in this row.
+    const from = queued ?? { ...session, session: sid };
     const row = note => ({
       id: f.id, at, source: 'agent', kind: e.kind, text: e.said, ...(e.fix ? { fix: e.fix } : {}),
-      note, session: sid, agent: session.agent ?? null, transcript: session.transcript ?? null, cwd: session.cwd ?? null, domain: rules[note]?.domain ?? f.domain, ...(e.pick ? { pick: e.pick } : {}), ...(e.page ? { page: e.page } : {}),
-      ...(kept ? { consent: kept.consent, ...(kept.approved ? { approved: kept.approved } : {}) } : {}),
+      note, session: from.session, agent: from.agent ?? null, transcript: from.transcript ?? null, cwd: from.cwd ?? null, domain: rules[note]?.domain ?? f.domain, ...(e.pick ? { pick: e.pick } : {}), ...(e.page ? { page: e.page } : {}),
+      ...(kept?.consent ? { consent: kept.consent, ...(kept.approved ? { approved: kept.approved } : {}) } : {}),
+      ...(queued ? { queued: queued.id } : {}),
     });
-    if (f.repeats) return addEvidence(f, e, scope, rules, same, row, notes);
+    const done = reply => {
+      if (queued && typeof reply === 'string') closeEntry({ id: queued.id, decision: 'kept', offer: kept?.offer ?? null, sid, agentName: session.agent });
+      return reply;
+    };
+    if (f.repeats) return done(addEvidence(f, e, scope, rules, same, row, notes));
     const taken = readNote(key, notes);
     if (taken) refuse(`${taken.rel} already exists. Pick another slug, or leave that note to the user.`);
     const overlaps = checkRepeats(f, ruleText(n), scope, rules, same, notes);
@@ -399,13 +463,25 @@ export function proposeRule(sid, p, { kept = null } = {}) {
       ...(overlaps.length ? [`It may overlap ${joinList(overlaps, 'and')}.`] : []),
       `It applies from now on. To change or remove it, edit or delete ${toPosix(file)}.`,
     ];
-    return [`Wrote ${rel}. ${sameFiles(f, n, notes, rules)}End your reply with these ${['two', 'three'][reply.length - 2]} lines as they are:`, '', ...reply].join('\n');
-  });
+    return done([`Wrote ${rel}. ${sameFiles(f, n, notes, rules)}End your reply with these ${['two', 'three'][reply.length - 2]} lines as they are:`, '', ...reply].join('\n'));
+  }));
   if (out.offer) {
+    const { asked, hold, ...given } = p;
+    const fields = queued ? { queued: queued.id } : given;
+    // The words a quote check passed against the transcript, kept for when it is gone.
+    const quote = !e.page && !e.pick && ['stated', 'correction'].includes(e.kind) ? e.said : null;
+    if (queueAs) {
+      const id = newId('u');
+      appendEntry(queueEntry({
+        id, kind: out.offer.kind, why: queueAs.why, unattended: queueAs.unattended, from: null, session: sid, entry: session,
+        domain: out.offer.key.split('/')[0], key: out.offer.key, fields, text: offerText(out.offer.lines, null), quote, checked: today(),
+      }), f.name);
+      return queueAs.reply(id);
+    }
     // Made once the propose lock is released, so no propose holds two locks at once.
     if (consentOf(session) === 'prompt' && declined(sid, offerText(out.offer.lines, null))) refuse("the user denied keeping this rule at the prompt in this session. Don't offer it again unless they ask.");
-    const { asked, ...fields } = p;
-    return makeOffer({ ...out.offer, sid, entry: session, fields }).reply;
+    const extra = { quote, checked: queued?.checked ?? today() };
+    return makeOffer({ ...out.offer, sid, entry: session, fields, hold: f.hold, extra }).reply;
   }
   // The rebuild takes seconds at thousands of notes, so it runs after the lock is released rather than hold up the other
   // proposes. The note is written by now, so a failed build costs the generated files, not the reply that names the rule.

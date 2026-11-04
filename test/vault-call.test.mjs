@@ -84,6 +84,23 @@ test('a second keep after one the user allowed is denied as spent, not as denied
   assert.ok(!v.exists('.state/calls/toolu_k3.json'));
 });
 
+test('a keep of a held offer is denied before it is recorded, so the offer keeps its one keep for after release', t => {
+  const v = makeVault(t, { config: { proposals: 'ask' } });
+  const sid = sessionId();
+  v.startSession(sid);
+  const r = v.propose(sid, {
+    domain: 'glim', slug: 'held-one', topic: 'code', basis: 'reading', reading: 'The user renamed three widgets after their screens.',
+    do: 'Name widgets after their screen.', not: 'Leave widget names bare.', keywords: ['widgetz'], hold: true,
+  });
+  const id = /^Held `(o-[0-9a-f]{8})`/.exec(r.stdout)?.[1];
+  assert.ok(id, r.stderr);
+  const out = v.hook('vault-call', AGENTS[0].input({
+    session_id: sid, cwd: v.project, tool_name: AGENTS[0].tool('keep'), tool_use_id: 'toolu_h1', tool_input: { id, offer: 'text' },
+  }), { agent: 'claude-code' });
+  assert.equal(denied(out), `Offer \`${id}\` is held. Call \`propose\` with \`release: true\` first.`);
+  assert.ok(!v.exists('.state/calls/toolu_h1.json'));
+});
+
 test('Codex: a keep retried for one offer is recorded, not denied, and carries no offer', async t => {
   const v = vault(t);
   const sid = sessionId();

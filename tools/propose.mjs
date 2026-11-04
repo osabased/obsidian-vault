@@ -2,8 +2,9 @@ import { domainTopics } from './lib/rules.mjs';
 import { proposeRule } from './lib/propose-rule.mjs';
 import { UsageError, readInput, failure, renderHelp, schemaOf, schemaArg } from './lib/input.mjs';
 import { currentSession } from './lib/agents.mjs';
+import { readCall } from './lib/calls.mjs';
 
-const RUN = 'usage: node tools/propose.mjs [session-id] < rule.json';
+const RUN = 'usage: node tools/propose.mjs [session-id] [call-id] < rule.json';
 const USAGE = `${RUN}\n       node tools/propose.mjs --help lists the fields of rule.json`;
 
 const topicLines = () => [...domainTopics()].flatMap(([d, topics]) => (topics.length ? [`  ${d}: ${topics.join(', ')}`] : []));
@@ -33,6 +34,9 @@ const fields = () => [
   { name: 'always', type: 'boolean', describe: 'see triggers' },
   { name: 'repeats', type: S, help: ['optional, the key of the rule in the vault this one repeats, like example-ui/flat-buttons:', "propose.mjs adds this rule's Evidence line to that note and writes no new one"] },
   { name: 'asked', type: S, help: ["the user's words asking you to keep the rule, as they typed them in their latest message. Needed outside", 'the vault folder when proposals is off for the domain.'] },
+  { name: 'hold', type: 'boolean', help: ['true holds the offer until you release it'] },
+  { name: 'release', type: 'boolean', help: ['true, alone: returns every offer this session holds'] },
+  { name: 'queued', type: S, help: ['alone: the id of a review queue entry (u-) to offer again'] },
 ];
 
 const help = () => renderHelp([RUN, '', 'rule.json is an object with these fields:'], fields(), [
@@ -53,8 +57,14 @@ try {
   const variant = schemaArg(args);
   if (variant) console.log(JSON.stringify(schemaOf(SUMMARY[variant], fields())));
   else if (args[0] === '--help' && args.length === 1) console.log(help());
-  else if (args.length > 1) throw new UsageError();
-  else console.log(proposeRule(args[0] ?? currentSession()?.id, readInput));
+  else if (args.length > 2) throw new UsageError();
+  else {
+    // A subagent's user is its caller, who can't answer the prompt, so its rules wait in the queue for the user.
+    const queueAs = readCall(args[1])?.subagent
+      ? { why: 'unattended', unattended: 'subagent', reply: id => `Queued \`${id}\` for the user's review; nothing is written. Tell your caller what you queued.` }
+      : null;
+    console.log(proposeRule(args[0] ?? currentSession()?.id, readInput, { queueAs }));
+  }
 } catch (e) {
   const f = failure(e, 'propose', USAGE, 'Not proposed');
   console.error(f.message);

@@ -2,10 +2,11 @@ import fs from 'node:fs';
 import { vaultPath, writeText, writeJson, lf, statePath, withLock } from './vault.mjs';
 import { loadNotes, liveRules, renderActive, renderIndex, readDerived } from './rules.mjs';
 import { renderDecisions } from './picks.mjs';
+import { renderQueue } from './queue.mjs';
 import { markBuilt, changedSinceBuild, refStats } from './cache.mjs';
 import { derive } from './sources.mjs';
 
-const render = notes => ({ 'active.md': renderActive(liveRules(notes)), 'index.md': renderIndex(notes), 'decisions.md': renderDecisions() });
+const render = notes => ({ 'active.md': renderActive(liveRules(notes)), 'index.md': renderIndex(notes), 'decisions.md': renderDecisions(), 'queue.md': renderQueue() });
 
 function stale(files, write) {
   const out = [];

@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { makeVault, ruleNote, pageNote, sessionId, prompt, editFile } from './fixture.mjs';
+import { makeVault, ruleNote, pageNote, sessionId, prompt, editFile, userTurn } from './fixture.mjs';
 
 // The status line the user sees at session start, /vault status, and folders the user keeps quiet.
 const context = out => out?.hookSpecificOutput?.additionalContext ?? '';
@@ -95,6 +95,25 @@ test('a resumed start shows the line again, and a compact or clear start shows n
   v.startSession(sid);
   assert.match(v.startSession(sid, { source: 'resume' }).systemMessage, /^vault: glim/);
   for (const source of ['compact', 'clear']) assert.equal(v.startSession(sid, { source })?.systemMessage, undefined);
+});
+
+test('after compaction or /clear, a session holding vault offers is told to release them', t => {
+  const v = filled(t);
+  const sid = sessionId();
+  v.startSession(sid, { transcript: v.transcript(sid, [userTurn('zq names follow the screen')]) });
+  const hold = slug => v.propose(sid, {
+    domain: 'glim', slug, topic: 'plumbing', kind: 'knowledge', basis: 'failure', error: `zq: ${slug} failed`, fix: 'renamed it', file: 'src/a.zq',
+    do: `Zebra ${slug}.`, not: `Plover ${slug}.`, applies_to: [`src/${slug}/**`], hold: true,
+  });
+  const contextOf = out => out?.hookSpecificOutput?.additionalContext ?? '';
+  assert.doesNotMatch(contextOf(v.startSession(sid, { source: 'compact' })), /vault offer/);
+  const q = hold('quartz');
+  assert.equal(q.code, 0, q.stderr);
+  assert.match(contextOf(v.startSession(sid, { source: 'compact' })), /You hold 1 vault offer from before the compaction\. Call `propose` with `release: true` before your final reply\./);
+  const m = hold('mango');
+  assert.equal(m.code, 0, m.stderr);
+  assert.match(contextOf(v.startSession(sid, { source: 'clear' })), /You hold 2 vault offers from before the compaction\. /);
+  assert.doesNotMatch(contextOf(v.startSession(sid, { source: 'resume' })), /vault offer/);
 });
 
 test('a quiet folder keeps the offer to propose to global and drops the domain pitch', t => {

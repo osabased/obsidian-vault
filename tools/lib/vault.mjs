@@ -30,6 +30,7 @@ export const DEFAULTS = {
   editTools: {},
   privacy: { allow: [] },
   compile: { maxBytes: 16_384 },
+  queue: { sweepAfterHours: 12 },
 };
 
 const strings = xs => (Array.isArray(xs) ? xs.filter(x => typeof x === 'string' && x.trim()) : []);
@@ -346,6 +347,7 @@ const sessionFile = (folder, name, day) => vaultPath('raw', folder, `${day}-${sa
 
 export const inboxFile = (name, day = today()) => sessionFile('inbox', name, day);
 export const picksFile = (name, day = today()) => sessionFile('picks', name, day);
+export const queueFile = (name, day = today()) => sessionFile('queue', name, day);
 
 export function datedFiles(folder) {
   const dir = vaultPath('raw', folder);
@@ -374,6 +376,7 @@ const datedRows = folder => datedFiles(folder).flatMap(f => f.rows).sort(byAt);
 
 export const proposalRows = () => datedRows('inbox').filter(r => r.source === 'agent');
 export const pickRows = () => datedRows('picks');
+export const queueRows = () => datedRows('queue');
 
 export function appendLog(lines) {
   const file = vaultPath('log.md');

@@ -8,6 +8,8 @@ import { knowledgeDays } from '../sources.mjs';
 import { touchSession, clearMarkers, markAlways, markShown, tidy, errorsSinceLint, sinceLint } from '../sessions.mjs';
 import { proposeNote, pickNote, uncoveredNote } from '../instructions.mjs';
 import { routesFor, viewOf } from '../reach.mjs';
+import { heldOffers } from '../offers.mjs';
+import { sweep } from '../queue.mjs';
 
 function errorsNote() {
   const errors = errorsSinceLint();
@@ -98,6 +100,7 @@ export async function start(event, agent) {
   let entry = null;
   if (registered) {
     entry = touchSession(event, hits, agent.name);
+    guarded('sweep', () => sweep(event.session));
     if (doms.length) {
       propose = proposeNote(doms, vaultFolder);
       pick = pickNote();
@@ -106,7 +109,10 @@ export async function start(event, agent) {
   // Compaction and /clear start the context again within one session, which already heard these lines.
   const again = ['compact', 'clear'].includes(event.reason);
   const errors = again ? [] : [guarded('hook errors', errorsNote), guarded('undelivered notes', () => undeliveredNote(readable, vaultFolder, ready))];
-  const lead = [...errors, uncovered];
+  // The agent's memory of what it held goes with the compaction, but the offers don't.
+  const held = registered && again ? guarded('held offers', () => heldOffers(event.session).length, 0) : 0;
+  const reminder = held ? `You hold ${plural(held, 'vault offer')} from before the compaction. Call \`propose\` with \`release: true\` before your final reply.` : '';
+  const lead = [...errors, reminder, uncovered];
   // Errors rank first, then the line for a folder no domain reaches, the always rules, the instructions for proposing
   // and recording, and the topics.
   const { text: context, kept } = fitContext([

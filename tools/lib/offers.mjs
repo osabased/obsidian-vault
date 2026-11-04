@@ -10,7 +10,7 @@ import { keepCallFor } from './calls.mjs';
 const CODE = 'ABCDEFGHJKMNPQRSTUVWXYZ23456789';
 const MAX_AGE = 7 * 864e5;
 const offerFile = id => statePath('offers', `${safeId(id)}.json`);
-const locked = fn => withLock(statePath('offers.lock'), fn, { waitMs: 5000 });
+export const offersLocked = fn => withLock(statePath('offers.lock'), fn, { waitMs: 5000 });
 
 export const consentOf = entry => agent(hasAgent(entry?.agent) ? entry.agent : FIRST_AGENT).consent;
 
@@ -22,40 +22,74 @@ function newCode() {
   }
 }
 
-function allOffers() {
+export function allOffers() {
   const dir = stateDir('offers');
   return fs.readdirSync(dir).filter(n => n.endsWith('.json')).map(n => readJsonSafe(`${dir}/${n}`)).filter(o => o?.id);
 }
 
 export const offerText = (lines, code) => [...lines, ...(code ? [`Reply "keep ${code}" to keep it, or say how to word it otherwise.`] : [])].join('\n');
 
-const REPLY = {
+export const REPLY = {
+  held: id => `Held \`${id}\`; nothing is written yet. Don't show it now. Release it with the others when the task is done.`,
   prompt: id => `Offered \`${id}\`; nothing is written yet. Call the vault's \`keep\` tool now with id \`${id}\` and offer set to the lines below, exactly. The user allows or denies it at the prompt; a Deny ends this proposal, so don't offer it again unless they ask.`,
   code: id => `Offered \`${id}\`; nothing is written yet. End your reply with the lines below as they are. If the user's next message has the code, call \`keep\` with id \`${id}\` and offer set to these lines.`,
 };
 
-export function makeOffer({ kind, sid, entry, key, fields, lines }) {
+// A held offer waits for the agent's release and a pending one for the user, so the purge spares both: the sweep moves
+// them to the review queue instead. A mode offer has no place in the queue and goes with the purge.
+const PURGED = new Set(['kept', 'used', 'superseded', 'denied', 'queued']);
+const purged = o => (PURGED.has(o.state) || o.kind === 'mode') && (Date.now() - Date.parse(o.at) >= MAX_AGE || Number.isNaN(Date.parse(o.at)));
+
+// extra carries what the review queue needs if the offer goes there: the quote that passed its check, the day it was
+// checked, and what release does with a held offer.
+export function makeOffer({ kind, sid, entry, key, fields, lines, hold = false, extra = {} }) {
   const code = consentOf(entry) === 'code' ? newCode() : null;
   const text = offerText(lines, code);
   const offer = {
     id: `o-${crypto.randomBytes(4).toString('hex')}`, kind, session: String(sid), key, fields, text,
-    typed: typedFor(entry)?.length ?? null, code, at: new Date().toISOString(), state: 'pending',
+    typed: typedFor(entry)?.length ?? null, code, at: new Date().toISOString(), state: hold ? 'held' : 'pending', ...extra,
   };
-  locked(() => {
+  offersLocked(() => {
     for (const o of allOffers()) {
-      if (Date.now() - Date.parse(o.at) >= MAX_AGE || Number.isNaN(Date.parse(o.at))) removeDir(offerFile(o.id));
-      else if (o.state === 'pending' && o.session === offer.session && o.kind === kind && o.key === key) writeJson(offerFile(o.id), { ...o, state: 'superseded' });
+      if (purged(o)) removeDir(offerFile(o.id));
+      else if (['pending', 'held'].includes(o.state) && o.session === offer.session && o.kind === kind && o.key === key) writeJson(offerFile(o.id), { ...o, state: 'superseded' });
     }
     writeJson(offerFile(offer.id), offer);
   });
-  return { id: offer.id, text, code, reply: `${REPLY[code ? 'code' : 'prompt'](offer.id)}\n\n${text}` };
+  return { id: offer.id, text, code, reply: hold ? REPLY.held(offer.id) : `${REPLY[code ? 'code' : 'prompt'](offer.id)}
+
+${text}` };
 }
+
+export const heldOffers = sid => allOffers().filter(o => o.session === String(sid) && o.state === 'held');
+
+// typed is counted again at release, so a code the user types after the final reply passes codeConsent.
+export function releaseOffers(sid, typed) {
+  return offersLocked(() => heldOffers(sid).sort((a, b) => a.at.localeCompare(b.at)).map(o => {
+    const released = { ...o, state: 'pending', typed, released_at: new Date().toISOString() };
+    writeJson(offerFile(o.id), released);
+    return released;
+  }));
+}
+
+// A keep recorded and never allowed was denied at the prompt, and the user's next message is past it, so the Deny is
+// marked before pruneCalls drops the record that shows it.
+export function markDenied(sid) {
+  offersLocked(() => {
+    for (const o of allOffers()) {
+      if (o.session === String(sid) && o.state === 'pending' && keepCallFor(o.id)?.allowed === null) writeJson(offerFile(o.id), { ...o, state: 'denied' });
+    }
+  });
+}
+
+// For a caller already holding offersLocked.
+export const saveOffer = o => writeJson(offerFile(o.id), o);
 
 export const readOffer = id => (typeof id === 'string' && id ? readJsonSafe(offerFile(id)) : null);
 
 // Moves an offer on from pending once, so two keeps of one offer can't both write. False when it had already moved.
 export function claimOffer(id) {
-  return locked(() => {
+  return offersLocked(() => {
     const o = readOffer(id);
     if (o?.state !== 'pending') return false;
     writeJson(offerFile(id), { ...o, state: 'used' });
@@ -63,7 +97,7 @@ export function claimOffer(id) {
   });
 }
 
-export const keptOffer = id => locked(() => {
+export const keptOffer = id => offersLocked(() => {
   const o = readOffer(id);
   if (o) writeJson(offerFile(id), { ...o, state: 'kept' });
 });
@@ -71,7 +105,7 @@ export const keptOffer = id => locked(() => {
 // The hook records the keep a prompt agent makes before the user answers, and the server marks it allowed only once
 // they allow it, so a recorded keep left unallowed was denied.
 export function declined(sid, text) {
-  return allOffers().some(o => o.session === String(sid) && o.text === text && keepCallFor(o.id)?.allowed === null);
+  return allOffers().some(o => o.session === String(sid) && o.text === text && (o.state === 'denied' || keepCallFor(o.id)?.allowed === null));
 }
 
 // The user's first typed message since the offer holds its code, and the agent's reply before it showed the offer, so
