@@ -12,4 +12,4 @@ fi
 if git diff --cached --name-only | grep -qE '^(tools|test|hooks|\.githooks|\.claude-plugin)/'; then
   node --test --test-reporter=dot "test/*.test.mjs" || exit 1
 fi
-node tools/build.mjs && git add active.md index.md decisions.md && exec node tools/lint.mjs --fail-on error
+node tools/build.mjs && git add active.md index.md decisions.md queue.md && exec node tools/lint.mjs --fail-on error

@@ -157,3 +157,22 @@ Each note the `propose` and `keep` tools write, and each Evidence line they add 
 - `text`: the exact words that back the rule (and `fix` for a failure, `pick` for a recorded answer, `page` for a user's page). Lint checks a quote in a note whose transcript is gone against this.
 - `consent`: how the user agreed to the rule. `prompt` means they allowed the `keep` call at the agent's permission prompt. `code` means they typed the offer's code, and `approved` holds that message as they typed it. A row from a session in the vault folder or in `corrections` mode has neither, and nor has one from before the vault recorded consent, which may hold `approved` words alone.
 - Lint warns on a `consent` other than `prompt` or `code`, and on `code` with no `approved`.
+- `queued`: the review queue entry the rule was proposed again from (see Queue rows). Its `session`, `agent`, `transcript` and `cwd` are that entry's, the session the words were typed in.
+
+## Queue rows
+
+Offers the user never answered, and rules a subagent or `/lint` drafted, wait in `raw/queue/<date>-<session>.jsonl` for the user's review. Rows are never edited. `node tools/build.mjs` writes the open entries to `queue.md`, which the edit hook keeps from hand edits.
+
+```json
+{"id":"u-9f8e7d6c","at":"2026-11-03T10:00:00.000Z","kind":"rule","why":"ignored","unattended":"left","from":"o-9f8e7d6c",
+ "session":"…","agent":"…","transcript":"…","cwd":"…","domain":"global","key":"global/zod-refine-async",
+ "fields":{…},"text":"…","quote":"…","checked":"2026-11-03"}
+```
+
+- `id`: `u-` and the offer's own hex when the entry comes from an offer, so one offer makes one entry; `from` names that offer.
+- `why`: `unreleased` for a held offer the agent never released, `skipped` when the user wrote after seeing the offer without agreeing to it, `ignored` when nothing came after it, `unattended` for a subagent's rule, `drafted` for one `tools/queue.mjs draft` wrote.
+- `unattended`: null, `subagent`, or `left` for an offer after which the user typed nothing at all.
+- `fields`: what `propose` takes to offer the rule again; `text`: the offer's lines.
+- `quote` and `checked`: the words that passed the quote check, and the day. When the transcript is gone, `propose` with `queued` checks the quote against this row.
+
+A decision is a later row: `{"id":"d-…","at":"…","decides":"u-…","decision":"kept|dropped|later","offer":"o-…","session":"…"}`. An entry is open until a `kept` or `dropped` row names it; `later` records that the user has seen it. `propose` with `queued` set to an entry's id, and `asked` where proposals is `off`, offers it again, and writing it appends the `kept` row. `node tools/queue.mjs` lists and shows entries, and appends `drafted` entries and `later` and `dropped` rows.

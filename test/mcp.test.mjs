@@ -194,7 +194,7 @@ test('a bound call runs the script from .live/tools with the session from its re
   assert.deepEqual(seen.sessionVars, []);
   const { readCall } = await v.import('lib/calls.mjs');
   assert.ok(readCall('toolu_k1').allowed, 'a marked call that reached the server was allowed at the prompt');
-  assert.deepEqual(JSON.parse(textOf(await call(c, 'propose', {}, ccMeta('toolu_p1')))).args, [sid]);
+  assert.deepEqual(JSON.parse(textOf(await call(c, 'propose', {}, ccMeta('toolu_p1')))).args, [sid, 'toolu_p1']);
   assert.equal(readCall('toolu_p1').allowed, null, 'an unmarked call is not allowed');
   assert.deepEqual(JSON.parse(textOf(await call(c, 'log', undefined, ccMeta('toolu_l1')))), { ...seen, script: 'log', args: ['--json', sid], input: '{}' });
   assert.deepEqual(JSON.parse(textOf(await call(c, 'search', { words: 'x' }, ccMeta('toolu_s1')))).args, ['--json']);
@@ -251,8 +251,8 @@ test('the server refuses a call it cannot bind, and runs nothing', async t => {
   const r = await call(codex, 'propose', {}, { callId: 'call_c1', threadId: 'another-thread' });
   assert.deepEqual(r, { content: [{ type: 'text', text: MISMATCH }], isError: true });
   assert.deepEqual(runs(v), []);
-  assert.deepEqual(JSON.parse(textOf(await call(codex, 'propose', {}, { callId: 'call_c1', threadId: sid }))).args, [sid]);
-  assert.deepEqual(JSON.parse(textOf(await call(codex, 'propose', {}, { callId: 'call_c2', threadId: 'subagent-thread' }))).args, [sid], "a subagent's thread is its own");
+  assert.deepEqual(JSON.parse(textOf(await call(codex, 'propose', {}, { callId: 'call_c1', threadId: sid }))).args, [sid, 'call_c1']);
+  assert.deepEqual(JSON.parse(textOf(await call(codex, 'propose', {}, { callId: 'call_c2', threadId: 'subagent-thread' }))).args, [sid, 'call_c2'], "a subagent's thread is its own");
   const unknown = await c.request('tools/call', { name: 'nope', arguments: {}, _meta: ccMeta('toolu_r1') });
   assert.equal(unknown.error.code, -32602);
 });
@@ -331,6 +331,25 @@ test('a propose call through the server writes triggers with backslashes exactly
   }, ccMeta('toolu_t1'));
   assert.equal(r.isError, undefined, textOf(r));
   assert.deepEqual(parse(v.read('wiki/glim/rules/new-rule.md')).data.triggers, triggers);
+});
+
+test("a subagent's propose through the server queues the rule for the user's review and makes no offer", async t => {
+  const v = liveVault(t, { stubs: false });
+  const sid = sessionId();
+  v.startSession(sid);
+  await recorded(v, { call: 'toolu_q1', session: sid, subagent: 'agent-7', tool: 'propose' });
+  const c = await open(t, v, CC);
+  const r = await call(c, 'propose', {
+    domain: 'glim', slug: 'sub-rule', topic: 'code', basis: 'reading', reading: 'The build failed twice on quartz.',
+    do: 'Zebra quartz mango.', not: 'Plover lantern ember.', applies_to: ['src/sub/**'],
+  }, ccMeta('toolu_q1'));
+  assert.equal(r.isError, undefined, textOf(r));
+  const id = /^Queued `(u-[0-9a-f]{8})` for the user's review; nothing is written\. Tell your caller what you queued\.$/.exec(textOf(r))?.[1];
+  assert.ok(id, textOf(r));
+  assert.ok(!v.exists('wiki/glim/rules/sub-rule.md'));
+  assert.deepEqual(fs.existsSync(v.at('.state', 'offers')) ? fs.readdirSync(v.at('.state', 'offers')).filter(f => f.endsWith('.json')) : [], []);
+  const rows = fs.readdirSync(v.at('raw', 'queue')).flatMap(f => v.read(`raw/queue/${f}`).trim().split('\n').map(l => JSON.parse(l)));
+  assert.deepEqual(rows.map(x => [x.id, x.kind, x.why, x.unattended, x.from, x.session, x.key]), [[id, 'rule', 'unattended', 'subagent', null, sid, 'glim/sub-rule']]);
 });
 
 test('pending until package B: the real propose and keep answer --schema, and keep takes id and offer on both clients', async t => {

@@ -17,6 +17,7 @@ function vaultGuard(file, cwd) {
   if (low === 'active.md' || low === 'index.md') return `${rel} is generated from the notes. Edit the notes instead, then run \`node tools/build.mjs\`.`;
   if (low === 'vault.local.json') return `${rel} lists this machine's project folders for each domain. \`node tools/domain.mjs\` adds a session's folder once the user agrees to a new domain; otherwise leave it to the user.`;
   if (low === 'decisions.md') return `${rel} is generated from the picks in raw/picks/. Record picks with tools/pick.mjs instead.`;
+  if (low === 'queue.md') return `${rel} is generated from the entries in raw/queue/. Use tools/queue.mjs instead.`;
   if (low === 'derived' || low.startsWith('derived/')) return 'derived/ is written by extraction, not edited by hand. A better extraction replaces the file.';
   if (low === '.state' || low.startsWith('.state/')) return ".state/ is the hooks' own bookkeeping. Leave it to them.";
   if (low === '.live' || low.startsWith('.live/')) return '`.live/` is a copy of `tools/` as of the last commit. Change `tools/` and commit instead.';

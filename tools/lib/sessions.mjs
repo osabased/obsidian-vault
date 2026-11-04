@@ -20,7 +20,9 @@ export function ownEntry(sid) {
 // `cwd` stays where the session registered, so a move into the vault folder doesn't let it propose for every domain;
 // `last_cwd` is the folder of its latest prompt or start, which /vault status counts for. Session start passes what sessionReach found for its folder, markers below it among them, so prompts, pick.mjs and
 // propose.mjs read the domains and their project roots here rather than scan the tree again.
-export function touchSession(event, hits, agent) {
+// last_prompt is set only by a typed message, so the queue's sweep can tell an offer the user wrote past from one a
+// resume merely reopened.
+export function touchSession(event, hits, agent, { prompted = false } = {}) {
   const id = safeId(event.session);
   const file = registry(id);
   const prev = readJsonSafe(file) ?? {};
@@ -31,6 +33,7 @@ export function touchSession(event, hits, agent) {
     cwd: prev.cwd ?? event.cwd ?? null,
     last_cwd: event.cwd ?? prev.last_cwd ?? null,
     last_seen: new Date().toISOString(),
+    ...(prompted ? { last_prompt: new Date().toISOString() } : prev.last_prompt ? { last_prompt: prev.last_prompt } : {}),
     // A start in a folder no domain reaches records the folder alone, so its domains are found again from the config and
     // one added later reaches the session from its next prompt rather than its next start.
     ...(hits?.length
