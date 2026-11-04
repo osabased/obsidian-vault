@@ -1,4 +1,4 @@
-import { sessionReach, isQuiet, vaultPath, toPosix, guarded, config, plural, clock, daysBetween } from '../vault.mjs';
+import { sessionReach, isQuiet, vaultPath, toPosix, guarded, config, plural, clock, daysBetween, skipIfLocked } from '../vault.mjs';
 import { statusLine } from '../status.mjs';
 import { alwaysContext, alwaysIn, fitContext, indexNote, scopeTopics, loadNotesAsync, settledNotes, deliveryFor, readDerived, clip, undelivered, knownDomain, joinList } from '../rules.mjs';
 import { build } from '../build.mjs';
@@ -85,7 +85,7 @@ export async function start(event, agent) {
     derived = readDerived();
     if (derived && !changedSinceBuild(notes, walked, refs)) return;
     derived = undefined;
-    try { build({ waitMs: Math.min(2000, remaining()), refs }); } catch (e) { if (e?.code !== 'ELOCKED') throw e; }
+    skipIfLocked(() => build({ waitMs: Math.min(2000, remaining()), refs }));
   });
   const view = viewOf(reach, settledNotes(notes), deliveryFor(hits, derived && { derived }));
   const { notes: ready, ctx, rules } = view;
@@ -101,9 +101,7 @@ export async function start(event, agent) {
   if (registered) {
     entry = touchSession(event, hits, agent.name);
     // Another session sweeping or keeping holds the locks only briefly, and the next session start sweeps what this one leaves.
-    guarded('sweep', () => {
-      try { sweep(event.session, { waitMs: Math.min(2000, remaining()) }); } catch (e) { if (e?.code !== 'ELOCKED') throw e; }
-    });
+    guarded('sweep', () => skipIfLocked(() => sweep(event.session, { waitMs: Math.min(2000, remaining()) })));
     if (doms.length) {
       propose = proposeNote(doms, vaultFolder);
       pick = pickNote();

@@ -1,6 +1,6 @@
 import crypto from 'node:crypto';
 import fs from 'node:fs';
-import { statePath, stateDir, readJsonSafe, writeJson, removeDir, safeId, withLock } from './vault.mjs';
+import { statePath, stateDir, readJsonSafe, writeJson, removeDir, safeId, withLock, newId } from './vault.mjs';
 import { normText } from './quotes.mjs';
 import { agent, hasAgent, FIRST_AGENT, typedFor } from './agents.mjs';
 import { keepCallFor } from './calls.mjs';
@@ -28,12 +28,16 @@ export function allOffers() {
 }
 
 export const offerText = (lines, code) => [...lines, ...(code ? [`Reply "keep ${code}" to keep it, or say how to word it otherwise.`] : [])].join('\n');
+// The offer's lines without the code line offerText adds.
+export const plainText = o => (o.code ? o.text.slice(0, o.text.lastIndexOf('\n')) : o.text);
 
-export const REPLY = {
+const REPLY = {
   held: id => `Held \`${id}\`; nothing is written yet. Don't show it now. Release it with the others when the task is done.`,
   prompt: id => `Offered \`${id}\`; nothing is written yet. Call the vault's \`keep\` tool now with id \`${id}\` and offer set to the lines below, exactly. The user allows or denies it at the prompt; a Deny ends this proposal, so don't offer it again unless they ask.`,
   code: id => `Offered \`${id}\`; nothing is written yet. End your reply with the lines below as they are. If the user's next message has the code, call \`keep\` with id \`${id}\` and offer set to these lines.`,
 };
+
+export const offerReply = o => `${REPLY[o.code ? 'code' : 'prompt'](o.id)}\n\n${o.text}`;
 
 // A held offer waits for the agent's release and a pending one for the user, so the purge spares both: the sweep moves
 // them to the review queue instead. A mode offer has no place in the queue and goes with the purge.
@@ -46,7 +50,7 @@ export function makeOffer({ kind, sid, entry, key, fields, lines, hold = false, 
   const code = consentOf(entry) === 'code' ? newCode() : null;
   const text = offerText(lines, code);
   const offer = {
-    id: `o-${crypto.randomBytes(4).toString('hex')}`, kind, session: String(sid), key, fields, text,
+    id: newId('o'), kind, session: String(sid), key, fields, text,
     typed: typedFor(entry)?.length ?? null, code, at: new Date().toISOString(), state: hold ? 'held' : 'pending', ...extra,
   };
   offersLocked(() => {
@@ -56,9 +60,7 @@ export function makeOffer({ kind, sid, entry, key, fields, lines, hold = false, 
     }
     writeJson(offerFile(offer.id), offer);
   });
-  return { id: offer.id, text, code, reply: hold ? REPLY.held(offer.id) : `${REPLY[code ? 'code' : 'prompt'](offer.id)}
-
-${text}` };
+  return { id: offer.id, text, code, reply: hold ? REPLY.held(offer.id) : offerReply(offer) };
 }
 
 export const heldOffers = sid => allOffers().filter(o => o.session === String(sid) && o.state === 'held');
@@ -73,12 +75,13 @@ export function releaseOffers(sid, typed) {
 }
 
 // A keep recorded and never allowed was denied at the prompt, and the user's next message is past it, so the Deny is
-// marked before pruneCalls drops the record that shows it.
+// marked before pruneCalls drops the record that shows it. Every prompt runs it, so it takes the lock only when a read
+// without it finds an offer to mark.
 export function markDenied(sid) {
+  const denied = o => o.session === String(sid) && o.state === 'pending' && keepCallFor(o.id)?.allowed === null;
+  if (!allOffers().some(denied)) return;
   offersLocked(() => {
-    for (const o of allOffers()) {
-      if (o.session === String(sid) && o.state === 'pending' && keepCallFor(o.id)?.allowed === null) writeJson(offerFile(o.id), { ...o, state: 'denied' });
-    }
+    for (const o of allOffers()) if (denied(o)) writeJson(offerFile(o.id), { ...o, state: 'denied' });
   });
 }
 

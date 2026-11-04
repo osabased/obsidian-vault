@@ -1,8 +1,7 @@
 import fs from 'node:fs';
-import crypto from 'node:crypto';
 import {
   vaultPath, writeSettled, appendJsonl, appendLog, inboxFile, proposalRows, pickRows, statePath, withLock, today, localDay, toPosix, guarded,
-  shortHash, isVaultOnly, sessionReach, cwdOf, proposalMode, inVaultFolder,
+  shortHash, isVaultOnly, sessionReach, cwdOf, proposalMode, inVaultFolder, newId,
 } from './vault.mjs';
 import {
   KEY_RE, BASES, wrongBasis, parseNote, noteErrors, ruleText, ruleTextParts, loadNotes, readNote, liveRules, mentions, isUrl, validDay, byKey, normTopic, domainTopics, vaultFile, joinList,
@@ -16,8 +15,8 @@ import { setField, yamlQuote, yamlScalar } from './frontmatter.mjs';
 import { subjectRows, laterRows, endedBy, otherLabels } from './picks.mjs';
 import { refuse, line, lines, Refused } from './input.mjs';
 import { typedFor, shortName } from './agents.mjs';
-import { makeOffer, offerText, consentOf, declined, releaseOffers, claimOffer, keptOffer, REPLY } from './offers.mjs';
-import { entryOf, queueEntry, appendEntry, closeEntry, queueLocked, newId } from './queue.mjs';
+import { makeOffer, offerText, offerReply, consentOf, declined, releaseOffers, claimOffer, keptOffer } from './offers.mjs';
+import { entryOf, queueEntry, appendEntry, closeEntry, queueLocked } from './queue.mjs';
 
 // Every field the code below reads, so a field it doesn't read is refused rather than dropped.
 const FIELDS = new Set([
@@ -277,7 +276,7 @@ function consent(f, domain, kind, key, offer) {
   const writes = mode === 'corrections' || vault;
   if (writes && !f.hold && !f.queueAs && !f.queued) return null;
   // Checked before the offer, which no answer could approve without a transcript.
-  if ((!writes || f.queued) && !f.queueAs &&(mode === 'off' || consentOf(f.session) === 'code') && !typedFor(f.session)) {
+  if ((!writes || f.queued) && !f.queueAs && (mode === 'off' || consentOf(f.session) === 'code') && !typedFor(f.session)) {
     refuse("the taste vault has no transcript for this session, so it can't check the user agreed. Ask the user to write the rule in Obsidian.");
   }
   // A filter with no power to write: an offer the user didn't ask for raises no prompt.
@@ -350,7 +349,7 @@ function releaseHeld(sid, session, p) {
       }
     }
   }
-  const blocks = offered.map(o => `${REPLY[o.code ? 'code' : 'prompt'](o.id)}\n\n${o.text}`);
+  const blocks = offered.map(offerReply);
   return [...written, ...(blocks.length && consentOf(session) === 'prompt' ? [RELEASE_HEAD] : []), ...blocks].join('\n\n');
 }
 
@@ -413,7 +412,7 @@ export function proposeRule(sid, p, { kept = null, queueAs = null } = {}) {
   if (f.kind === 'knowledge') f.as_of = e.date ?? today();
 
   const at = new Date().toISOString();
-  Object.assign(f, { day: today(), id: `a-${crypto.randomBytes(4).toString('hex')}` });
+  Object.assign(f, { day: today(), id: newId('a') });
   const text = noteText(f, e);
   const rel = `wiki/${f.domain}/rules/${f.slug}.md`;
   const n = parseNote(text, rel);
