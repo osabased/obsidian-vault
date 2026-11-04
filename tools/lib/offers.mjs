@@ -10,7 +10,7 @@ import { keepCallFor } from './calls.mjs';
 const CODE = 'ABCDEFGHJKMNPQRSTUVWXYZ23456789';
 const MAX_AGE = 7 * 864e5;
 const offerFile = id => statePath('offers', `${safeId(id)}.json`);
-export const offersLocked = fn => withLock(statePath('offers.lock'), fn, { waitMs: 5000 });
+export const offersLocked = (fn, waitMs = 5000) => withLock(statePath('offers.lock'), fn, { waitMs });
 
 export const consentOf = entry => agent(hasAgent(entry?.agent) ? entry.agent : FIRST_AGENT).consent;
 

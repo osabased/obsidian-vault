@@ -350,6 +350,7 @@ test("a subagent's propose through the server queues the rule for the user's rev
   assert.deepEqual(fs.existsSync(v.at('.state', 'offers')) ? fs.readdirSync(v.at('.state', 'offers')).filter(f => f.endsWith('.json')) : [], []);
   const rows = fs.readdirSync(v.at('raw', 'queue')).flatMap(f => v.read(`raw/queue/${f}`).trim().split('\n').map(l => JSON.parse(l)));
   assert.deepEqual(rows.map(x => [x.id, x.kind, x.why, x.unattended, x.from, x.session, x.key]), [[id, 'rule', 'unattended', 'subagent', null, sid, 'glim/sub-rule']]);
+  assert.deepEqual((await v.import('lib/lint.mjs')).lint().filter(f => f.file.startsWith('raw/queue/')), [], 'lint passes the row');
 });
 
 test('pending until package B: the real propose and keep answer --schema, and keep takes id and offer on both clients', async t => {

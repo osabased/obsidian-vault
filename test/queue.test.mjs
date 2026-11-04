@@ -4,7 +4,7 @@ import { promisify } from 'node:util';
 import { pathToFileURL } from 'node:url';
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { makeVault, sessionId, userTurn, assistantTurn, recordedCall, keepAllowed, offerOf, prompt, cleanEnv } from './fixture.mjs';
+import { makeVault, sessionId, userTurn, assistantTurn, recordedCall, keepAllowed, offerOf, prompt, cleanEnv, sectionOf } from './fixture.mjs';
 import { today } from '../tools/lib/vault.mjs';
 
 // Offers no one answered go to the review queue in raw/queue/ once their session has gone quiet: the sweep at another
@@ -43,6 +43,8 @@ function setMode(v, mode) {
 }
 
 const entries = v => queueRows(v).filter(r => !r.decides);
+// What the tools write has to pass lint's checks on raw/queue/.
+const queueLint = async v => (await v.import('lib/lint.mjs')).lint().filter(f => f.file.startsWith('raw/queue/'));
 
 function backdate(v, id, days) {
   const o = offerAt(v, id);
@@ -216,7 +218,7 @@ test('keep of a queued offer points to its entry, and propose with queued offers
   assert.deepEqual(found, [], 'lint checks the quote against the inbox row of the session it was typed in');
 });
 
-test('(8) queue.mjs draft refuses basis stated, inferred and pick, and writes a drafted entry for reading', t => {
+test('(8) queue.mjs draft refuses basis stated, inferred and pick, and writes a drafted entry for reading', async t => {
   const v = makeVault(t, { config: { proposals: 'ask' } });
   const sid = sessionId();
   // The transcript holds the quote, so only the basis check can refuse.
@@ -237,9 +239,10 @@ test('(8) queue.mjs draft refuses basis stated, inferred and pick, and writes a 
   assert.equal(row.session, sid);
   assert.equal(row.quote, null);
   assert.ok(!v.exists('wiki/glim/rules/tidy-names.md'));
+  assert.deepEqual(await queueLint(v), []);
 });
 
-test('queue.mjs lists open entries oldest first, marks unattended ones, and later and drop append decision rows', t => {
+test('queue.mjs lists open entries oldest first, marks unattended ones, and later and drop append decision rows', async t => {
   const v = makeVault(t, { config: { proposals: 'ask' } });
   const a = started(v);
   const first = offered(v.propose(a, rule()));
@@ -267,6 +270,7 @@ test('queue.mjs lists open entries oldest first, marks unattended ones, and late
   assert.equal(v.run('build.mjs').code, 0);
   assert.match(v.read('queue.md'), new RegExp(`u-${second.slice(2)}`));
   assert.doesNotMatch(v.read('queue.md'), new RegExp(u));
+  assert.deepEqual(await queueLint(v), []);
 });
 
 test('a held offer stays held: nothing is written, and release returns it for keep', t => {
@@ -362,4 +366,85 @@ test('under off, a queued entry is offered again with the words of the user aski
   offered(v.propose(b, { queued: u, asked: 'keep the widget naming rule' }));
   const other = v.propose(b, { queued: u, slug: 'x' });
   assert.equal(other.stderr, "Not proposed: queued takes no other field than asked: the entry's own fields are proposed again.\n");
+});
+
+test('under corrections, and in the vault folder, an entry proposed again with queued is an offer for the user, not a write', async t => {
+  for (const vaultFolder of [false, true]) {
+    const v = makeVault(t);
+    const a = started(v);
+    const held = heldId(v.propose(a, rule({ hold: true })));
+    quiet(v, a);
+    const b = sessionId();
+    v.startSession(b, { transcript: v.transcript(b, typed(['something unrelated'])), ...(vaultFolder ? { cwd: v.root } : {}) });
+    const u = `u-${held.slice(2)}`;
+    const again = offered(v.propose(b, { queued: u }));
+    assert.ok(!v.exists('wiki/glim/rules/tidy-names.md'), 'the entry waits for the user, whatever the mode');
+    const kept = keepAllowed(v, b, again.id, again.text);
+    assert.equal(kept.code, 0, kept.stderr);
+    assert.ok(v.exists('wiki/glim/rules/tidy-names.md'));
+    assert.deepEqual(queueRows(v).filter(r => r.decides).map(d => [d.decides, d.decision]), [[u, 'kept']]);
+    assert.deepEqual(await queueLint(v), []);
+  }
+});
+
+test("a session start waits at most 2 s for another session's offers.lock, and leaves the sweep to the next start", t => {
+  const v = makeVault(t, { config: { proposals: 'ask' } });
+  const a = started(v);
+  offered(v.propose(a, rule()));
+  quiet(v, a);
+  // A live holder's lock, which goes stale only after 30 s.
+  v.write('.state/offers.lock', `${process.pid}:held`, { settled: false });
+  const t0 = Date.now();
+  started(v, ['something unrelated']);
+  assert.ok(Date.now() - t0 < 4000, `the start took ${Date.now() - t0} ms`);
+  assert.deepEqual(queueRows(v), []);
+  fs.rmSync(v.at('.state', 'offers.lock'));
+  started(v, ['something unrelated']);
+  assert.equal(entries(v).length, 1);
+});
+
+test('lint warns on queue rows of the wrong shape, decisions with no entry or a second close, and a quote the user never typed', async t => {
+  const v = makeVault(t, { config: { proposals: 'ask' } });
+  const a = started(v);
+  const transcript = registryOf(v, a).transcript;
+  const at = new Date().toISOString();
+  const entry = o => ({
+    id: 'u-0000000a', at, kind: 'rule', why: 'ignored', unattended: 'left', from: 'o-0000000a', session: a, agent: 'claude-code', transcript,
+    cwd: null, domain: 'glim', key: 'glim/tidy-names', fields: rule(), text: 'x', quote: 'call them by their screen', checked: today(), ...o,
+  });
+  const decision = o => ({ id: 'd-0000000a', at, decides: 'u-0000000a', decision: 'dropped', offer: null, session: a, ...o });
+  v.write(`raw/queue/${today()}-${a.slice(0, 8)}.jsonl`, [
+    entry({}),
+    entry({ id: 'u-zz', kind: 'bogus', why: 'bored', unattended: 'away' }),
+    entry({ id: 'u-0000000b', quote: 'name them after the moon', fields: rule({ quote: 'name them after the moon' }) }),
+    decision({}),
+    decision({ id: 'd-0000000b', decision: 'kept' }),
+    decision({ id: 'd-0000000c', decides: 'u-0000000f', decision: 'maybe' }),
+  ].map(r => `${JSON.stringify(r)}\n`).join(''));
+  const file = `raw/queue/${today()}-${a.slice(0, 8)}.jsonl`;
+  const found = (await v.import('lib/lint.mjs')).lint().filter(f => f.file === file).map(f => f.msg);
+  assert.deepEqual(found.sort(), [
+    "d-0000000b closes u-0000000a, which d-0000000a already closed",
+    'd-0000000c decides u-0000000f, which has no entry',
+    'd-0000000c records decision "maybe", which is neither kept, dropped nor later',
+    'u-0000000b quotes "name them after the moon", which isn\'t in what the user typed in session ' + a.slice(0, 8),
+    'u-zz has why "bored", which is none of unreleased, skipped, ignored, unattended or drafted',
+    'u-zz has kind "bogus", which is none of rule, evidence, page, reword, retire, domain or move',
+    'u-zz has unattended "away", which is none of subagent, headless or left',
+    "u-zz isn't an entry id: u- and 8 hex digits",
+  ].sort());
+});
+
+test('review.mjs status lists the entries dropped from the queue with the session that dropped them', t => {
+  const v = makeVault(t, { config: { proposals: 'ask' } });
+  const a = started(v);
+  const o = offered(v.propose(a, rule()));
+  quiet(v, a);
+  const sid = sessionId();
+  v.startSession(sid, { cwd: v.root });
+  const u = `u-${o.id.slice(2)}`;
+  assert.equal(v.run('queue.mjs', ['drop', u], { env: { CLAUDE_CODE_SESSION_ID: sid } }).code, 0);
+  const r = v.run('review.mjs', ['status']);
+  assert.equal(r.code, 0, r.stderr);
+  assert.deepEqual(sectionOf(r.stdout, 'Review queue entries dropped'), [`- ${u} · glim/tidy-names · dropped ${today()} in session ${sid.slice(0, 8)}`]);
 });

@@ -142,6 +142,7 @@ export function lint(notes = loadNotes(), chains = sourceChains()) {
   lintOrphans(notes, resolve, add);
   lintPicks(add);
   lintInbox(add);
+  lintQueue(add);
   lintSources(add, chains);
   lintManifestCase(add);
   lintBundles(add, hashOf);
@@ -248,6 +249,43 @@ function lintInbox(add) {
       if (r.consent === undefined) continue;
       if (r.consent !== 'prompt' && r.consent !== 'code') add('warn', file, `${r.id} records consent ${JSON.stringify(r.consent)}, which is neither "prompt" nor "code"`);
       else if (r.consent === 'code' && !(typeof r.approved === 'string' && r.approved.trim())) add('warn', file, `${r.id} records consent "code" with no approved reply, the typed message that held the code`);
+    }
+  }
+}
+
+const ENTRY_ID = /^u-[0-9a-f]{8}$/;
+const QUEUE_FIELDS = [
+  ['kind', ['rule', 'evidence', 'page', 'reword', 'retire', 'domain', 'move'], false],
+  ['why', ['unreleased', 'skipped', 'ignored', 'unattended', 'drafted'], false],
+  ['unattended', ['subagent', 'headless', 'left'], true],
+];
+
+// A stated quote is the user's words, which propose checked as the offer was made; a row written by hand never was. Only
+// the first kept or dropped row closes an entry, so a second one is a sign of a race or a hand edit.
+function lintQueue(add) {
+  const files = datedFiles('queue');
+  const all = files.flatMap(f => f.rows);
+  const entries = new Set(all.filter(r => !r.decides).map(r => r.id));
+  const closedBy = new Map();
+  for (const { file, rows } of files) {
+    for (const r of rows) {
+      if (r.decides !== undefined) {
+        if (!entries.has(r.decides)) add('warn', file, `${r.id} decides ${r.decides}, which has no entry`);
+        if (!['kept', 'dropped', 'later'].includes(r.decision)) add('warn', file, `${r.id} records decision ${JSON.stringify(r.decision)}, which is neither kept, dropped nor later`);
+        else if (r.decision !== 'later') {
+          if (closedBy.has(r.decides)) add('warn', file, `${r.id} closes ${r.decides}, which ${closedBy.get(r.decides)} already closed`);
+          else closedBy.set(r.decides, r.id);
+        }
+        continue;
+      }
+      if (!ENTRY_ID.test(String(r.id))) add('warn', file, `${r.id} isn't an entry id: u- and 8 hex digits`);
+      for (const [field, values, optional] of QUEUE_FIELDS) {
+        if (optional && r[field] === null) continue;
+        if (!values.includes(r[field])) add('warn', file, `${r.id} has ${field} ${JSON.stringify(r[field])}, which is none of ${joinList(values, 'or')}`);
+      }
+      if (r.fields?.basis !== 'stated' || typeof r.quote !== 'string' || !r.transcript || !fs.existsSync(r.transcript)) continue;
+      const typed = typedFor({ agent: r.agent, transcript: r.transcript });
+      if (typed && !saidIn(r.quote, typed)) add('warn', file, `${r.id} quotes "${r.quote}", which isn't in what the user typed in session ${sessionName(String(r.session), r.agent)}`);
     }
   }
 }

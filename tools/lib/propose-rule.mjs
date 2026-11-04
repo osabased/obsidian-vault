@@ -265,7 +265,8 @@ function withEvidence(text, entry) {
 // Outside the vault folder, where /ingest goes through each rule with the user, ask and off only offer the rule once
 // every other check has passed, and keep writes it once the user agrees, so what the user agrees to is what gets written.
 // Kept, the offer's text must still be what these fields give: the rule a repeat backs may have changed since. A held
-// rule waits for release whatever the mode, and a queued one waits for the user's review.
+// rule waits for release whatever the mode. An entry from the review queue is offered again in every mode, since it went
+// there for the user's review, and a subagent's rule waits there for it.
 function consent(f, domain, kind, key, offer) {
   if (f.kept) {
     if (offerText(offer, f.kept.code) !== f.kept.text) refuse("the vault changed since the offer, so it isn't what the user agreed to. Propose it again.");
@@ -274,9 +275,9 @@ function consent(f, domain, kind, key, offer) {
   const mode = proposalMode(domain);
   const vault = inVaultFolder(f.folder);
   const writes = mode === 'corrections' || vault;
-  if (writes && !f.hold && !f.queueAs) return null;
+  if (writes && !f.hold && !f.queueAs && !f.queued) return null;
   // Checked before the offer, which no answer could approve without a transcript.
-  if (!writes && !f.queueAs && (mode === 'off' || consentOf(f.session) === 'code') && !typedFor(f.session)) {
+  if ((!writes || f.queued) && !f.queueAs &&(mode === 'off' || consentOf(f.session) === 'code') && !typedFor(f.session)) {
     refuse("the taste vault has no transcript for this session, so it can't check the user agreed. Ask the user to write the rule in Obsidian.");
   }
   // A filter with no power to write: an offer the user didn't ask for raises no prompt.

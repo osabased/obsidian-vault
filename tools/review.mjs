@@ -1,10 +1,10 @@
-import { config, plural, toPosix, guarded, hookErrors, errorsLog, localDay, appendLog, isVaultOnly, sessionReach, cwdOf } from './lib/vault.mjs';
+import { config, plural, toPosix, guarded, hookErrors, errorsLog, localDay, appendLog, isVaultOnly, sessionReach, cwdOf, queueRows } from './lib/vault.mjs';
 import {
   clip, normTopic, topicNotes, loadNotes, liveRules, evidenceSessions, validDay, byKey, cmp, sharedFiles, resolver, linkedKeys, evidenceSources, isSourcePage, joinList,
   rankPair, sourceItem, fitIn, readDerived, isDocSet, folderNames, unverifiedNow,
 } from './lib/rules.mjs';
 import { lint, tally } from './lib/lint.mjs';
-import { lintRan, lintDone, tidy, trackedSessions, sessionDomains } from './lib/sessions.mjs';
+import { lintRan, lintDone, tidy, trackedSessions, sessionDomains, sessionName } from './lib/sessions.mjs';
 import { subjectRows, liveRows, newestFirst, projectName } from './lib/picks.mjs';
 import { UsageError } from './lib/input.mjs';
 import { refSources, sourceVersion, sourceChains, noteCitations, newerCopies } from './lib/sources.mjs';
@@ -208,6 +208,14 @@ function provisional() {
     .map(r => `- ${localDay(r.at)} · ${projectName(r.project)}/${r.subject} · ${r.question}: "${r.pick}" (${r.id})`);
 }
 
+// A drop writes no note and needs no consent, so any session's shell can make one: the user sees each here.
+function queueDrops() {
+  const rows = queueRows();
+  const keyOf = new Map(rows.filter(r => !r.decides).map(r => [r.id, r.key]));
+  return newestFirst(rows.filter(r => r.decides && r.decision === 'dropped'))
+    .map(r => `- ${r.decides} · ${keyOf.get(r.decides) ?? 'no entry'} · dropped ${localDay(r.at)} in session ${sessionName(String(r.session))}`);
+}
+
 const status = () => [
   lintLine(), '', 'Hook health', ...hookHealth(),
   ...section('Listed topics no rule has yet', emptyTopics),
@@ -219,6 +227,7 @@ const status = () => [
   ...section('Source checks that failed', failedChecks),
   ...section("Quotes lint can't check", uncheckedQuotes),
   ...section('Provisional picks not yet confirmed', provisional),
+  ...section('Review queue entries dropped', queueDrops),
   ...section('Sources in raw/refs/ no source page names', () => unnamedSources().map(f => `- ${f}`)),
 ].join('\n');
 

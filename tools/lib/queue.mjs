@@ -9,7 +9,7 @@ import { keepCallFor } from './calls.mjs';
 // never edited, so an entry is open until a kept or dropped row names it; a later row only records it was seen. Every write
 // to raw/queue/ and queue.md takes queue.lock, so queue.md is rendered from the rows as they are once the write is done.
 // A caller holding offers.lock or propose.lock may take it, never the other way round.
-export const queueLocked = fn => withLock(statePath('queue.lock'), fn, { waitMs: 5000 });
+export const queueLocked = (fn, waitMs = 5000) => withLock(statePath('queue.lock'), fn, { waitMs });
 
 export const newId = prefix => `${prefix}-${crypto.randomBytes(4).toString('hex')}`;
 
@@ -65,8 +65,9 @@ function why(o, entry) {
 }
 
 // Reads only .state/offers/ and the registry, never a transcript, so it fits in a session start's deadline. The caller's
-// own offers are never its to sweep, and a session not quiet yet may still answer its own.
-export function sweep(self) {
+// own offers are never its to sweep, and a session not quiet yet may still answer its own. waitMs caps the wait for each
+// lock, so a session start can leave the sweep to the next one.
+export function sweep(self, { waitMs = 5000 } = {}) {
   const hours = config().queue.sweepAfterHours;
   let moved = 0;
   offersLocked(() => queueLocked(() => {
@@ -94,7 +95,7 @@ export function sweep(self) {
       }
       saveOffer({ ...o, state: 'queued', queued_as: id });
     }
-  }));
+  }, waitMs), waitMs);
   return moved;
 }
 
