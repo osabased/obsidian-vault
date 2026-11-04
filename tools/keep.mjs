@@ -1,4 +1,4 @@
-import { ownEntry } from './lib/sessions.mjs';
+import { callerEntry, PASS } from './lib/sessions.mjs';
 import { typedFor, currentSession } from './lib/agents.mjs';
 import { useCall } from './lib/calls.mjs';
 import { readOffer, claimOffer, keptOffer, codeConsent, consentOf } from './lib/offers.mjs';
@@ -23,16 +23,6 @@ const SUMMARY = {
   code: "Keeps an offer that propose, domain or proposals returned, and writes it once the user's next message has the offer's code.",
 };
 
-const PASS = "The vault's tools pass the session id themselves. From a shell, pass it as the first argument, or run this from the agent's own shell, which sets its session variable.";
-
-function sessionOf(sid) {
-  if (!sid) refuse(`there's no session id to keep an offer for. ${PASS}`);
-  const { entry, notOwn } = ownEntry(sid);
-  if (notOwn) refuse(notOwn);
-  if (!entry) refuse(`the taste vault has no session ${sid}. ${PASS}`);
-  return entry;
-}
-
 const NOUN = { rule: 'rule', evidence: 'rule', domain: 'domain', mode: 'setting' };
 
 function notPending(o) {
@@ -52,7 +42,7 @@ function notPending(o) {
 // refused keep can't be run again, from the tool or a shell, with other lines. By a code, lines that don't match leave
 // the offer pending, so the agent can pass the right ones.
 function keep(sid, input, call) {
-  const entry = sessionOf(sid);
+  const entry = callerEntry(sid, { noId: `there's no session id to keep an offer for. ${PASS}` });
   const p = input();
   const prompted = consentOf(entry) === 'prompt';
   if (prompted && !useCall(call, { session: String(sid), tool: 'keep', offer: typeof p.id === 'string' ? p.id : null, input: p })) {

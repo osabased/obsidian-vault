@@ -7,7 +7,7 @@ import {
 } from './vault.mjs';
 import { build } from './build.mjs';
 import { KEBAB, joinList } from './rules.mjs';
-import { ownEntry, addReach } from './sessions.mjs';
+import { callerEntry, addReach, PASS } from './sessions.mjs';
 import { namedIn } from './neutral.mjs';
 import { proposeNote, pickNote } from './instructions.mjs';
 import { valuesOf, addMember } from './json.mjs';
@@ -19,13 +19,8 @@ const FIELD_NAMES = new Set(['name', 'title', 'topics', 'marker', 'path', 'vault
 
 const REACH = ['marker', 'path', 'vaultOnly'];
 
-const PASS = "The vault's tools pass the session id themselves. From a shell, pass it as the first argument, or run this from the agent's own shell, which sets its session variable.";
-
 function sessionOf(sid) {
-  if (!sid) refuse(`there's no session id to add a domain for. ${PASS}`);
-  const { entry, notOwn } = ownEntry(sid);
-  if (notOwn) refuse(notOwn);
-  if (!entry) refuse(`the taste vault has no session ${sid}. ${PASS}`);
+  const entry = callerEntry(sid, { noId: `there's no session id to add a domain for. ${PASS}` });
   const folder = entry.reach?.cwd ?? entry.cwd;
   if (!folder) refuse(`the taste vault has no folder for session ${sid}.`);
   return { entry, folder: toPosix(folder) };

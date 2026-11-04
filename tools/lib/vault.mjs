@@ -336,6 +336,9 @@ const pad = n => String(n).padStart(2, '0');
 export const today = (d = new Date()) => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
 // Rows stamp `at` in UTC and files are named for the local day, so a row's day is read as a local day too.
 // Whole days from one YYYY-MM-DD day to another, today by default.
+// A time that doesn't parse counts as old, so a broken stamp never keeps something forever.
+export const olderThan = (at, ms) => !(Date.now() - (typeof at === 'number' ? at : Date.parse(at)) < ms);
+
 export const daysBetween = (from, to = today()) => Math.round((Date.parse(to) - Date.parse(from)) / 864e5);
 export const localDay = at => (Number.isNaN(Date.parse(at)) ? '' : today(new Date(at)));
 export const clock = (d = new Date()) => `${today(d)} ${pad(d.getHours())}:${pad(d.getMinutes())}`;

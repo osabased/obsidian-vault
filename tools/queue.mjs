@@ -1,7 +1,7 @@
 import { localDay } from './lib/vault.mjs';
 import { proposeRule } from './lib/propose-rule.mjs';
 import { entryOf, openEntries, decide } from './lib/queue.mjs';
-import { ownEntry } from './lib/sessions.mjs';
+import { callerEntry } from './lib/sessions.mjs';
 import { currentSession } from './lib/agents.mjs';
 import { UsageError, readInput, refuse, failure } from './lib/input.mjs';
 
@@ -15,13 +15,10 @@ const USAGE = [
 
 const NOT = { draft: 'Not drafted', later: 'Not marked', drop: 'Not dropped' };
 
-function sessionOf(sid) {
-  if (!sid) refuse("there's no session id. Pass it as an argument, or run this from the agent's own shell, which sets its session variable.");
-  const { entry, notOwn } = ownEntry(sid);
-  if (notOwn) refuse(notOwn);
-  if (!entry) refuse(`the taste vault has no session ${sid}.`);
-  return entry;
-}
+const sessionOf = sid => callerEntry(sid, {
+  noId: "there's no session id. Pass it as an argument, or run this from the agent's own shell, which sets its session variable.",
+  pass: '',
+});
 
 const lineOf = r => [r.id, localDay(r.at), r.kind, r.why, ...(r.unattended ? [`unattended: ${r.unattended}`] : []), r.key].join(' · ');
 

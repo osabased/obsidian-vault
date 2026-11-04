@@ -10,7 +10,7 @@ import {
 import { build } from './build.mjs';
 import { entryKey } from './glob.mjs';
 import { saidIn, normText, quoteTexts, userPageTexts, inLatest } from './quotes.mjs';
-import { ownEntry, marked, markMany, wasShown, carryMarkers, proposeDomains, sessionName } from './sessions.mjs';
+import { callerEntry, PASS, marked, markMany, wasShown, carryMarkers, proposeDomains, sessionName } from './sessions.mjs';
 import { setField, yamlQuote, yamlScalar } from './frontmatter.mjs';
 import { subjectRows, laterRows, endedBy, otherLabels } from './picks.mjs';
 import { refuse, line, lines, Refused } from './input.mjs';
@@ -24,13 +24,8 @@ const FIELDS = new Set([
   'source', 'source_date', 'keywords', 'applies_to', 'triggers', 'always', 'repeats', 'asked', 'hold', 'release', 'queued',
 ]);
 
-const PASS = "The vault's tools pass the session id themselves. From a shell, pass it as the first argument, or run this from the agent's own shell, which sets its session variable.";
-
 function sessionOf(sid) {
-  if (!sid) refuse(`there's no session id to propose for. ${PASS}`);
-  const { entry, notOwn } = ownEntry(sid);
-  if (notOwn) refuse(notOwn);
-  if (!entry) refuse(`the taste vault has no session ${sid}. ${PASS}`);
+  const entry = callerEntry(sid, { noId: `there's no session id to propose for. ${PASS}` });
   return { ...entry, domains: proposeDomains(entry) };
 }
 

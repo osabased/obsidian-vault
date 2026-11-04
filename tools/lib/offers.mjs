@@ -1,6 +1,6 @@
 import crypto from 'node:crypto';
 import fs from 'node:fs';
-import { statePath, stateDir, readJsonSafe, writeJson, removeDir, safeId, withLock, newId } from './vault.mjs';
+import { statePath, stateDir, readJsonSafe, writeJson, removeDir, safeId, withLock, newId, olderThan } from './vault.mjs';
 import { normText } from './quotes.mjs';
 import { agent, hasAgent, FIRST_AGENT, typedFor } from './agents.mjs';
 import { keepCallFor } from './calls.mjs';
@@ -42,7 +42,7 @@ export const offerReply = o => `${REPLY[o.code ? 'code' : 'prompt'](o.id)}\n\n${
 // A held offer waits for the agent's release and a pending one for the user, so the purge spares both: the sweep moves
 // them to the review queue instead. A mode offer has no place in the queue and goes with the purge.
 const PURGED = new Set(['kept', 'used', 'superseded', 'denied', 'queued']);
-const purged = o => (PURGED.has(o.state) || o.kind === 'mode') && (Date.now() - Date.parse(o.at) >= MAX_AGE || Number.isNaN(Date.parse(o.at)));
+const purged = o => (PURGED.has(o.state) || o.kind === 'mode') && olderThan(o.at, MAX_AGE);
 
 // extra carries what the review queue needs if the offer goes there: the quote that passed its check, the day it was
 // checked, and what release does with a held offer.
