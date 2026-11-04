@@ -100,7 +100,10 @@ export async function start(event, agent) {
   let entry = null;
   if (registered) {
     entry = touchSession(event, hits, agent.name);
-    guarded('sweep', () => sweep(event.session));
+    // Another session sweeping or keeping holds the locks only briefly, and the next session start sweeps what this one leaves.
+    guarded('sweep', () => {
+      try { sweep(event.session, { waitMs: Math.min(2000, remaining()) }); } catch (e) { if (e?.code !== 'ELOCKED') throw e; }
+    });
     if (doms.length) {
       propose = proposeNote(doms, vaultFolder);
       pick = pickNote();
