@@ -1,4 +1,4 @@
-import { config, statePath, withLock, appendJsonl, queueFile, queueRows, readJsonSafe, writeText, vaultPath, safeId, today, localDay, newId } from './vault.mjs';
+import { config, statePath, withLock, appendJsonl, queueFile, queueRows, readJsonSafe, writeText, vaultPath, safeId, today, localDay, newId, olderThan } from './vault.mjs';
 import { registry } from './sessions.mjs';
 import { shortName } from './agents.mjs';
 import { allOffers, offersLocked, saveOffer, consentOf, plainText } from './offers.mjs';
@@ -60,7 +60,7 @@ export function decide({ id, decision, offer = null, sid, agentName }) {
   });
 }
 
-const quietSince = (entry, hours) => !entry || Number.isNaN(Date.parse(entry.last_seen)) || Date.now() - Date.parse(entry.last_seen) >= hours * 3600e3;
+const quietSince = (entry, hours) => olderThan(entry?.last_seen, hours * 3600e3);
 
 function why(o, entry) {
   if (o.state === 'held') return ['unreleased', null];

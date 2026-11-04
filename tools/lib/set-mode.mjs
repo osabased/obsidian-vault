@@ -3,7 +3,7 @@ import {
   config, vaultPath, statePath, withLock, writeText, appendLog, toPosix, inVaultFolder, reloadConfig, PROPOSAL_MODES,
 } from './vault.mjs';
 import { joinList } from './rules.mjs';
-import { ownEntry, proposeDomains } from './sessions.mjs';
+import { callerEntry, proposeDomains, PASS } from './sessions.mjs';
 import { valuesOf, setMember } from './json.mjs';
 import { modeLines } from './instructions.mjs';
 import { typedFor, shortName } from './agents.mjs';
@@ -12,16 +12,6 @@ import { useCall } from './calls.mjs';
 import { makeOffer, offerText, consentOf } from './offers.mjs';
 
 const FIELD_NAMES = new Set(['mode', 'domain']);
-
-const PASS = "The vault's tools pass the session id themselves. From a shell, pass it as the first argument, or run this from the agent's own shell, which sets its session variable.";
-
-function sessionOf(sid) {
-  if (!sid) refuse(`there's no session id to set the mode for. ${PASS}`);
-  const { entry, notOwn } = ownEntry(sid);
-  if (notOwn) refuse(notOwn);
-  if (!entry) refuse(`the taste vault has no session ${sid}. ${PASS}`);
-  return entry;
-}
 
 function fields(p) {
   const unknown = Object.keys(p).find(k => !FIELD_NAMES.has(k));
@@ -80,7 +70,7 @@ function reply({ mode, domain }, entry) {
 // consent keep found, with the offer's text and code, which the fields must still give. The user allowed one call with
 // the input they saw, so the call is spent before the fields are checked, and a refused run can't be run again.
 export function setMode(sid, p, { call = null, kept = null } = {}) {
-  const entry = sessionOf(sid);
+  const entry = callerEntry(sid, { noId: `there's no session id to set the mode for. ${PASS}` });
   if (typeof p === 'function') p = p();
   const prompted = !kept && consentOf(entry) === 'prompt';
   if (prompted && !useCall(call, { session: String(sid), tool: 'proposals', input: p })) {

@@ -9,7 +9,7 @@ import { build } from './lib/build.mjs';
 import { IMAGE, hashPath, derivedText } from './lib/sources.mjs';
 import { subjectRows, laterRows, liveRows, endedBy, newestFirst, entry, projectName, sameProject } from './lib/picks.mjs';
 import { UsageError, readInput, refuse, failure, line, renderHelp, schemaOf, schemaArg } from './lib/input.mjs';
-import { ownEntry, markShown, sessionRoots } from './lib/sessions.mjs';
+import { callerEntry, markShown, sessionRoots, PASS } from './lib/sessions.mjs';
 import { saidIn } from './lib/quotes.mjs';
 import { currentSession, typedFor, shortName } from './lib/agents.mjs';
 
@@ -59,9 +59,7 @@ const help = () => renderHelp([
 ], 13);
 
 function sessionOf(sid) {
-  if (!sid) refuse("there's no session id to record for. The vault's tools pass the session id themselves. From a shell, pass it as the first argument, or run this from the agent's own shell, which sets its session variable.");
-  const { entry: entryRow, notOwn } = ownEntry(sid);
-  if (notOwn) refuse(notOwn);
+  const entryRow = callerEntry(sid, { noId: `there's no session id to record for. ${PASS}`, optional: true });
   const hits = [...sessionRoots(entryRow)].sort((a, b) => cmp(a.domain, b.domain) || cmp(a.root, b.root));
   if (!hits.length) refuse(`the taste vault has no session ${sid} from a domain's project folder. The vault's tools pass the session id themselves; from a shell, pass this session's own id.`);
   return { ...entryRow, hits };

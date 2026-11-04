@@ -1,6 +1,6 @@
 import crypto from 'node:crypto';
 import fs from 'node:fs';
-import { statePath, stateDir, readJsonSafe, writeJson, removeDir, safeId, withLock } from './vault.mjs';
+import { statePath, stateDir, readJsonSafe, writeJson, removeDir, safeId, withLock, olderThan } from './vault.mjs';
 
 // The PreToolUse hook records each call of a vault tool before the call runs; the server and the scripts it runs read
 // the record to learn which session made the call and whether the user allowed it. One lock serves them all, since a
@@ -74,7 +74,7 @@ function mtime(file) {
 
 export function pruneCalls(maxAgeMs = 2 * 864e5) {
   const dir = stateDir('calls');
-  const old = (file, at) => Date.now() - (Number.isFinite(at) ? at : mtime(file)) >= maxAgeMs;
+  const old = (file, at) => olderThan(Number.isFinite(at) ? at : mtime(file), maxAgeMs);
   locked(() => {
     for (const e of fs.readdirSync(dir, { withFileTypes: true })) {
       const file = `${dir}/${e.name}`;

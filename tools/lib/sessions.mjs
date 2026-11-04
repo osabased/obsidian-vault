@@ -1,10 +1,11 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import {
-  config, vaultPath, statePath, stateDir, readJsonSafe, writeJson, appendJsonl, safeId, shortHash, logError, guarded, hookErrors, errorsLog, domainsFor, sessionReach, toPosix, inVaultFolder, isVaultOnly,
+  config, vaultPath, statePath, stateDir, readJsonSafe, writeJson, appendJsonl, safeId, shortHash, logError, guarded, hookErrors, errorsLog, domainsFor, sessionReach, toPosix, inVaultFolder, isVaultOnly, olderThan,
 } from './vault.mjs';
 import { noteTimes } from './cache.mjs';
 import { sessionIds, shortName } from './agents.mjs';
+import { refuse } from './input.mjs';
 
 const DAY = 86400e3;
 
@@ -15,6 +16,18 @@ export function ownEntry(sid) {
   const own = sessionIds();
   if (own.length && !own.includes(String(sid))) return { entry: null, notOwn: `${sid} isn't this session, which is ${own.join(' or ')}.` };
   return { entry: readJsonSafe(registry(safeId(sid))), notOwn: null };
+}
+
+export const PASS = "The vault's tools pass the session id themselves. From a shell, pass it as the first argument, or run this from the agent's own shell, which sets its session variable.";
+
+// The registry entry of the session a tool runs for. It refuses with noId when no id came, and when the id isn't this
+// session's or has no entry, followed by pass; a tool with its own refusal for an id with no entry passes optional.
+export function callerEntry(sid, { noId, pass = PASS, optional = false }) {
+  if (!sid) refuse(noId);
+  const { entry, notOwn } = ownEntry(sid);
+  if (notOwn) refuse(notOwn);
+  if (!entry && !optional) refuse(`the taste vault has no session ${sid}.${pass ? ` ${pass}` : ''}`);
+  return entry;
 }
 
 // `cwd` stays where the session registered, so a move into the vault folder doesn't let it propose for every domain;
@@ -379,14 +392,14 @@ const markersChanged = id => Math.max(...KINDS.flatMap(kind => [changedAt(vaultP
 // passes full and clears the lot.
 export function tidy({ full = false } = {}) {
   const stampFile = statePath('tidy.json');
-  if (!full && Date.now() - Date.parse(readJsonSafe(stampFile)?.at) < DAY) return;
+  if (!full && !olderThan(readJsonSafe(stampFile)?.at, DAY)) return;
   let room = full ? Infinity : Math.max(0, Number(config().delivery.tidyMaxMarkers) || 0);
   let finished = true;
   const registered = new Set(registeredIds());
   for (const id of new Set([...registered, ...KINDS.flatMap(kind => fs.readdirSync(stateDir(kind)))])) {
     try {
       const seen = registered.has(id) ? Date.parse(readJsonSafe(registry(id))?.last_seen) : markersChanged(id);
-      if (Date.now() - seen <= 30 * DAY) continue;
+      if (!olderThan(seen, 30 * DAY)) continue;
       if (room <= 0) { finished = false; break; }
       const r = prune(id, room);
       room -= r.removed;
