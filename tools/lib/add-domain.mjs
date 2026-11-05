@@ -3,29 +3,32 @@ import os from 'node:os';
 import path from 'node:path';
 import {
   config, vaultPath, statePath, withLock, writeText, appendLog, toPosix, inside, inVaultFolder, isMarkerName, isFileAt, markerDomains, mainCheckout,
-  readJson, guarded, reloadConfig,
+  readJson, guarded, reloadConfig, newId, today,
 } from './vault.mjs';
 import { build } from './build.mjs';
 import { KEBAB, joinList } from './rules.mjs';
-import { ownEntry, addReach } from './sessions.mjs';
+import { callerEntry, addReach, PASS } from './sessions.mjs';
 import { namedIn } from './neutral.mjs';
 import { proposeNote, pickNote } from './instructions.mjs';
 import { valuesOf, addMember } from './json.mjs';
 import { typedFor, shortName } from './agents.mjs';
 import { refuse, line, lines } from './input.mjs';
 import { makeOffer, offerText, consentOf, declined } from './offers.mjs';
+import { entryOf, closeEntry, queueLocked, queueEntry, appendEntry } from './queue.mjs';
+
+function openEntry(id) {
+  const { entry, decided } = entryOf(id);
+  if (!entry) refuse(`there's no entry \`${id}\` in raw/queue/.`);
+  if (decided) refuse(`\`${id}\` was already ${decided}.`);
+  return entry;
+}
 
 const FIELD_NAMES = new Set(['name', 'title', 'topics', 'marker', 'path', 'vaultOnly']);
 
 const REACH = ['marker', 'path', 'vaultOnly'];
 
-const PASS = "The vault's tools pass the session id themselves. From a shell, pass it as the first argument, or run this from the agent's own shell, which sets its session variable.";
-
 function sessionOf(sid) {
-  if (!sid) refuse(`there's no session id to add a domain for. ${PASS}`);
-  const { entry, notOwn } = ownEntry(sid);
-  if (notOwn) refuse(notOwn);
-  if (!entry) refuse(`the taste vault has no session ${sid}. ${PASS}`);
+  const entry = callerEntry(sid, { noId: `there's no session id to add a domain for. ${PASS}` });
   const folder = entry.reach?.cwd ?? entry.cwd;
   if (!folder) refuse(`the taste vault has no folder for session ${sid}.`);
   return { entry, folder: toPosix(folder) };
@@ -165,26 +168,43 @@ function offerLines(f, vaultFolder) {
 // session in such a project loads. The input is read after the session is checked, so a script run from the wrong place
 // says that first: p is the input, or a function that reads it. kept is the consent keep found, with the offer's text and
 // code, which the fields must still give. mainWorktree is lib/git.mjs's, passed in by the script, since hooks load lib/
-// and may take only changedFiles from lib/git.mjs.
-export function addDomain(sid, p, { kept = null, mainWorktree }) {
+// and may take only changedFiles from lib/git.mjs. queued is the review queue entry propose offers the domain again from;
+// the offer names it in its fields, so keep closes it once the domain is written. queueAs drafts the domain into the
+// review queue, as /lint does for a kind of project its rules keep matching, instead of offering it.
+export function addDomain(sid, p, { kept = null, mainWorktree, queued = null, queueAs = null }) {
   const { entry: session, folder } = sessionOf(sid);
   const vaultFolder = inVaultFolder(folder);
   if (typeof p === 'function') p = p();
+  if (kept && p && Object.hasOwn(p, 'queued')) {
+    queued = openEntry(p.queued);
+    p = queued.fields;
+  }
   const f = fields(p, { folder, vaultFolder, mainWorktree });
   clashes(f);
   const offer = offerLines(f, vaultFolder);
+  if (queueAs) {
+    const id = newId('u');
+    appendEntry(queueEntry({
+      id, kind: 'domain', why: queueAs.why, unattended: queueAs.unattended, from: null, session: sid, entry: session,
+      domain: f.name, key: f.name, fields: p, text: offerText(offer, null), quote: null, checked: today(),
+    }), shortName(sid, session.agent));
+    return queueAs.reply(id);
+  }
   if (!kept) {
     if (consentOf(session) === 'code' && !typedFor(session)) refuse("the taste vault has no transcript for this session, so it can't check the user agreed. Ask the user to add the domain to vault.config.json.");
     if (consentOf(session) === 'prompt' && declined(sid, offerText(offer, null))) refuse("the user denied starting this domain at the prompt in this session. Don't offer it again unless they ask.");
-    return makeOffer({ kind: 'domain', sid, entry: session, key: f.name, fields: p, lines: offer }).reply;
+    return makeOffer({ kind: 'domain', sid, entry: session, key: f.name, fields: queued ? { queued: queued.id } : p, lines: offer }).reply;
   }
   if (offerText(offer, kept.code) !== kept.text) refuse("the vault changed since the offer, so it isn't what the user agreed to. Propose it again.");
-  const entry = withLock(statePath('config.lock'), () => {
+  // Under queue.lock too for a queued entry, so a drop can't land between the check and the kept row.
+  const entry = withLock(statePath('config.lock'), () => (queued ? queueLocked : g => g())(() => {
+    if (queued) openEntry(queued.id);
     const written = write(f);
     if (f.root) addReach(sid, { domain: f.name, root: f.root });
     appendLog([`added domain ${f.name} · session ${shortName(sid, session.agent)}`]);
+    if (queued) closeEntry({ id: queued.id, decision: 'kept', offer: kept.offer ?? null, sid, agentName: session.agent });
     return written;
-  });
+  }));
   // index.md lists the domains, so it is rebuilt; the config is written by now, so a failed build costs only the generated files.
   reloadConfig();
   guarded('build', build);

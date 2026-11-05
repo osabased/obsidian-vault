@@ -1,6 +1,6 @@
 import { parseArgs } from 'node:util';
 import { vaultPath, toPosix, filesIn } from './lib/vault.mjs';
-import { loadNotes, undelivered, kindLabel, normTopic, clip, cmp, PAGE_KINDS } from './lib/rules.mjs';
+import { loadNotes, undelivered, isRetired, kindLabel, normTopic, clip, cmp, PAGE_KINDS } from './lib/rules.mjs';
 import { parse } from './lib/frontmatter.mjs';
 import { sourceTexts } from './lib/quotes.mjs';
 import { UsageError, failure, readInput, schemaOf, schemaArg } from './lib/input.mjs';
@@ -129,7 +129,7 @@ function search(query, o) {
   const limit = o.limit === undefined ? 10 : /^\d+$/.test(o.limit) && Number(o.limit) > 0 ? Number(o.limit) : null;
   if (!limit || (o.kind !== undefined && !KINDS.includes(o.kind))) throw new UsageError();
   const filtered = o.domain !== undefined || o.kind !== undefined || o.topic !== undefined;
-  const notes = loadNotes().filter(n => !n.superseded_by && (o.domain === undefined || n.domain === o.domain.toLowerCase())
+  const notes = loadNotes().filter(n => !isRetired(n) && (o.domain === undefined || n.domain === o.domain.toLowerCase())
     && (o.topic === undefined || n.topic === normTopic(o.topic)) && (o.kind === undefined || fits(n, o.kind)));
   const terms = [...new Set(words(query))];
   const hits = terms.length ? rank([...notes.map(noteDoc), ...(o.raw && !filtered ? rawDocs() : [])], terms) : [];

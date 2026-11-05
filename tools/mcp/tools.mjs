@@ -2,7 +2,7 @@
 // argument. A marked tool is one the user allows at the client's prompt, which is their consent; keep and proposals
 // count on it.
 export const TOOLS = [
-  { name: 'propose', script: 'propose.mjs', argv: sid => [sid] },
+  { name: 'propose', script: 'propose.mjs', argv: (sid, call) => [sid, call] },
   { name: 'keep', script: 'keep.mjs', argv: (sid, call) => [sid, call], marked: true },
   { name: 'proposals', script: 'proposals.mjs', argv: (sid, call) => [sid, call], marked: true },
   { name: 'domain', script: 'domain.mjs', argv: sid => [sid] },

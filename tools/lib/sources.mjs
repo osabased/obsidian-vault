@@ -7,7 +7,7 @@ import { cachedFiles } from './cache.mjs';
 import { checkDeadline } from './deadline.mjs';
 import {
   isUrl, validDay, rawFile, bundleOf, bundleAbove, folderNames, isDocSet, manifestNames, filled, parsedFile, normUrl, evidenceSources, footnotes, locate, linkedKeys,
-  isSourcePage, undelivered, resolver, cmp, isMap, joinList, clip,
+  isSourcePage, undelivered, resolver, cmp, isMap, joinList, clip, isRetired,
 } from './rules.mjs';
 
 export const KINDS = ['pdf', 'video', 'audio', 'image'];
@@ -412,7 +412,7 @@ export function derive(notes, old = {}, chains = sourceChains()) {
   const domains = {};
   for (const n of notes) {
     checkDeadline();
-    if (n.superseded_by || undelivered(n)) continue;
+    if (isRetired(n) || undelivered(n)) continue;
     const { ids, latest } = cites(n);
     for (const id of ids) (domains[n.domain] ??= new Set()).add(id);
     const changed = [...latest].flatMap(([id, i]) => {

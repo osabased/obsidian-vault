@@ -2,21 +2,22 @@ import fs from 'node:fs';
 import { config, domainsFor, vaultRel, vaultOwn, toPosix, cwdOf, shortHash, plainText, readJsonSafe, safeId, inVaultFolder } from '../vault.mjs';
 import { routesOf, routesFor } from '../reach.mjs';
 import {
-  loadNotesAsync, settledNotes, liveRules, livePages, deliverable, deliveryFor, byFit, ruleLine, rulePointer, pageLine, fitContext, cmp, clip, parseNote, QUOTED, agentNotesSpan, authoredByUser, AGENT_NOTES, TOP_HEADING, isMap,
+  loadNotesAsync, settledNotes, liveRules, livePages, deliverable, deliveryFor, byFit, ruleLine, rulePointer, pageLine, fitContext, cmp, clip, QUOTED, isMap, wroteByUser,
 } from '../rules.mjs';
+import { usersOwn, userNoteGuard, ruleChange, changeOf } from '../note-guards.mjs';
 import { matchTarget, targetNames, specificity, bySpecificity } from '../glob.mjs';
 import { matcher, fileScope, fires, dueRules, gatedFile } from '../scope.mjs';
-import { parse } from '../frontmatter.mjs';
 import { extension } from '../ext.mjs';
+import { rootOutside } from '../versions.mjs';
 import { mark, marked, markMany, markShown, markPages, duePages, agentKey, keyHash, sessionHits, turnStart, registry } from '../sessions.mjs';
 
-function vaultGuard(file, cwd) {
-  const rel = vaultRel(file, cwd);
+function vaultGuard(rel, file, cwd) {
   if (!vaultOwn(rel)) return null;
   const low = rel.toLowerCase();
   if (low === 'active.md' || low === 'index.md') return `${rel} is generated from the notes. Edit the notes instead, then run \`node tools/build.mjs\`.`;
   if (low === 'vault.local.json') return `${rel} lists this machine's project folders for each domain. \`node tools/domain.mjs\` adds a session's folder once the user agrees to a new domain; otherwise leave it to the user.`;
   if (low === 'decisions.md') return `${rel} is generated from the picks in raw/picks/. Record picks with tools/pick.mjs instead.`;
+  if (low === 'queue.md') return `${rel} is generated from the entries in raw/queue/. Use tools/queue.mjs instead.`;
   if (low === 'derived' || low.startsWith('derived/')) return 'derived/ is written by extraction, not edited by hand. A better extraction replaces the file.';
   if (low === '.state' || low.startsWith('.state/')) return ".state/ is the hooks' own bookkeeping. Leave it to them.";
   if (low === '.live' || low.startsWith('.live/')) return '`.live/` is a copy of `tools/` as of the last commit. Change `tools/` and commit instead.';
@@ -28,98 +29,58 @@ function vaultGuard(file, cwd) {
   return null;
 }
 
-// A rule written by hand in a project's session would skip the user's agreement. The folder the session registered
-// decides, since a session moving into the vault folder later gains no more reach than it started with. Any note under
-// wiki/ whose frontmatter says `type: rule` is live, so the result is judged, not the folder.
-function newRuleGuard(event, file, cwd) {
-  const rel = vaultRel(file, cwd);
-  if (rel === null || !/^wiki\/.+\.md$/i.test(rel)) return null;
-  if (inVaultFolder(readJsonSafe(registry(safeId(event.session)))?.cwd ?? cwd)) return null;
-  const exists = fs.existsSync(toPosix(file, cwd));
+// The folder the session registered decides, since a session moving into the vault folder later gains no more reach
+// than it started with.
+const vaultSession = (event, cwd) => inVaultFolder(readJsonSafe(registry(safeId(event.session)))?.cwd ?? cwd);
+
+// The file's text before and after the edit, each parsed (see changeOf). Null when the file can't be read now.
+function change(event, file, cwd, rel) {
   let before = null;
-  if (exists) {
+  if (fs.existsSync(toPosix(file, cwd))) {
     try { before = plainText(fs.readFileSync(toPosix(file, cwd), 'utf8')); } catch { return null; }
   }
-  const after = event.after ? event.after(before ?? '') : null;
-  const isRule = after === null
-    ? !exists && /^wiki\/[^/]+\/rules\/[^/]+\.md$/i.test(rel)
-    : parseNote(after, rel).type === 'rule' && (before === null || parseNote(before, rel).type !== 'rule');
-  if (!isRule) return null;
-  return `\`${rel}\` would be a new rule. Outside the vault folder, rules are kept only through the vault's \`propose\` tool, so the user agrees to each one. Propose it there.`;
+  return changeOf(rel, before, event.after ? event.after(before ?? '') : null);
+}
+
+const wikiNote = rel => rel !== null && /^wiki\/.+\.md$/i.test(rel);
+
+// A project session changes the wiki only through offers the user agrees to. Any note whose frontmatter says
+// `type: rule` is live, so the result is judged, not the folder. In the vault folder too, a rule changes only through
+// an offer the user agrees to, so a retry gets the same answer. The user's own edits in Obsidian reach no hook.
+function wikiGuard(rel, c, inVault) {
+  // A note that exists but can't be read may be a rule, so the vault folder refuses it as one rather than let it through.
+  const kind = c ? ruleChange(rel, c) : inVault ? 'changed' : null;
+  if (inVault) {
+    if (kind === 'new') return `\`${rel}\` would be a new rule. Rules are kept only through the vault's \`propose\` tool, so the user agrees to each one. Propose it there.`;
+    if (kind) return `\`${rel}\` is a rule. Its Do, Not, Because and frontmatter change only through the vault's \`propose\` tool with \`key\`, so the user agrees to each change. Add Evidence lines as before.`;
+    return null;
+  }
+  if (kind === 'new') return `\`${rel}\` would be a new rule. Outside the vault folder, rules are kept only through the vault's \`propose\` tool, so the user agrees to each one. Propose it there.`;
+  if (kind || c?.was?.type === 'rule') {
+    return `\`${rel}\` is a rule. Outside the vault folder, rules change only through the vault's \`propose\` tool: \`repeats\` adds evidence, and \`change\` with \`key\` rewords it, so the user agrees to each change.`;
+  }
+  return `\`${rel}\` is a vault page. Outside the vault folder, pages change only through the vault's \`propose\` tool with \`page\` and \`text\`, so the user agrees to each change.`;
 }
 
 // Fences are kept: a quote the user wrote inside one is still theirs.
 const quotedLines = n => n.body.split(/^## /m).slice(1).filter(s => QUOTED.includes(s.split('\n')[0].trim().toLowerCase()))
   .flatMap(s => s.split('\n').slice(1).map(l => l.trim()).filter(Boolean));
 
-const headingLine = l => TOP_HEADING.test(l);
-
-// A page the user wrote may gain lines under `## Agent notes`, or that heading with lines at its end, and nothing else.
-// Lines added without a heading in the way are the same text wherever the diff puts them, so any placement inside the
-// section is enough. Added lines can still move where the section ends, as an unclosed fence does, so the section must
-// end after the edit where it ended before.
-function bodyNotesAdded(before, after) {
-  const [b, a] = [before, after].map(s => s.split('\n'));
-  const span = agentNotesSpan(b);
-  const now = agentNotesSpan(a);
-  if (!span) {
-    if (!after.startsWith(before)) return false;
-    const rest = after.slice(before.length);
-    const gap = rest.match(/^\n*/)[0];
-    if (!gap && before && !before.endsWith('\n')) return false;
-    const [first, ...added] = rest.slice(gap.length).split('\n');
-    const at = a.length - added.length - 1;
-    return AGENT_NOTES.test(first) && added.some(l => l.trim()) && !added.some(headingLine) && now?.at === at && now.end === a.length;
-  }
-  if (a.length < b.length || now?.at !== span.at || a.length - now.end !== b.length - span.end) return false;
-  let head = 0;
-  while (head < b.length && a[head] === b[head]) head++;
-  let tail = 0;
-  while (tail < b.length && a[a.length - 1 - tail] === b[b.length - 1 - tail]) tail++;
-  if (head + tail < b.length) return false;
-  const at = Math.max(span.at + 1, b.length - tail);
-  return at <= Math.min(span.end, head) && !a.slice(at, at + a.length - b.length).some(headingLine);
-}
-
-// A frontmatter line can read as a heading or a fence, so the section is found in the body, and the frontmatter must
-// stay as it was.
-const frontmatter = text => {
-  const { body, ok } = parse(text);
-  return ok ? text.slice(0, text.length - body.length).replace(/\n$/, '') : '';
-};
-const onlyNotesAdded = (before, after) => frontmatter(before) === frontmatter(after) && bodyNotesAdded(parse(before).body, parse(after).body);
-
-const usersOwn = rel => `${rel} is the user's own writing, so it stays as they wrote it. Add notes as new lines under ## Agent notes, and change nothing else in the file.`;
-
-function userNoteGuard(rel, before, after) {
-  if (authoredByUser(after) && !authoredByUser(before)) {
-    return `${rel} would be marked author: user. The user sets author: user themselves; the agent doesn't make a page theirs.`;
-  }
-  if (!authoredByUser(before) || after === before || onlyNotesAdded(before, after)) return null;
-  return usersOwn(rel);
-}
-
 const PAGE_KEEPS = 0.7;
 
 // Notes are rewritten in place, so an edit that drops the user's words or most of a page is more likely a slip than a
 // choice. The same edit sent again goes through, for when the user asked for it.
-function noteGuard(event, file, cwd) {
-  const rel = vaultRel(file, cwd);
-  if (!rel || !/^wiki\/.+\.md$/i.test(rel)) return null;
-  let before = null;
-  if (fs.existsSync(toPosix(file, cwd))) {
-    try { before = plainText(fs.readFileSync(toPosix(file, cwd), 'utf8')); } catch { return null; }
-  }
-  const after = event.after ? event.after(before ?? '') : null;
+function noteGuard(event, rel, c) {
+  if (!c) return null;
+  const { before, after, was, now } = c;
   // The agent refuses an edit it can't apply before the hook runs, so one the guard can't follow still applies. A tool
   // config maps to the file namespace comes with no after, so the guard can't follow it either.
-  if (after === null) return authoredByUser(before ?? '') ? usersOwn(rel) : null;
+  if (after === null) return wroteByUser(was) ? usersOwn(rel) : null;
   // A user's page gets no second try: a retry of an edit that changes their words would be the slip the guard is for.
-  const owned = userNoteGuard(rel, before ?? '', after);
+  const owned = userNoteGuard(rel, before ?? '', after, was, now);
   if (owned) return owned;
   if (before === null) return null;
-  const was = parseNote(before, rel);
-  const kept = new Set(quotedLines(parseNote(after, rel)));
+  const kept = new Set(quotedLines(now));
   const lost = quotedLines(was).filter(l => !kept.has(l));
   const why = [];
   if (lost.length) {
@@ -132,6 +93,12 @@ function noteGuard(event, file, cwd) {
   }
   if (!why.length || !mark('notes', event.session, agentKey(event, `${rel.toLowerCase()}|${shortHash(after)}`))) return null;
   return [...why, 'If the user asked for this, retry the same edit. The retry is allowed.'].join('\n');
+}
+
+// A project session is always refused by wikiGuard, so noteGuard only judges edits made from the vault folder.
+function wikiNoteGuards(event, rel, file, cwd) {
+  const c = change(event, file, cwd, rel);
+  return wikiGuard(rel, c, vaultSession(event, cwd)) ?? noteGuard(event, rel, c);
 }
 
 // A tool that edits something other than files is gated once config maps it to a namespace, naming the fields of its
@@ -268,14 +235,15 @@ export async function preTool(event) {
   const t = target(event);
   const cwd = cwdOf(event);
   if (t?.namespace === 'file') {
-    const why = vaultGuard(t.path, cwd) ?? newRuleGuard(event, t.path, cwd) ?? noteGuard(event, t.path, cwd);
+    const rel = vaultRel(t.path, cwd);
+    const why = vaultGuard(rel, t.path, cwd) ?? (wikiNote(rel) ? wikiNoteGuards(event, rel, t.path, cwd) : null);
     if (why) return { deny: why };
-    if (vaultOwn(vaultRel(t.path, cwd))) return null;
+    if (vaultOwn(rel)) return null;
   }
   const { domains, hits: reach, matching } = scopeOf(event, t, cwd);
   const notes = settledNotes(await loadNotesAsync(domains));
   const text = plainText(newText(event));
-  const ctx = deliveryFor(reach);
+  const ctx = deliveryFor(reach, null, cwd, rootOutside(reach, cwd, t?.namespace === 'file' ? t.path : undefined));
   const matched = deliverable(matching(liveRules(notes)), ctx);
   const hits = dueRules(event, matched, text);
   // A page is told of once per session wherever it comes up, and is gated on each file as a rule is, so a page the

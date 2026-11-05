@@ -1,11 +1,13 @@
-import { ownEntry } from './lib/sessions.mjs';
+import { callerEntry, PASS } from './lib/sessions.mjs';
 import { typedFor, currentSession } from './lib/agents.mjs';
 import { useCall } from './lib/calls.mjs';
-import { readOffer, claimOffer, keptOffer, codeConsent, consentOf } from './lib/offers.mjs';
+import { readOffer, claimOffer, keptOffer, keepable, codeConsent, consentOf } from './lib/offers.mjs';
 import { proposeRule } from './lib/propose-rule.mjs';
 import { addDomain } from './lib/add-domain.mjs';
 import { mainWorktree } from './lib/git.mjs';
+import { localDay } from './lib/vault.mjs';
 import { setMode } from './lib/set-mode.mjs';
+import { CHANGE_KINDS } from './lib/queue.mjs';
 import { UsageError, readInput, refuse, failure, line, renderHelp, schemaOf, schemaArg } from './lib/input.mjs';
 
 const RUN = 'usage: node tools/keep.mjs [session-id] [call-id] < keep.json';
@@ -23,21 +25,15 @@ const SUMMARY = {
   code: "Keeps an offer that propose, domain or proposals returned, and writes it once the user's next message has the offer's code.",
 };
 
-const PASS = "The vault's tools pass the session id themselves. From a shell, pass it as the first argument, or run this from the agent's own shell, which sets its session variable.";
-
-function sessionOf(sid) {
-  if (!sid) refuse(`there's no session id to keep an offer for. ${PASS}`);
-  const { entry, notOwn } = ownEntry(sid);
-  if (notOwn) refuse(notOwn);
-  if (!entry) refuse(`the taste vault has no session ${sid}. ${PASS}`);
-  return entry;
-}
-
-const NOUN = { rule: 'rule', evidence: 'rule', domain: 'domain', mode: 'setting' };
-
 function notPending(o) {
   if (o.state === 'kept') return `offer \`${o.id}\` was already kept. Nothing more was written.`;
-  if (o.state === 'superseded') return `offer \`${o.id}\` was replaced by a later offer of the same ${NOUN[o.kind] ?? 'change'}. Keep that one.`;
+  if (o.state === 'held') return `offer \`${o.id}\` is held. Call \`propose\` with \`release: true\` first.`;
+  if (o.state === 'queued') {
+    const u = o.queued_as ?? `u-${o.id.slice(2)}`;
+    return `Offer \`${o.id}\` went to the review queue as \`${u}\`. Propose it again with \`queued: "${u}"\`.`;
+  }
+  if (o.state === 'superseded') return `offer \`${o.id}\` was replaced by a later offer of the same ${CHANGE_KINDS[o.kind]?.noun ?? 'change'}. Keep that one.`;
+  if (o.state === 'denied') return `the user denied keeping offer \`${o.id}\` at the prompt in this session. Don't offer it again unless they ask.`;
   return `offer \`${o.id}\` was already tried once. Propose it again.`;
 }
 
@@ -47,7 +43,7 @@ function notPending(o) {
 // refused keep can't be run again, from the tool or a shell, with other lines. By a code, lines that don't match leave
 // the offer pending, so the agent can pass the right ones.
 function keep(sid, input, call) {
-  const entry = sessionOf(sid);
+  const entry = callerEntry(sid, { noId: `there's no session id to keep an offer for. ${PASS}` });
   const p = input();
   const prompted = consentOf(entry) === 'prompt';
   if (prompted && !useCall(call, { session: String(sid), tool: 'keep', offer: typeof p.id === 'string' ? p.id : null, input: p })) {
@@ -59,8 +55,8 @@ function keep(sid, input, call) {
   if (typeof p.offer !== 'string' || !p.offer.trim()) refuse('offer is missing: pass the lines the offer was returned with.');
   const o = readOffer(id);
   if (!o || o.session !== String(sid)) refuse(`there's no offer \`${id}\` in this session. Propose it again.`);
-  if (o.state !== 'pending') refuse(notPending(o));
-  if (prompted && !claimOffer(id)) refuse(notPending(readOffer(id) ?? o));
+  if (!keepable(o, prompted ? call : null)) refuse(notPending(o));
+  if (prompted && !claimOffer(id, call)) refuse(notPending(readOffer(id) ?? o));
   if (p.offer.replace(/\r\n?/g, '\n').trimEnd() !== o.text) {
     refuse(prompted
       ? `offer isn't the text propose returned for \`${id}\`, so the user didn't agree to what keep would write. Propose it again.`
@@ -73,7 +69,7 @@ function keep(sid, input, call) {
     kept = { consent: 'code', approved: typedFor(entry)[o.typed] };
     if (!claimOffer(id)) refuse(notPending(readOffer(id) ?? o));
   }
-  Object.assign(kept, { text: o.text, code: o.code });
+  Object.assign(kept, { text: o.text, code: o.code, offer: o.id, day: o.checked ?? localDay(o.at) });
   const out = o.kind === 'domain' ? addDomain(sid, o.fields, { kept, mainWorktree })
     : o.kind === 'mode' ? setMode(sid, o.fields, { kept })
     : proposeRule(sid, o.fields, { kept });

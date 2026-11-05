@@ -20,7 +20,7 @@ export const toolsPath = (...xs) => path.join(import.meta.dirname, '..', ...xs);
 
 export const DEFAULTS = {
   delivery: { maxRulesPerEdit: 3, maxRuleChars: 300, maxKnowledgeRuleChars: 600, maxBlockChars: 1200, maxPromptExcerpts: 3, maxPages: 3, maxContextChars: 8000, activeMaxLines: 60, activeMaxBytes: 4096, settleSeconds: 60, tidyMaxMarkers: 2000 },
-  knowledge: { staleAfterDays: 180, checkAfterDays: 14 },
+  knowledge: { staleAfterDays: 180, checkAfterDays: 14, movedOn: 'major' },
   refresh: { timeoutSeconds: 20, maxBytes: 5_000_000 },
   docSets: { manifests: ['llms.txt'] },
   lint: { remindAfterDays: 14, remindAfterNotes: 10 },
@@ -30,10 +30,18 @@ export const DEFAULTS = {
   editTools: {},
   privacy: { allow: [] },
   compile: { maxBytes: 16_384 },
+  queue: { sweepAfterHours: 12 },
+  pages: { maxOfferChars: 4000, entityAfterRules: 3, rollupAfterRules: 3 },
 };
+// domains holds one setting of its own beside the domains it maps.
+export const DOMAIN_SETTINGS = { suggestAfterProjects: 2 };
+export const domainEntries = ds => Object.entries(ds && typeof ds === 'object' && !Array.isArray(ds) ? ds : {}).filter(([d]) => !Object.hasOwn(DOMAIN_SETTINGS, d));
 
 const strings = xs => (Array.isArray(xs) ? xs.filter(x => typeof x === 'string' && x.trim()) : []);
 const local = () => readJsonSafe(vaultPath('vault.local.json')) ?? {};
+
+export const aboveZero = (x, whole = false) => typeof x === 'number' && (whole ? Number.isInteger(x) : Number.isFinite(x)) && x > 0;
+export const POSITIVE = [['queue', 'sweepAfterHours', false], ['pages', 'maxOfferChars', true], ['pages', 'entityAfterRules', true], ['pages', 'rollupAfterRules', true]];
 
 // Paths differ per machine, so they come from the untracked vault.local.json; a file lint finds broken gives none.
 let loaded;
@@ -41,11 +49,16 @@ export function config() {
   if (!loaded) {
     const c = readJson(vaultPath('vault.config.json'), {});
     const mine = local();
-    const domains = Object.fromEntries(Object.entries(c.domains ?? {}).map(([d, x]) => [d, { ...x, paths: strings(mine.domains?.[d]?.paths) }]));
+    const domains = Object.fromEntries(domainEntries(c.domains).map(([d, x]) => [d, { ...x, paths: strings(mine.domains?.[d]?.paths) }]));
     const extractors = Array.isArray(c.extractors) ? c.extractors : [];
     // The agents whose tool names lint checks, in the order a script looks for its own session, each a folder in tools/adapters/.
     const agents = Array.isArray(c.agents) ? c.agents : ['claude-code'];
     loaded = { domains, extractors, agents, proposals: c.proposals, quiet: strings(mine.quiet).filter(g => validGlob(g)), ...Object.fromEntries(Object.entries(DEFAULTS).map(([k, d]) => [k, { ...d, ...c[k] }])) };
+    // Lint reports these; until the user fixes one, its default keeps the sweep off live sessions and the page cap on.
+    for (const [k, f, whole] of POSITIVE) if (!aboveZero(loaded[k][f], whole)) loaded[k][f] = DEFAULTS[k][f];
+    if (loaded.knowledge.movedOn !== 'major') loaded.knowledge.movedOn = DEFAULTS.knowledge.movedOn;
+    const suggest = c.domains?.suggestAfterProjects;
+    loaded.suggestAfterProjects = aboveZero(suggest, true) ? suggest : DOMAIN_SETTINGS.suggestAfterProjects;
   }
   return loaded;
 }
@@ -64,9 +77,12 @@ export function toPosix(p, base = process.cwd()) {
   return /^[a-z]:\/$/i.test(s) ? s : s.replace(/\/+$/, '');
 }
 
+// Hooks get one folder spelled in more than one case, so paths are compared folded.
+export const pathKey = (p, base) => toPosix(p, base).toLowerCase();
+
 export function inside(root, p, base) {
   const target = toPosix(p, base);
-  const r = toPosix(root).toLowerCase();
+  const r = pathKey(root);
   const lower = target.toLowerCase();
   if (lower === r) return '';
   const prefix = r.endsWith('/') ? r : `${r}/`;
@@ -84,7 +100,7 @@ export const fromRoot = ref => (path.isAbsolute(ref) && vaultRel(ref)) || ref;
 
 // The vault's notes and sources are the user's taste, and the rest are written by the tools or kept for this machine,
 // so no rule covers them, and the edit guard decides what may change.
-const VAULT_OWN = /^(?:wiki|raw|derived|\.state|\.live|\.sources)(?:\/|$)|^(?:active\.md|index\.md|decisions\.md|vault\.local\.json)$/i;
+const VAULT_OWN = /^(?:wiki|raw|derived|\.state|\.live|\.sources)(?:\/|$)|^(?:active\.md|index\.md|decisions\.md|queue\.md|vault\.local\.json)$/i;
 export const vaultOwn = rel => typeof rel === 'string' && VAULT_OWN.test(rel);
 
 const caseFolds = process.platform === 'win32' || process.platform === 'darwin';
@@ -267,12 +283,33 @@ export function writeText(file, text) {
   }
 }
 
+// The top of the work tree dir is in, found without running git. A worktree or submodule has a .git file in place of
+// the folder.
+export function topOf(dir) {
+  for (let d = path.resolve(dir); ; d = path.dirname(d)) {
+    if (fs.existsSync(path.join(d, '.git'))) return d;
+    if (path.dirname(d) === d) return null;
+  }
+}
+
+// Only for a note a tool moves. A rename keeps the file's times, and leaves one copy whether it lands or not. Windows
+// would replace a file already at to, so that is refused instead.
+export function moveFile(from, to) {
+  fs.mkdirSync(path.dirname(to), { recursive: true });
+  if (fs.existsSync(to)) throw Object.assign(new Error(`${to} already exists`), { code: 'EEXIST' });
+  retry(() => fs.renameSync(from, to));
+}
+
 // Only for a folder the tools keep for themselves, such as a clone in .sources/.
 export const removeDir = dir => fs.rmSync(dir, { recursive: true, force: true, maxRetries: 3, retryDelay: 50 });
 
 export const lf = s => String(s ?? '').replace(/\r\n/g, '\n');
 // A BOM is the editor's, not the text's, so the guards and triggers read text without it.
 export const plainText = s => lf(s).replace(/^\uFEFF/, '');
+// The tools edit a file's plain text, and restore puts back its line endings and byte order mark once on write.
+export const plainLayout = s => ({ text: plainText(s), eol: s.includes('\r\n') ? '\r\n' : '\n', bom: s.startsWith('\uFEFF') });
+export const readPlain = file => plainLayout(fs.readFileSync(file, 'utf8'));
+export const restore = (text, { eol, bom }) => `${bom ? '\uFEFF' : ''}${eol === '\n' ? text : text.replace(/\n/g, eol)}`;
 export const writeJson = (file, data) => writeText(file, `${JSON.stringify(data, null, 2)}\n`);
 
 // The hooks wait out delivery.settleSeconds after a save because Obsidian saves half-typed notes;
@@ -285,8 +322,9 @@ export function writeSettled(file, text) {
 
 // For a change that leaves what a note says as it was. The file keeps the day it was saved, so the pages that watch the
 // note don't go stale, but moves on a second, since editors such as VS Code tell a file changed by its time and size.
-export function rewriteText(file, text) {
-  const { atime, mtime } = fs.statSync(file);
+// A move writes the note at its new path, from, and keeps that file's day.
+export function rewriteText(file, text, from = file) {
+  const { atime, mtime } = fs.statSync(from);
   writeText(file, text);
   fs.utimesSync(file, atime, new Date(mtime.getTime() + 1000));
 }
@@ -335,6 +373,9 @@ const pad = n => String(n).padStart(2, '0');
 export const today = (d = new Date()) => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
 // Rows stamp `at` in UTC and files are named for the local day, so a row's day is read as a local day too.
 // Whole days from one YYYY-MM-DD day to another, today by default.
+// A time that doesn't parse counts as old, so a broken stamp never keeps something forever.
+export const olderThan = (at, ms) => !(Date.now() - (typeof at === 'number' ? at : Date.parse(at)) < ms);
+
 export const daysBetween = (from, to = today()) => Math.round((Date.parse(to) - Date.parse(from)) / 864e5);
 export const localDay = at => (Number.isNaN(Date.parse(at)) ? '' : today(new Date(at)));
 export const clock = (d = new Date()) => `${today(d)} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
@@ -346,6 +387,7 @@ const sessionFile = (folder, name, day) => vaultPath('raw', folder, `${day}-${sa
 
 export const inboxFile = (name, day = today()) => sessionFile('inbox', name, day);
 export const picksFile = (name, day = today()) => sessionFile('picks', name, day);
+export const queueFile = (name, day = today()) => sessionFile('queue', name, day);
 
 export function datedFiles(folder) {
   const dir = vaultPath('raw', folder);
@@ -374,6 +416,7 @@ const datedRows = folder => datedFiles(folder).flatMap(f => f.rows).sort(byAt);
 
 export const proposalRows = () => datedRows('inbox').filter(r => r.source === 'agent');
 export const pickRows = () => datedRows('picks');
+export const queueRows = () => datedRows('queue');
 
 export function appendLog(lines) {
   const file = vaultPath('log.md');
@@ -508,6 +551,13 @@ function tryLock(file, token, staleMs) {
 
 // A propose holds the lock for about 6 s at 3,000 notes, and three at once run one after another, so a waiter gives up
 // only after a minute, and a live holder's lock goes stale at half that.
+export const newId = prefix => `${prefix}-${crypto.randomBytes(4).toString('hex')}`;
+
+// For work a later run redoes, such as a build or a sweep: another process holding its lock is not an error.
+export function skipIfLocked(fn) {
+  try { return fn(); } catch (e) { if (e?.code !== 'ELOCKED') throw e; }
+}
+
 export function withLock(file, fn, { waitMs = 60_000, staleMs = 30_000 } = {}) {
   const token = `${process.pid}:${crypto.randomBytes(6).toString('hex')}`;
   fs.mkdirSync(path.dirname(file), { recursive: true });

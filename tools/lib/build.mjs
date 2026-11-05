@@ -1,11 +1,17 @@
 import fs from 'node:fs';
-import { vaultPath, writeText, writeJson, lf, statePath, withLock } from './vault.mjs';
+import { vaultPath, writeText, writeJson, lf, statePath, withLock, skipIfLocked } from './vault.mjs';
 import { loadNotes, liveRules, renderActive, renderIndex, readDerived } from './rules.mjs';
 import { renderDecisions } from './picks.mjs';
+import { renderQueue, queueLocked } from './queue.mjs';
 import { markBuilt, changedSinceBuild, refStats } from './cache.mjs';
 import { derive } from './sources.mjs';
 
 const render = notes => ({ 'active.md': renderActive(liveRules(notes)), 'index.md': renderIndex(notes), 'decisions.md': renderDecisions() });
+
+// queue.md is rendered and written under queue.lock, so it never overwrites a newer one a queue write left. A holder of
+// the lock writes queue.md itself once its rows are in, so a build that finds the lock taken leaves queue.md to it rather
+// than wait.
+const writeQueueFile = () => skipIfLocked(() => queueLocked(() => stale({ 'queue.md': renderQueue() }, true), 0)) ?? [];
 
 function stale(files, write) {
   const out = [];
@@ -37,10 +43,10 @@ function writeDerived(notes, { apply, refs, chains }) {
 // checks, after writing any copies under raw/refs/. A caller that holds refStats() or sourceChains() passes them as refs
 // and chains so raw/refs/ isn't read twice; with apply, both are taken afresh once its copies are written.
 export function build({ check = false, notes, waitMs = 60_000, apply, refs, chains } = {}) {
-  if (check) return stale(render(notes ?? loadNotes()), false);
+  if (check) return stale({ ...render(notes ?? loadNotes()), 'queue.md': renderQueue() }, false);
   return withLock(statePath('build.lock'), () => {
     const all = loadNotes();
-    const out = stale(render(all), true);
+    const out = [...stale(render(all), true), ...writeQueueFile()];
     const before = apply ? null : (refs ?? refStats());
     writeDerived(all, { apply, refs: before, chains });
     markBuilt(all, before ?? refStats());

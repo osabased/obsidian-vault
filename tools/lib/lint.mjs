@@ -3,13 +3,13 @@ import path from 'node:path';
 import { isBuiltin } from 'node:module';
 import {
   config, vaultPath, plural, today, daysBetween, datedFiles, filesIn, pickRows, proposalRows, rewriteText, writeText, lf, readJson, readJsonSafe, toPosix, memo, statePath, isVaultOnly, isMarkerName, clock, inVaultFolder,
-  PROPOSAL_MODES,
+  PROPOSAL_MODES, aboveZero, domainEntries,
 } from './vault.mjs';
 import { editsFile, sentToHook, hookMatchers, listedAgents, typedFor, hasAgent, AGENT_NAME } from './agents.mjs';
 import {
   vaultFile, loadNotes, noteErrors, ruleText, ruleTextParts, liveRules, knownDomain, alwaysSize, isUrl, validDay, normTopic, topicNotes, rawFile, toKey, resolver, linksUnder, noteLinks, byTopic, isTopicPage, isSourcePage, PAGE_KINDS, joinList,
-  hasSection, footnotes, youSaid, linkedKeys, clip, citedSources, evidenceQuotes, keyOf, kindFolder, kindLabel, linkTo, parseNote, noteLinkSpans, maxChars, bundleOf, locate,
-  filled, isMap, sourceItem, authoredByUser, isUserPage, parsedFile, notTextError, manifestNames,
+  hasSection, sectionLines, footnotes, youSaid, linkedKeys, clip, citedSources, evidenceQuotes, keyOf, kindFolder, kindPlace, linkTo, maxChars, bundleOf, locate,
+  filled, isMap, sourceItem, authoredByUser, isUserPage, parsedFile, notTextError, manifestNames, isRetired, packageId, editBody, relink, comparedKeys, PACKAGE_SHAPE, notesByKey,
 } from './rules.mjs';
 import { hasFormat, reachOf, compileFor } from './compile.mjs';
 import { setField } from './frontmatter.mjs';
@@ -21,6 +21,7 @@ import { build } from './build.mjs';
 import { transcriptFor, sessionsByName, sessionName } from './sessions.mjs';
 import { saidIn, quoteTexts, userPageTexts } from './quotes.mjs';
 import { loadExtractor } from './extractors.mjs';
+import { CLOSING, kindsThat } from './queue.mjs';
 import {
   KINDS, LOCATORS, hashFile, lineCount, clockTime, parseLocator, anchorsIn, derivedAnchors, manifestLine, sourceProblems, refSources,
   sourceChains, noteCitations, knowledgeDays, newerCopies, copyStem,
@@ -50,9 +51,7 @@ export function lint(notes = loadNotes(), chains = sourceChains()) {
     return days.length && days.every(validDay) ? days.sort()[0] : null;
   };
   const keys = new Set(notes.map(n => n.key));
-  const named = new Map();
-  for (const n of notes) named.set(n.slug, [...(named.get(n.slug) ?? []), n]);
-  const noteAt = new Map(notes.map(n => [n.key, n]));
+  const { noteAt, named } = linkIndex(notes);
   const resolve = resolver(notes);
   const md = markdownFiles();
   const rulesOf = page => [...new Set(linksUnder(page, 'Rules').map(resolve))].map(k => noteAt.get(k)).filter(r => r?.type === 'rule');
@@ -93,8 +92,7 @@ export function lint(notes = loadNotes(), chains = sourceChains()) {
     else if (!knownDomain(n.domain)) add('error', n.rel, `${n.domain} isn't a domain in vault.config.json`);
     const folder = kindFolder(n);
     if (n.depth > 1 && folder && n.folder !== folder) {
-      const what = n.type === 'rule' ? 'rule' : kindLabel(n.kind);
-      add('warn', n.rel, `${/^[aeiou]/.test(what) ? 'an' : 'a'} ${what} goes in wiki/${n.domain}/${folder}/`);
+      add('warn', n.rel, kindPlace(n, n.domain));
     }
     for (const e of noteErrors(n)) add('error', n.rel, e);
     for (const e of toolErrors(n)) add('error', n.rel, e);
@@ -114,7 +112,7 @@ export function lint(notes = loadNotes(), chains = sourceChains()) {
     if (n.data.status !== undefined) add('warn', n.rel, 'status does nothing. To stop a rule, delete its note or set superseded_by');
     if (n.data.replaces !== undefined) add('warn', n.rel, 'replaces does nothing. Set superseded_by on the note it replaces instead');
     if (!n.because) add('warn', n.rel, 'empty **Because:**');
-    if (!n.superseded_by && !n.topic) add('warn', n.rel, 'no topic. Give it a short one, so the repeat check lists it with the rules on its topic');
+    if (!isRetired(n) && !n.topic) add('warn', n.rel, 'no topic. Give it a short one, so the repeat check lists it with the rules on its topic');
     if (n.do && n.not && ruleText(n).length > maxChars(n.kind)) {
       add('warn', n.rel, `${ruleTextParts(n)} come to ${ruleText(n).length} characters; the hooks cut them at ${maxChars(n.kind)}`);
     }
@@ -122,7 +120,7 @@ export function lint(notes = loadNotes(), chains = sourceChains()) {
     if (n.do && n.not && n.always && n.kind === 'knowledge' && ruleText(n).length > delivery.maxRuleChars) {
       add('warn', n.rel, `always: true loads this rule at every session start, and its ${ruleTextParts(n)} come to ${ruleText(n).length} characters, over the ${delivery.maxRuleChars} a taste rule may have. Shorten it, or give it keywords instead`);
     }
-    if (n.kind === 'knowledge' && !n.superseded_by && validDay(n.as_of)) {
+    if (n.kind === 'knowledge' && !isRetired(n) && validDay(n.as_of)) {
       const checked = lastChecked(n);
       const from = checked && checked > n.as_of ? checked : n.as_of;
       const days = daysBetween(from);
@@ -141,7 +139,9 @@ export function lint(notes = loadNotes(), chains = sourceChains()) {
   lintTopicPages(notes, add);
   lintOrphans(notes, resolve, add);
   lintPicks(add);
+  lintPackages(notes, resolve, add);
   lintInbox(add);
+  lintQueue(add);
   lintSources(add, chains);
   lintManifestCase(add);
   lintBundles(add, hashOf);
@@ -184,27 +184,6 @@ export function fix(found, chains, refs) {
   return { fixed: [...copied, ...fixable.filter(f => written.includes(f.file))], written, rebuilt: build({ chains, refs }) };
 }
 
-// Each fix parses the text it's given afresh, so the fixes to one file apply one after another, and a fix for a link
-// another fix already rewrote finds nothing left to change.
-function editBody(text, rel, edits) {
-  const n = parseNote(text, rel);
-  const at = text.length - n.body.length;
-  return edits(n).sort((a, b) => b.at - a.at)
-    .reduce((t, e) => `${t.slice(0, at + e.at)}${e.text}${t.slice(at + e.at + e.length)}`, text);
-}
-
-// A link keeps its heading and alias. One with no alias gets the note's name, escaped in a table row as Obsidian
-// escapes it.
-function relink(rel, target, note) {
-  const to = note.rel.replace(/\.md$/i, '');
-  return text => editBody(text, rel, n => noteLinkSpans(n).filter(s => s.target === target).map(s => {
-    if (!s.wiki) return { at: s.at, length: s.raw.length, text: note.rel };
-    const row = /^\s*\|/.test(n.body.slice(n.body.lastIndexOf('\n', s.at) + 1, s.at));
-    const alias = /\\?\|/.test(s.rest) ? '' : `${row ? '\\|' : '|'}${note.slug}`;
-    return { at: s.at, length: s.raw.length + s.rest.length, text: `${to}${s.rest}${alias}` };
-  }));
-}
-
 function refootnote(rel, id, target, from, to) {
   return text => editBody(text, rel, n => footnotes(n).defs.filter(d => d.id === id && d.target === target)
     .map(d => ({ at: d.at, length: d.raw.length, text: d.raw.replace(from, () => to) })));
@@ -241,6 +220,44 @@ function lintPicks(add) {
   }
 }
 
+const GOTCHA = /^- \d{4}-\d\d-\d\d · session [^\s·]+ · `[^`]+` · error: ".+" · fixed by: \S/;
+const DOC_READ = /^- (?:https?:\/\/\S+|raw\/refs\/\S+) · fetched \d{4}-\d\d-\d\d$/;
+const LINE_FORMS = [
+  ['Gotchas', GOTCHA, '- <date> · session <id> · `<file>` · error: "<as printed>" · fixed by: <the fix>'],
+  ['Docs read', DOC_READ, '- <URL or raw/refs/ file> · fetched <date>'],
+];
+
+// An entity page names its library as OSV does, one page per library, and its Gotchas and Docs read lines keep a form
+// a later session can check. review.mjs pairs entity pages by job and looks for the synthesis page that compares them.
+function lintPackages(notes, resolve, add) {
+  const byPackage = new Map();
+  const kinds = new Map(notes.map(n => [n.key, n.kind]));
+  for (const n of notes) {
+    if (n.type !== 'page') continue;
+    if (n.data.job !== undefined && n.kind !== 'entity') add('warn', n.rel, 'job is for entity pages, the task the library does');
+    else if (n.data.job !== undefined && !filled(n.data.job)) add('warn', n.rel, 'job must be a short phrase, such as the task the library does');
+    if (n.data.compares !== undefined && n.kind !== 'synthesis') add('warn', n.rel, 'compares is for synthesis pages, naming the entity pages they compare');
+    else if (n.data.compares !== undefined) {
+      const keys = comparedKeys(n, resolve);
+      const named = Array.isArray(n.data.compares) && keys.length === n.data.compares.length && keys.every(k => kinds.get(k) === 'entity');
+      if (!(named && keys.length >= 2)) add('warn', n.rel, 'compares must list two or more entity pages by key, such as [global/react, global/vue]');
+    }
+    const id = packageId(n.data.package);
+    if (n.data.package !== undefined && !id) add('warn', n.rel, PACKAGE_SHAPE);
+    else if (id) byPackage.set(id, [...(byPackage.get(id) ?? []), n.rel]);
+    if (n.kind !== 'entity') continue;
+    for (const [title, form, shape] of LINE_FORMS) {
+      for (const l of sectionLines(n, title)) {
+        if (l.trim() && !form.test(l.trimEnd())) add('warn', n.rel, `a ## ${title} line reads "${clip(l.trim(), 80)}", not ${shape}`);
+      }
+    }
+  }
+  for (const [id, rels] of byPackage) {
+    if (rels.length < 2) continue;
+    for (const rel of rels) add('warn', rel, `${id} is also the package of ${joinList(rels.filter(r => r !== rel), 'and')}. Keep one entity page per library`);
+  }
+}
+
 // Rows from before consent was recorded have neither field.
 function lintInbox(add) {
   for (const { file, rows } of datedFiles('inbox')) {
@@ -248,6 +265,46 @@ function lintInbox(add) {
       if (r.consent === undefined) continue;
       if (r.consent !== 'prompt' && r.consent !== 'code') add('warn', file, `${r.id} records consent ${JSON.stringify(r.consent)}, which is neither "prompt" nor "code"`);
       else if (r.consent === 'code' && !(typeof r.approved === 'string' && r.approved.trim())) add('warn', file, `${r.id} records consent "code" with no approved reply, the typed message that held the code`);
+    }
+  }
+}
+
+const ENTRY_ID = /^u-[0-9a-f]{8}$/;
+const QUEUE_FIELDS = [
+  ['kind', kindsThat('queued'), false],
+  ['why', ['unreleased', 'skipped', 'ignored', 'unattended', 'drafted'], false],
+  ['unattended', ['subagent', 'headless', 'left'], true],
+];
+
+// A stated or inferred quote is the user's words, which propose checked as the offer was made; a row written by hand
+// never was. Only the first kept or dropped row closes an entry, so a second one is a sign of a race or a hand edit.
+function lintQueue(add) {
+  const files = datedFiles('queue');
+  const all = files.flatMap(f => f.rows);
+  const entries = new Set(all.filter(r => !r.decides).map(r => r.id));
+  const closedBy = new Map();
+  // An entry's transcript is its session's, and a session leaves many entries.
+  const typedAt = new Map();
+  for (const { file, rows } of files) {
+    for (const r of rows) {
+      if (r.decides !== undefined) {
+        if (!entries.has(r.decides)) add('warn', file, `${r.id} decides ${r.decides}, which has no entry`);
+        if (!['kept', 'dropped', 'later'].includes(r.decision)) add('warn', file, `${r.id} records decision ${JSON.stringify(r.decision)}, which is neither kept, dropped nor later`);
+        else if (CLOSING.includes(r.decision)) {
+          if (closedBy.has(r.decides)) add('warn', file, `${r.id} closes ${r.decides}, which ${closedBy.get(r.decides)} already closed`);
+          else closedBy.set(r.decides, r.id);
+        }
+        continue;
+      }
+      if (!ENTRY_ID.test(String(r.id))) add('warn', file, `${r.id} isn't an entry id: u- and 8 hex digits`);
+      for (const [field, values, optional] of QUEUE_FIELDS) {
+        if (optional && r[field] === null) continue;
+        if (!values.includes(r[field])) add('warn', file, `${r.id} has ${field} ${JSON.stringify(r[field])}, which is none of ${joinList(values, 'or')}`);
+      }
+      if (!['stated', 'inferred'].includes(r.fields?.basis) || typeof r.quote !== 'string' || !r.transcript || !fs.existsSync(r.transcript)) continue;
+      if (!typedAt.has(r.transcript)) typedAt.set(r.transcript, typedFor({ agent: r.agent, transcript: r.transcript }));
+      const typed = typedAt.get(r.transcript);
+      if (typed && !saidIn(r.quote, typed)) add('warn', file, `${r.id} quotes "${r.quote}", which isn't in what the user typed in session ${sessionName(String(r.session), r.agent)}`);
     }
   }
 }
@@ -279,7 +336,7 @@ export function lintConfig(add) {
     }
   }
   const declared = ns => isMap(namespaces) && typeof ns === 'string' && ns !== 'file' && Object.hasOwn(namespaces, ns);
-  for (const [d, x] of Object.entries(isMap(c.domains) ? c.domains : {})) {
+  for (const [d, x] of domainEntries(c.domains)) {
     if (x?.aliases === undefined) continue;
     const at = `${d}.aliases`;
     if (!isMap(x.aliases)) {
@@ -292,7 +349,7 @@ export function lintConfig(add) {
       else if (!hasExtension('aliases', name)) bad(`${at}.${ns} names ${name}, and ${extensionRel('aliases', name)} doesn't exist`);
     }
   }
-  for (const [d, x] of Object.entries(isMap(c.domains) ? c.domains : {})) {
+  for (const [d, x] of domainEntries(c.domains)) {
     if (x?.compile === undefined) continue;
     if (!Array.isArray(x.compile) || x.compile.some(name => typeof name !== 'string')) bad(`${d}.compile must be a list of adapter names`);
     else for (const name of x.compile) if (!hasFormat(name)) bad(`${d}.compile names ${name}, and tools/adapters/${name}/compile.mjs doesn't exist`);
@@ -300,7 +357,20 @@ export function lintConfig(add) {
   if (c.compile !== undefined && (!isMap(c.compile) || (c.compile.maxBytes !== undefined && !(Number.isInteger(c.compile.maxBytes) && c.compile.maxBytes > 0)))) {
     bad('compile.maxBytes must be a whole number of bytes above 0');
   }
-  for (const [d, x] of Object.entries(isMap(c.domains) ? c.domains : {})) {
+  if (c.queue !== undefined && (!isMap(c.queue) || (c.queue.sweepAfterHours !== undefined && !aboveZero(c.queue.sweepAfterHours)))) {
+    bad('queue.sweepAfterHours must be a number of hours above 0');
+  }
+  if (c.pages !== undefined && (!isMap(c.pages) || (c.pages.maxOfferChars !== undefined && !aboveZero(c.pages.maxOfferChars, true)))) {
+    bad('pages.maxOfferChars must be a whole number of characters above 0');
+  }
+  for (const f of ['entityAfterRules', 'rollupAfterRules']) {
+    if (isMap(c.pages) && c.pages[f] !== undefined && !aboveZero(c.pages[f], true)) bad(`pages.${f} must be a whole number of rules above 0`);
+  }
+  if (isMap(c.domains) && c.domains.suggestAfterProjects !== undefined && !aboveZero(c.domains.suggestAfterProjects, true)) {
+    bad('domains.suggestAfterProjects must be a whole number of projects above 0');
+  }
+  if (isMap(c.knowledge) && c.knowledge.movedOn !== undefined && c.knowledge.movedOn !== 'major') bad('knowledge.movedOn must be major, the only policy so far');
+  for (const [d, x] of domainEntries(c.domains)) {
     if (x?.feeds !== undefined) add('warn', 'vault.config.json', `${d}.feeds does nothing yet: no feed parser ships, so refresh reads no feeds`);
   }
   const editTools = c.editTools ?? {};
@@ -594,7 +664,7 @@ const toolErrors = n => (n.tools ?? []).filter(x => /^\S+$/.test(x)).flatMap(x =
   : !listedAgents().length ? [`tools names ${x}, but agents in vault.config.json lists no agent, so lint can't tell whether an edit hook is sent it`]
   : [`tools names ${x}, which the edit hook's matcher, ${hookMatchers()}, never sends to the hook, so it would never bring the rule up`]));
 
-function lintLinks(n, noteAt, named, md, add) {
+export function lintLinks(n, noteAt, named, md, add) {
   for (const target of noteLinks(n)) {
     if (!target || /\.(?!md$)[^./]+$/i.test(target)) continue;
     const rel = target.replace(/\\/g, '/').replace(/^\.?\//, '').replace(/\.md$/i, '').toLowerCase();
@@ -603,14 +673,22 @@ function lintLinks(n, noteAt, named, md, add) {
     const same = named.get(key) ?? [];
     if (!key.includes('/') && (same.length === 1 || (!same.length && md.names.has(key)))) continue;
     const note = key.includes('/') && noteAt.get(keyOf(key));
-    if (note) add('warn', n.rel, `links [[${target}]], a note at ${note.rel}. Link it by that path, as ${linkTo(note.key, note.rel)}`, note.clash ? null : relink(n.rel, target, note));
+    if (note) add('warn', n.rel, `links [[${target}]], a note at ${note.rel}. Link it by that path, as ${linkTo(note.key, note.rel)}`, note.clash ? null : relink(n.rel, t => t === target, note));
     else if (same.length > 1) add('warn', n.rel, `links [[${target}]], which names more than one note. Write its path from the vault root: ${joinList(same.map(x => `[[${x.rel.slice(0, -3)}]]`), 'or')}`);
     else add('warn', n.rel, `links [[${target}]], which has no note`);
   }
 }
 
-function markdownFiles() {
-  const paths = new Set(filesIn(vaultPath(), '.md').map(f => f.slice(0, -3).toLowerCase()));
+export function linkIndex(notes) {
+  const named = new Map();
+  for (const n of notes) named.set(n.slug, [...(named.get(n.slug) ?? []), n]);
+  // A link by a moved rule's old path finds the rule through moved_from, so lint gives the path it has now.
+  return { noteAt: notesByKey(notes), named };
+}
+
+// extra are paths not on disk yet, from the vault root, lowercase and without .md, that links may name too.
+export function markdownFiles(extra = []) {
+  const paths = new Set([...filesIn(vaultPath(), '.md').map(f => f.slice(0, -3).toLowerCase()), ...extra]);
   return { paths, names: new Set([...paths].map(f => f.split('/').at(-1))) };
 }
 
@@ -797,7 +875,7 @@ function lintReaders(notes, add) {
   const c = readJson(vaultPath('vault.config.json'), {}) ?? {};
   const bad = msg => add('error', 'vault.config.json', msg);
   const answers = new Map();
-  for (const [d, x] of Object.entries(isMap(c.domains) ? c.domains : {})) {
+  for (const [d, x] of domainEntries(c.domains)) {
     if (x?.readers === undefined) continue;
     const at = `${d}.readers`;
     if (!Array.isArray(x.readers)) {
@@ -938,7 +1016,7 @@ const isFolder = p => typeof p === 'string' && Boolean(p.trim()) && path.isAbsol
 // machine has, so each file is read as written rather than through config(), which keeps only what parses.
 function lintReach(add) {
   const sharedFile = readJsonSafe(vaultPath('vault.config.json'));
-  const shared = sharedFile?.domains ?? {};
+  const shared = Object.fromEntries(domainEntries(sharedFile?.domains));
   const localFile = vaultPath('vault.local.json');
   const modes = joinList(PROPOSAL_MODES, 'or');
   const topMode = sharedFile?.proposals;

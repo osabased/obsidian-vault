@@ -1,6 +1,6 @@
-import { sessionReach, isQuiet, vaultPath, toPosix, guarded, config, plural, clock, daysBetween } from '../vault.mjs';
+import { sessionReach, isQuiet, vaultPath, toPosix, guarded, config, plural, clock, daysBetween, skipIfLocked } from '../vault.mjs';
 import { statusLine } from '../status.mjs';
-import { alwaysContext, alwaysIn, fitContext, indexNote, scopeTopics, loadNotesAsync, settledNotes, deliveryFor, readDerived, clip, undelivered, knownDomain, joinList } from '../rules.mjs';
+import { alwaysContext, alwaysIn, fitContext, indexNote, scopeTopics, loadNotesAsync, settledNotes, deliveryFor, readDerived, clip, undelivered, knownDomain, joinList, isRetired } from '../rules.mjs';
 import { build } from '../build.mjs';
 import { remaining } from '../deadline.mjs';
 import { changedSinceBuild, noteTimes, refStats } from '../cache.mjs';
@@ -8,6 +8,8 @@ import { knowledgeDays } from '../sources.mjs';
 import { touchSession, clearMarkers, markAlways, markShown, tidy, errorsSinceLint, sinceLint } from '../sessions.mjs';
 import { proposeNote, pickNote, uncoveredNote } from '../instructions.mjs';
 import { routesFor, viewOf } from '../reach.mjs';
+import { heldOffers } from '../offers.mjs';
+import { sweep } from '../queue.mjs';
 
 function errorsNote() {
   const errors = errorsSinceLint();
@@ -20,7 +22,7 @@ function errorsNote() {
 // Notes go live without a commit, so a note an error keeps from delivery would otherwise go unnoticed until /lint.
 // A session in this folder also hears of notes outside any domain in vault.config.json.
 function undeliveredNote(scope, vaultFolder, notes) {
-  const broken = notes.filter(n => !n.superseded_by && (scope.includes(n.domain) || (vaultFolder && !knownDomain(n.domain))))
+  const broken = notes.filter(n => !isRetired(n) && (scope.includes(n.domain) || (vaultFolder && !knownDomain(n.domain))))
     .flatMap(n => {
       const why = undelivered(n);
       return why ? [`${n.key} (${clip(why, 120)})`] : [];
@@ -83,9 +85,9 @@ export async function start(event, agent) {
     derived = readDerived();
     if (derived && !changedSinceBuild(notes, walked, refs)) return;
     derived = undefined;
-    try { build({ waitMs: Math.min(2000, remaining()), refs }); } catch (e) { if (e?.code !== 'ELOCKED') throw e; }
+    skipIfLocked(() => build({ waitMs: Math.min(2000, remaining()), refs }));
   });
-  const view = viewOf(reach, settledNotes(notes), deliveryFor(hits, derived && { derived }));
+  const view = viewOf(reach, settledNotes(notes), deliveryFor(hits, derived && { derived }, event.cwd));
   const { notes: ready, ctx, rules } = view;
   const always = alwaysContext(reach.always, rules);
   const topics = guarded('index note', () => scopeTopics(readable, ready), []);
@@ -98,6 +100,8 @@ export async function start(event, agent) {
   let entry = null;
   if (registered) {
     entry = touchSession(event, hits, agent.name);
+    // Another session sweeping or keeping holds the locks only briefly, and the next session start sweeps what this one leaves.
+    guarded('sweep', () => skipIfLocked(() => sweep(event.session, { waitMs: Math.min(2000, remaining()) })));
     if (doms.length) {
       propose = proposeNote(doms, vaultFolder);
       pick = pickNote();
@@ -106,7 +110,10 @@ export async function start(event, agent) {
   // Compaction and /clear start the context again within one session, which already heard these lines.
   const again = ['compact', 'clear'].includes(event.reason);
   const errors = again ? [] : [guarded('hook errors', errorsNote), guarded('undelivered notes', () => undeliveredNote(readable, vaultFolder, ready))];
-  const lead = [...errors, uncovered];
+  // The agent's memory of what it held goes with the compaction, but the offers don't.
+  const held = registered && again ? guarded('held offers', () => heldOffers(event.session).length, 0) : 0;
+  const reminder = held ? `You hold ${plural(held, 'vault offer')} from before the compaction. Call \`propose\` with \`release: true\` before your final reply.` : '';
+  const lead = [...errors, reminder, uncovered];
   // Errors rank first, then the line for a folder no domain reaches, the always rules, the instructions for proposing
   // and recording, and the topics.
   const { text: context, kept } = fitContext([

@@ -5,7 +5,7 @@ import { parse, yamlQuote } from './frontmatter.mjs';
 import { validGlob, overlapping, entryParts, globListProblems } from './glob.mjs';
 import { config, vaultPath, shortHash, toPosix, today, inside, plural, isVaultOnly, memo, readJson, statePath, logError } from './vault.mjs';
 import { cachedNotes, cleanFromGit, noteStats } from './cache.mjs';
-import { SEMVER, SCHEMES, fitOf, projectVersions } from './versions.mjs';
+import { SEMVER, SCHEMES, fitOf, checkedFit, projectVersions, rootOutside, osvPackage, compareFor, comparable, compareSemver } from './versions.mjs';
 import { checkDeadline } from './deadline.mjs';
 
 export const LIST_FIELDS = ['applies_to', 'triggers', 'keywords', 'tools'];
@@ -14,6 +14,8 @@ export const LIST_FIELDS = ['applies_to', 'triggers', 'keywords', 'tools'];
 // compare equal.
 export const KEY_RE = /^[\p{Ll}\p{Lm}\p{Lo}\p{Nd}\p{M}-]+\/[\p{Ll}\p{Lm}\p{Lo}\p{Nd}\p{M}-]+$/u;
 export const BASES = { taste: ['stated', 'inferred', 'pick', 'reading'], knowledge: ['stated', 'failure', 'source'] };
+export const PAGE_WHERE = 'page must be a page under wiki/, like wiki/<domain>/<folder>/<slug>.md.';
+export const rulePath = key => `wiki/${key.replace('/', '/rules/')}.md`;
 export const PAGE_KINDS = ['topic', 'concept', 'entity', 'synthesis', 'source'];
 const FOLDERS = { topic: 'topics', concept: 'concepts', entity: 'entities', synthesis: 'syntheses', source: 'sources' };
 // The folder of its domain a note's type and kind put it in, or null for a page with no kind lint knows.
@@ -106,8 +108,10 @@ const asList = v => (v === null || v === undefined ? [] : Array.isArray(v) ? v.f
 // Obsidian writes a list-type property as a list even when it holds one link.
 const single = v => (Array.isArray(v) && v.length === 1 ? v[0] : v);
 
+export const leadPattern = name => `^[ \\t]*(?:\\*\\*)?${name}(?::\\*\\*|\\*\\*:|:)`;
+
 function field(lead, name) {
-  const m = lead.match(new RegExp(`^[ \\t]*(?:\\*\\*)?${name}(?::\\*\\*|\\*\\*:|:)[ \\t]*(.*)$`, 'm'));
+  const m = lead.match(new RegExp(`${leadPattern(name)}[ \\t]*(.*)$`, 'm'));
   return m ? m[1].trim() : '';
 }
 
@@ -117,6 +121,7 @@ function noteFrom({ data, body, ok, errors }, rel) {
   const parts = nfc(rel).replace(/^wiki\//i, '').replace(/\.md$/i, '').split('/');
   const lead = body.split(/^## /m)[0];
   const successor = single(data.superseded_by);
+  const before = single(data.moved_from);
   const note = {
     rel,
     key: parts.length > 1 ? `${parts[0]}/${parts.at(-1)}` : parts[0],
@@ -134,6 +139,10 @@ function noteFrom({ data, body, ok, errors }, rel) {
     always: data.always === true,
     author: single(data.author) ?? (data.type === 'page' ? 'agent' : null),
     requires: data.requires ?? null,
+    package: data.package ?? null,
+    checked_with: data.checked_with ?? null,
+    retired: data.retired ?? null,
+    moved_from: typeof before === 'string' && before.trim() ? toKey(before) : null,
     topic: typeof data.topic === 'string' ? normTopic(data.topic) : '',
     summary: typeof data.summary === 'string' ? data.summary.trim() : '',
     superseded_by: typeof successor === 'string' && successor.trim() ? toKey(successor) : null,
@@ -231,6 +240,28 @@ function requiresErrors(req) {
   });
 }
 
+export const packageId = p => {
+  const pkg = osvPackage(p);
+  return pkg ? `${pkg.ecosystem}/${pkg.name}` : null;
+};
+export const PACKAGE_SHAPE = 'package must be an ecosystem and a name, as in OSV: package: { ecosystem: npm, name: <name> }';
+
+// checked_with is read as delivery reads it, so a version the rule's ecosystem can't compare, which would leave the rule
+// version unknown in every project, is an error.
+function packageErrors(n) {
+  const errs = [];
+  const pkg = osvPackage(n.package);
+  if (n.package !== null && !pkg) errs.push(PACKAGE_SHAPE);
+  if (n.checked_with !== null && !filled(n.checked_with)) errs.push("checked_with must be the version the rule was checked with, in quotes, such as '1.4.0'");
+  else if (n.checked_with !== null && n.package === null) errs.push('checked_with needs package, the library whose version it gives');
+  else if (n.checked_with !== null && pkg) {
+    const compare = compareFor(n.domain, pkg.ecosystem);
+    if (compare === compareSemver && !SEMVER.test(n.checked_with)) errs.push(`checked_with must be a whole semver version, in quotes, such as '1.4.0', since ${pkg.ecosystem} versions are semver: ${n.checked_with} isn't one`);
+    else if (compare && !comparable(compare, n.checked_with)) errs.push(`checked_with ${n.checked_with} isn't a version the ${pkg.ecosystem} reader can compare`);
+  }
+  return errs;
+}
+
 const alwaysErrors = n => (n.data.always != null && typeof n.data.always !== 'boolean' ? ['always must be true or false'] : []);
 
 function checkNote(n) {
@@ -251,10 +282,16 @@ function checkNote(n) {
   if (n.kind === 'knowledge') {
     if (!validDay(n.as_of)) errs.push('a knowledge rule needs as_of, the day it was last checked, as YYYY-MM-DD');
     else if (n.as_of > today()) errs.push(`as_of ${n.as_of} is in the future`);
-    errs.push(...requiresErrors(n.requires));
+    errs.push(...requiresErrors(n.requires), ...packageErrors(n));
   } else if (n.kind === 'taste') {
     if (n.as_of !== null) errs.push('as_of is only for knowledge rules; taste rules never expire');
     if (n.requires !== null) errs.push('requires is for knowledge rules and pages; a taste rule holds whatever the version');
+    if (n.package !== null || n.checked_with !== null) errs.push('package and checked_with are for knowledge rules; a taste rule holds whatever the version');
+  }
+  if (n.retired !== null && !validDay(n.retired)) errs.push('retired must be the day the rule was retired, as YYYY-MM-DD');
+  if (n.data.retired_because !== undefined && !filled(n.data.retired_because)) errs.push('retired_because must say in one line why the rule was retired');
+  if (n.data.moved_from !== undefined && (!n.moved_from || !KEY_RE.test(n.moved_from) || n.moved_from === n.key)) {
+    errs.push('moved_from must name the key the rule had before its move, as <domain>/<slug>');
   }
   if (n.author !== null) errs.push('author is only for pages');
   if (!hasChannel(n)) errs.push('a rule needs keywords, applies_to, tools or always: true, or nothing brings it up');
@@ -292,9 +329,21 @@ export function loadNotes(domains, pre) {
 // loadNotes with every note stat'ed at once, which a hook awaits.
 export const loadNotesAsync = async domains => loadNotes(domains, await noteStats(domains ?? null));
 
+// The keys a note answers to: its own, and the one it had before a move.
+export const noteKeys = n => (n.moved_from ? [n.key, n.moved_from] : [n.key]);
+
+// Each key to its note, a note's own key before the old key of a moved one, and the first note sorted by key first.
+export function notesByKey(notes) {
+  const by = new Map();
+  for (const n of notes) if (!by.has(n.key)) by.set(n.key, n);
+  for (const n of notes) if (n.moved_from && !by.has(n.moved_from)) by.set(n.moved_from, n);
+  return by;
+}
+
+// A key a note had before a move still finds it.
 export function readNote(key, notes = loadNotes()) {
   const k = nfc(key);
-  return KEY_RE.test(k) ? notes.find(n => n.key === k) ?? null : null;
+  return KEY_RE.test(k) ? notesByKey(notes).get(k) ?? null : null;
 }
 
 export const knownDomain = d => d === 'global' || Object.hasOwn(config().domains, d);
@@ -306,9 +355,13 @@ export function undelivered(n) {
   return noteErrors(n)[0] ?? null;
 }
 
-const isLive = n => n.type === 'rule' && !n.superseded_by && !undelivered(n);
+// A retired field that isn't a day is an error, which undelivered names, not a retirement.
+export const isRetired = n => Boolean(n.superseded_by || validDay(n.retired));
+export const isLive = n => n.type === 'rule' && !isRetired(n) && !undelivered(n);
 export const isTopicPage = n => n.type === 'page' && n.kind === 'topic';
 export const isSourcePage = n => n.type === 'page' && n.kind === 'source';
+// The keys of the entity pages a synthesis page compares, as its compares field names them.
+export const comparedKeys = (n, resolve) => (Array.isArray(n.data.compares) ? n.data.compares.filter(filled).map(x => resolve(keyOf(x))) : []);
 
 export function byTopic(notes) {
   const used = new Map();
@@ -344,7 +397,7 @@ export function liveRules(notes = loadNotes()) {
       // Only the delivered wording counts, so an edit to a rule's evidence or globs doesn't deliver it again.
       hash: shortHash(text),
       kind: n.kind, always: n.always, applies_to: n.applies_to, triggers: n.triggers, keywords: n.keywords, tools: n.tools,
-      requires: n.requires, contentHash: n.contentHash,
+      requires: n.requires, package: n.package, checked_with: n.checked_with, contentHash: n.contentHash,
     };
   }
   return rules;
@@ -378,6 +431,11 @@ export function livePages(notes = loadNotes()) {
 }
 
 export const kindLabel = kind => (PAGE_KINDS.includes(kind) ? `${kind} page` : 'page');
+// Where lint and a page change say a note of its type and kind goes, for a note kindFolder gives a folder.
+export const kindPlace = (n, domain) => {
+  const what = n.type === 'rule' ? 'rule' : kindLabel(n.kind);
+  return `${/^[aeiou]/.test(what) ? 'an' : 'a'} ${what} goes in wiki/${domain}/${kindFolder(n)}/`;
+};
 
 // A bare line leaves out the summary, for the pages past what a refusal describes.
 export const pageLine = (k, p, bare = false) => `- ${k} (${kindLabel(p.kind)}): ${p.summary && !bare ? `${clip(sentence(p.summary), 150)} ` : ''}${toPosix(vaultPath(...p.rel.split('/')))}${labelled(p)}`;
@@ -408,12 +466,13 @@ export const unverifiedNow = (derived, n) => {
 
 // What a project's lockfiles and .state/derived.json say of the notes a hook matched, read only when a note asks.
 // A missing derived.json means nothing is unverified, and readDerived reads a corrupt one as missing. A hook
-// that delivers for several projects passes the first one's context as shared, so derived.json is read once.
-export function deliveryFor(hits, shared) {
+// that delivers for several projects passes the first one's context as shared, so derived.json is read once. fallback
+// is rootOutside's root for no hits, worked out from cwd when not given.
+export function deliveryFor(hits, shared, cwd, fallback) {
   let versions;
   let derived;
   return {
-    get versions() { return (versions ??= projectVersions(hits)); },
+    get versions() { return (versions ??= projectVersions(hits, cwd, fallback)); },
     get derived() { return shared ? shared.derived : (derived ??= readDerived() ?? {}); },
   };
 }
@@ -426,7 +485,7 @@ export function deliveryFor(hits, shared) {
 export function deliverable(items, ctx) {
   const one = (key, note) => {
     checkDeadline();
-    const fit = note.requires ? fitOf(note.requires, note.domain, ctx.versions) : null;
+    const fit = noteFit(note, () => ctx.versions);
     if (fit?.fit === 'mismatch') return null;
     const u = unverifiedNow(ctx.derived, { key, contentHash: note.contentHash });
     const labels = [
@@ -445,6 +504,15 @@ export function deliverable(items, ctx) {
     const x = one(key, note);
     return !x ? [] : Array.isArray(it) ? [[key, x]] : [{ ...it, note: x }];
   });
+}
+
+// An empty requires list requires nothing.
+export const hasRequires = n => Array.isArray(n.requires) && n.requires.length > 0;
+
+// A requires the user wrote wins over the checked_with propose filled. Null for a note neither gives.
+export function noteFit(n, versions) {
+  if (hasRequires(n)) return fitOf(n.requires, n.domain, versions());
+  return n.checked_with ? checkedFit(n.package, n.checked_with, n.domain, versions()) : null;
 }
 
 // Within a rank, a note its project's version settles comes before one it can't.
@@ -609,15 +677,18 @@ export function renderActive(rules) {
 
 // A note is linked by its path from the vault root. Only superseded_by can name a key with no note, and only a rule
 // takes it, so that link points where the rule would go.
-export const linkTo = (key, rel = `wiki/${key.replace('/', '/rules/')}.md`) => `[[${rel.replace(/\.md$/i, '')}|${key.split('/').at(-1)}]]`;
+export const linkTo = (key, rel = rulePath(key)) => `[[${rel.replace(/\.md$/i, '')}|${key.split('/').at(-1)}]]`;
 
 // Obsidian writes a bare [[slug]] when no other note has that name, and the tools write a note's path from the vault
-// root. A key, or a path through a folder of the domain the note isn't in, still names the note.
+// root. A key, or a path through a folder of the domain the note isn't in, still names the note, and so does the key
+// a note had before a move.
 export function resolver(notes) {
   const bySlug = new Map();
   for (const n of notes) bySlug.set(n.slug, bySlug.has(n.slug) ? null : n.key);
   const byPath = new Map(notes.map(n => [toKey(n.rel), n.key]));
-  return k => byPath.get(k) ?? (k.includes('/') ? keyOf(k) : bySlug.get(k) ?? k);
+  const known = notesByKey(notes);
+  const current = k => known.get(k)?.key ?? k;
+  return k => byPath.get(k) ?? (k.includes('/') ? current(keyOf(k)) : bySlug.get(k) ?? k);
 }
 
 // An unclosed fence runs to the end of the note.
@@ -648,9 +719,12 @@ export const linksUnder = (n, title) => targets(sections(n).slice(1).find(s => h
 
 const sectionNamed = (n, title) => sections(n).slice(1).find(s => heading(s).toLowerCase() === title.toLowerCase()) ?? '';
 export const hasSection = (n, title) => sectionNamed(n, title) !== '';
+export const sectionLines = (n, title) => sectionNamed(n, title).split(/\r?\n/).slice(1);
 
 const byUser = a => typeof a === 'string' && a.trim().toLowerCase() === 'user';
 export const isUserPage = n => n.type === 'page' && byUser(n.author);
+// Any note marked author: user, as the edit guard reads it; null for a note that doesn't exist yet.
+export const wroteByUser = n => byUser(n?.author);
 // The edit guard and lint --fix read the file as it is, so any note marked author: user counts, a malformed one too.
 export const authoredByUser = text => byUser(single(parse(text).data.author));
 
@@ -695,10 +769,11 @@ const evidenceLines = n => [...sectionNamed(n, 'evidence').matchAll(/^- .*$/gm)]
 
 // The fit of each note for the projects given, for rankPair, or undefined when they hold no project root, so as_of
 // decides. The lockfiles are read at the first note asked about, so a ranking that never asks reads none.
-export function fitIn(hits) {
-  if (!hits.some(h => typeof h.root === 'string')) return undefined;
+export function fitIn(hits, cwd) {
+  const fallback = rootOutside(hits, cwd);
+  if (!hits.some(h => typeof h.root === 'string') && !fallback) return undefined;
   let versions;
-  return n => fitOf(n.requires, n.domain, (versions ??= projectVersions(hits)));
+  return n => noteFit(n, () => (versions ??= projectVersions(hits, cwd, fallback)));
 }
 
 // The session prefixes the Evidence lines give, first seen first.
@@ -784,6 +859,27 @@ const unquoted = n => {
 export const noteLinkSpans = n => linkSpans(unquoted(n), n.rel);
 export const noteLinks = n => noteLinkSpans(n).map(s => s.target);
 export const linkedKeys = (n, resolve) => noteLinks(n).map(t => resolve(toKey(t)));
+
+// Each edit parses the text it's given afresh, so the edits to one file apply one after another, and an edit for a link
+// another one already rewrote finds nothing left to change.
+export function editBody(text, rel, edits) {
+  const n = parseNote(text, rel);
+  const at = text.length - n.body.length;
+  return edits(n).sort((a, b) => b.at - a.at)
+    .reduce((t, e) => `${t.slice(0, at + e.at)}${e.text}${t.slice(at + e.at + e.length)}`, text);
+}
+
+// Rewrites the links whose target picks gives to name note. A link keeps its heading and alias. One with no alias gets
+// the note's name, escaped in a table row as Obsidian escapes it.
+export function relink(rel, picks, note) {
+  const to = note.rel.replace(/\.md$/i, '');
+  return text => editBody(text, rel, n => noteLinkSpans(n).filter(s => picks(s.target)).map(s => {
+    if (!s.wiki) return { at: s.at, length: s.raw.length, text: note.rel };
+    const row = /^\s*\|/.test(n.body.slice(n.body.lastIndexOf('\n', s.at) + 1, s.at));
+    const alias = /\\?\|/.test(s.rest) ? '' : `${row ? '\\|' : '|'}${note.slug}`;
+    return { at: s.at, length: s.raw.length + s.rest.length, text: `${to}${s.rest}${alias}` };
+  }));
+}
 
 // A footnote's target is a file under raw/ or a URL, in backticks or not, then ` · ` and its date when it has one.
 // It may end in a #locator, which fragment holds without the #, or null when the target has none.
@@ -924,8 +1020,9 @@ function indexLine(n, refs, sources, link) {
     const [why] = noteErrors(n);
     return `- ${link(n.key)} · ${kindLabel(n.kind)}${sources(n)}${why ? ` · not valid: ${why}` : ''} · ${n.summary ? clip(n.summary, 150) : '(no summary)'}`;
   }
-  const why = n.superseded_by ? null : undelivered(n);
-  const gone = n.superseded_by ? ` · superseded by ${link(n.superseded_by)}` : why ? ` · not delivered: ${why}` : '';
+  const why = isRetired(n) ? null : undelivered(n);
+  const ended = [...(validDay(n.retired) ? [`retired on ${n.retired}`] : []), ...(n.superseded_by ? [`superseded by ${link(n.superseded_by)}`] : [])];
+  const gone = ended.length ? ` · ${ended.join(' · ')}` : why ? ` · not delivered: ${why}` : '';
   const kind = n.kind === 'knowledge' ? ` · knowledge as of ${n.as_of ?? '(no date)'}` : '';
   const from = [...(refs.get(n.key) ?? [])].sort(cmp);
   return `- ${link(n.key)}${gone}${kind} · Do: ${clip(n.do || '(missing)', 100)}${from.length ? ` · from ${from.map(link).join(', ')}` : ''}`;
