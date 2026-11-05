@@ -243,8 +243,8 @@ test('an empty requires list leaves checked_with to decide the fit', async t => 
   const movedOn = (a, b) => Number(b.split('.')[0]) > Number(a.split('.')[0]);
   const versions = new Map([['glim', [new Map([['npm', { versions: { react: '19.0.0' }, compare: null, movedOn }]])]]]);
   const pkg = { ecosystem: 'npm', name: 'react' };
-  assert.equal(rules.noteFit({ requires: [], package: pkg, checked_with: '18.2.0', domain: 'glim' }, () => versions)?.fit, 'mismatch');
-  assert.equal(rules.noteFit({ requires: null, package: pkg, checked_with: '18.2.0', domain: 'glim' }, () => versions)?.fit, 'mismatch');
+  assert.equal(rules.noteFit({ kind: 'knowledge', requires: [], package: pkg, checked_with: '18.2.0', domain: 'glim' }, () => versions)?.fit, 'mismatch');
+  assert.equal(rules.noteFit({ kind: 'knowledge', requires: null, package: pkg, checked_with: '18.2.0', domain: 'glim' }, () => versions)?.fit, 'mismatch');
 });
 
 test('a retired field that is not a day is an error, not a retirement', async t => {

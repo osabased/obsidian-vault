@@ -350,12 +350,15 @@ export function copyNew(src, dir, stem, ext) {
   }
 }
 
-// A file that can't be read gives missing, so a caller can tell it from an empty one.
+// A file that can't be read gives missing, so a caller can tell it from an empty one. Each row is an object, so a line
+// that doesn't parse, or parses to anything else, is no row.
 export function readJsonl(file, missing = []) {
   let text;
   try { text = fs.readFileSync(file, 'utf8'); } catch { return missing; }
   return text.split('\n').flatMap(line => {
-    try { return line.trim() ? [JSON.parse(line)] : []; } catch { return []; }
+    let row;
+    try { row = line.trim() ? JSON.parse(line) : null; } catch { return []; }
+    return row !== null && typeof row === 'object' && !Array.isArray(row) ? [row] : [];
   });
 }
 

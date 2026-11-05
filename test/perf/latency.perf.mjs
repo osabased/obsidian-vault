@@ -3,7 +3,7 @@
 // pre-commit hook runs.
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { makeVault, sessionId, denied, editFile, unrelatedRules, proposeAtOnce } from '../fixture.mjs';
+import { makeVault, sessionId, denied, editFile, unrelatedRules, proposeAtOnce, userTurn, assistantTurn, offerOf } from '../fixture.mjs';
 import { bigVault, addNotes, GATED } from './notes.mjs';
 
 const perf = { skip: !process.env.VAULT_PERF && 'set VAULT_PERF=1 to run the timing tests' };
@@ -84,4 +84,36 @@ test('a session start with 2,000 open review queue entries takes under 500 ms', 
   times.sort((a, b) => a - b);
   t.diagnostic(`session start, 2,000 queue entries: fastest ${Math.round(times[0])} ms, median ${Math.round(times[1])} ms of 3`);
   assert.ok(times[0] < 500, `${Math.round(times[0])} ms`);
+});
+
+// The 10 s timeout hooks/hooks.json gives session start, less the 1 s margin tools/lib/deadline.mjs stops at.
+const START_DEADLINE_MS = 9000;
+
+test('a session start that sweeps 500 offers into the review queue stays within its deadline', perf, t => {
+  const v = makeVault(t, { config: { proposals: 'ask' } });
+  const said = 'call them by their screen';
+  const a = sessionId();
+  v.startSession(a, { transcript: v.transcript(a, [userTurn(said), assistantTurn('Noted.')]) });
+  const r = v.propose(a, {
+    domain: 'glim', slug: 'tidy-names', topic: 'code', basis: 'stated', quote: said,
+    do: 'Name widgets after their screen.', not: 'Leave widget names bare.', because: 'A screen says what a widget is for.', applies_to: ['src/**/*.zq'],
+  });
+  const offer = JSON.parse(v.read(`.state/offers/${offerOf(r.stdout).id}.json`));
+  // The offering session's last start moved back past queue.sweepAfterHours, so its offers are due.
+  const registry = `.state/sessions/${a}.json`;
+  v.write(registry, JSON.stringify({ ...JSON.parse(v.read(registry)), last_seen: new Date(Date.now() - 13 * 3600e3).toISOString() }));
+  const times = [];
+  for (let run = 0; run < 3; run++) {
+    for (let i = 0; i < 500; i++) {
+      const id = `o-${(0x10000000 + run * 1000 + i).toString(16)}`;
+      v.write(`.state/offers/${id}.json`, JSON.stringify({ ...offer, id }));
+    }
+    const start = performance.now();
+    const out = v.startSession(sessionId());
+    times.push(performance.now() - start);
+    assert.match(out.systemMessage, new RegExp(` · queue ${(run + 1) * 500 + 1}\\b`), 'every offer is swept');
+  }
+  times.sort((x, y) => x - y);
+  t.diagnostic(`session start sweeping 500 offers: fastest ${Math.round(times[0])} ms, median ${Math.round(times[1])} ms of 3`);
+  assert.ok(times[0] < START_DEADLINE_MS, `${Math.round(times[0])} ms`);
 });

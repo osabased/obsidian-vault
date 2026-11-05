@@ -40,9 +40,16 @@ export function entryOf(id, rows = queueRows()) {
   return { entry: rows.find(r => r.id === id && !r.decides) ?? null, decided: closedBy(rows).get(id) ?? null };
 }
 
+// In the order of `at`, as queueRows reads them.
 export function openEntries(rows = queueRows()) {
   const closed = closedBy(rows);
-  return rows.filter(r => !r.decides && typeof r.id === 'string' && !closed.has(r.id)).sort((a, b) => String(a.at).localeCompare(String(b.at)));
+  return rows.filter(r => !r.decides && typeof r.id === 'string' && !closed.has(r.id));
+}
+
+// The rules a retirement entry already asks about: open, or dropped by the user, who kept the rule. A kept one retired it.
+export function retirementsAsked(rows = queueRows()) {
+  const closed = closedBy(rows);
+  return new Set(rows.filter(r => !r.decides && r.kind === 'retire' && closed.get(r.id) !== 'kept').map(r => r.key));
 }
 
 export function queueEntry({ id, kind, why, unattended, from, session, entry, agent = null, domain, key, fields, text, quote, checked }) {
