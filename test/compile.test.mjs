@@ -236,8 +236,8 @@ test('lint errors on compile: ["nope"] and on agents: ["nope"]', async t => {
 test('lint errors on a compile or compile.maxBytes of the wrong shape', async t => {
   const v = glimVault(t, { compile: 'codex', config: { compile: { maxBytes: 'big' } } });
   const found = (await lintOf(v)).filter(f => f.level === 'error').map(f => f.msg);
-  assert.ok(found.some(m => /^glim\.compile must be a list of adapter names/.test(m)), found.join('\n'));
-  assert.ok(found.some(m => /^compile\.maxBytes must be a whole number/.test(m)), found.join('\n'));
+  assert.ok(found.some(m => m.startsWith('glim.compile must be a list of adapter names')), found.join('\n'));
+  assert.ok(found.some(m => m.startsWith('compile.maxBytes must be a whole number')), found.join('\n'));
 });
 
 test('a compile.maxBytes that isn\'t a positive whole number falls back to the default, so compile and lint finish', t => {
