@@ -1,5 +1,4 @@
 import fs from 'node:fs';
-import path from 'node:path';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { makeVault, sessionId, ledgerEdit, serve, gitRepo, ruleNote, withFields, sectionOf, LEDGER_GUIDE, LEDGER_REPO } from './fixture.mjs';

@@ -1,0 +1,6 @@
+{
+  "rules": {
+    "no-unused-vars": ["warn", { "ignoreRestSiblings": true }],
+    "no-invalid-regexp": ["warn", { "allowConstructorFlags": ["l"] }]
+  }
+}

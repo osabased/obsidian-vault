@@ -24,6 +24,7 @@ export function failure(e, name, usage, refused = 'Refused') {
 }
 
 // What a shell makes of a backslash escape such as \b or \t. Line breaks have their own check.
+// oxlint-disable-next-line no-control-regex
 export const CONTROL = /[\u0000-\u0009\u000B\u000C\u000E-\u001F\u007F-\u009F]/;
 
 function noControl(v, name) {

@@ -3,7 +3,7 @@ import {
   shortHash, isVaultOnly, sessionReach, cwdOf, proposalMode, inVaultFolder, newId, readPlain, restore, queueRows, config, rewriteText, moveFile,
 } from './vault.mjs';
 import {
-  KEY_RE, BASES, PAGE_WHERE, wrongBasis, parseNote, noteErrors, ruleText, ruleTextParts, loadNotes, readNote, liveRules, isLive, mentions, isUrl, validDay, byKey, normTopic, domainTopics, vaultFile, joinList,
+  KEY_RE, BASES, PAGE_WHERE, wrongBasis, parseNote, noteErrors, ruleText, ruleTextParts, loadNotes, readNote, liveRules, isLive, mentions, isUrl, validDay, byKey, normTopic, vaultFile, joinList,
   sharedFiles, rankPair, maxChars, fitIn, hasChannel, rulePath, leadPattern, isRetired, packageId, knownDomain, resolver, relink, toKey, authoredByUser, noteLinks,
 } from './rules.mjs';
 import { projectVersions, versionIn, compareFor } from './versions.mjs';

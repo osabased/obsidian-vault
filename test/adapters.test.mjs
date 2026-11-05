@@ -165,7 +165,7 @@ for (const d of [claudeCode, codex]) {
       };
       const r = v.run('propose.mjs', [other], { input: rule, env: { [sessionVar]: sid } });
       assert.equal(r.code, 1, `agents ${JSON.stringify(agents)}: ${r.stdout}`);
-      assert.match(r.stderr, new RegExp(`${other} isn't this session, which is ${sid}\.`));
+      assert.match(r.stderr, new RegExp(`${other} isn't this session, which is ${sid}\\.`));
     }
   });
 
