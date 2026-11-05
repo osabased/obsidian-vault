@@ -183,7 +183,7 @@ async function check(id, chain, chains, was, copy) {
 
 // Fetches run a few at a time, so a vault offline doesn't wait out each timeout in turn.
 async function inPool(items, n, f) {
-  const out = new Array(items.length);
+  const out = Array.from({ length: items.length });
   let next = 0;
   await Promise.all(Array.from({ length: Math.min(n, items.length) }, async () => {
     while (next < items.length) {
@@ -218,7 +218,7 @@ async function main() {
   // there, and a check whose copy no longer follows the latest one isn't saved.
   build({
     apply: derived => {
-      const sources = { ...(derived.sources ?? {}) };
+      const sources = { ...derived.sources };
       const now = [...results.values()].some(r => r.copy) ? sourceChains() : chains;
       for (let [id, r] of results) {
         const w = sources[id] ?? {};

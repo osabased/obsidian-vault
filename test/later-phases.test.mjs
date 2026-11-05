@@ -1,4 +1,3 @@
-import path from 'node:path';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { makeVault, sessionId, denied, ledgerEdit, filesUnder, ruleNote, sha256, sectionOf, serve, gitRepo, LEDGER_GUIDE, LEDGER_REPO } from './fixture.mjs';

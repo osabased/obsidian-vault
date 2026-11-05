@@ -46,3 +46,7 @@ These keep the hooks safe to run in every session. Follow them when you change a
 - No TODO, FIXME, XXX or HACK comments, no `/**` docstrings, and no banner comments such as `// ===`, `// ---`, `// Step 1` or `// Note:`.
 
 Lint reads the code with comments, strings and regex literals blanked out, so it doesn't match words inside them. It doesn't follow aliases such as `const w = fs.writeFileSync`.
+
+## oxlint
+
+oxlint is a dev check, not a dependency: nothing in `tools/` imports it, and it is the one npm package the repo uses. When it is installed, pre-commit runs `oxlint --deny-warnings tools hooks mcp test` with the rules in `.oxlintrc.json`, so any warning refuses the commit; a machine without it skips the step. Where code breaks a rule on purpose, put `// oxlint-disable-next-line <rule>` under the comment that says why.
