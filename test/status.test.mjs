@@ -96,6 +96,15 @@ test('the status line counts the open review queue entries, and how many of them
   assert.match(v.startSession(sessionId(), { cwd: v.root }).systemMessage, / · queue 1$/, 'the vault folder counts the queue too');
 });
 
+test("a queue line that holds no row is skipped, so the count and lint read the rows around it", async t => {
+  const v = filled(t);
+  const row = { id: 'u-0000000a', at: '2026-11-01T10:00:00.000Z', kind: 'rule', why: 'ignored', unattended: null, from: 'o-0000000a', session: '1a2b3c4d-0000', agent: 'claude-code', domain: 'glim', key: 'glim/r-0000000a' };
+  v.write('raw/queue/2026-11-01-1a2b3c4d.jsonl', `null\n[]\n7\n${JSON.stringify(row)}\n`);
+  assert.match(v.startSession(sessionId()).systemMessage, / · queue 1$/);
+  const { lint } = await v.import('lib/lint.mjs');
+  assert.doesNotThrow(() => lint());
+});
+
 test('/vault status counts for the folder the latest prompt came from', t => {
   const v = filled(t);
   const sid = sessionId();
