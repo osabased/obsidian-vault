@@ -1,8 +1,8 @@
 import { domainsByMode, inVaultFolder, plural, guarded } from './vault.mjs';
 import { proposeDomains } from './sessions.mjs';
-import { joinList, hasRequires } from './rules.mjs';
+import { joinList, namesPackage, checkedWithOnly } from './rules.mjs';
 import { openEntries } from './queue.mjs';
-import { anyReaders, movedOnFrom, osvPackage } from './versions.mjs';
+import { anyReaders, movedOnFrom } from './versions.mjs';
 
 // The modes propose.mjs keeps to for a session: those of the domains it may propose to, or ask when it began in the
 // vault folder, which offers whatever the mode. A start with no session to register can't propose, and shows its folder's.
@@ -19,12 +19,12 @@ function queueCount() {
   return `queue ${open.length}${unattended ? ` (${unattended} unattended)` : ''}`;
 }
 
-// The rules /lint offers to retire for this session's projects. A requires the user wrote wins over checked_with, as at
-// delivery, and a project without the package hasn't moved past a version of it. With no reader set, no version is known.
+// The rules /lint offers to retire for this session's projects. A project without the package hasn't moved past a
+// version of it. With no reader set, no version is known.
 function versionCount(reached, ctx) {
-  const rules = Object.values(reached);
-  if (!anyReaders()) return rules.some(r => osvPackage(r.package)) ? 'no version readers set' : '';
-  const past = rules.filter(r => r.checked_with && !hasRequires(r) && movedOnFrom(r.package, r.checked_with, r.domain, ctx.versions).length).length;
+  const rules = Object.values(reached).filter(namesPackage);
+  if (!anyReaders()) return rules.length ? 'no version readers set' : '';
+  const past = rules.filter(r => checkedWithOnly(r) && movedOnFrom(r.package, r.checked_with, r.domain, ctx.versions).length).length;
   return past ? `${plural(past, 'rule')} past ${past === 1 ? 'its' : 'their'} version here` : '';
 }
 
