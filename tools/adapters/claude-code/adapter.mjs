@@ -36,7 +36,7 @@ export const vaultTool = name => /^mcp__(?:plugin_obsidian-vault_vault|vault)__(
 
 export const identifiers = [
   'CLAUDE_CODE_', 'CLAUDE_PLUGIN_', 'hookSpecificOutput', 'systemMessage', 'permissionDecision', 'additionalContext', 'AskUserQuestion', 'MultiEdit', 'NotebookEdit',
-  'toolUseResult', 'isCompactSummary', 'isMeta', 'queued_command', 'system-reminder', 'task-notification', 'local-command-', 'stop_hook_active',
+  'toolUseResult', 'isCompactSummary', 'isMeta', 'queued_command', 'system-reminder', 'task-notification', 'cross-session-message', 'local-command-', 'stop_hook_active',
   'session_id', 'agent_id', 'tool_name', 'transcript_path', 'file_path', 'notebook_path', 'old_string', 'new_string', 'new_source', 'Claude Code',
   'tool_use_id', 'claudecode/', 'anthropic/requiresUserInteraction', 'mcp__plugin_', 'mcp_server',
 ];
@@ -87,11 +87,17 @@ function preTool(input, base) {
   return [{ ...base, tool, args: input.tool_input, target: { namespace: 'file', path: file }, added: newText(tool, ti), after: before => textAfter(tool, ti, before) }];
 }
 
+// Claude Code submits a background task's notification and another session's message as prompts too, and the hook's
+// payload doesn't say who wrote a prompt. Each of those starts with its own marker, which no typed prompt in this
+// machine's transcripts did.
+const NOT_TYPED = /^(?:<task-notification>|Another Claude session sent a message:\r?\n<(?:cross-session-message|agent-message)[\s>])/;
+export const typedPrompt = text => !NOT_TYPED.test(String(text ?? ''));
+
 export function events(hook, input) {
   const base = { session: input.session_id, agent: input.agent_id, cwd: input.cwd };
   switch (hook) {
     case 'session-start': return [{ session: base.session, cwd: base.cwd, transcript: input.transcript_path, reason: input.source === 'startup' ? 'new' : input.source }];
-    case 'prompt': return [{ ...base, transcript: input.transcript_path, text: input.prompt }];
+    case 'prompt': return [{ ...base, transcript: input.transcript_path, text: input.prompt, typed: typedPrompt(input.prompt) }];
     case 'edit': return preTool(input, base);
     case 'vault-call': {
       const tool = vaultTool(input.tool_name);

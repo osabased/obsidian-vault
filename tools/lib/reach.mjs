@@ -42,7 +42,7 @@ export async function sessionView(sid, cwd, agent) {
   const hits = sessionHits(sid, cwd);
   const reach = routesFor(hits, cwd, agent);
   const notes = settledNotes(await loadNotesAsync(reach.readable));
-  return viewOf(reach, notes, deliveryFor(hits));
+  return viewOf(reach, notes, deliveryFor(hits, null, cwd));
 }
 
 const reaching = (notes, reaches) => Object.fromEntries(Object.entries(notes).filter(([, n]) => reaches(n)));

@@ -1,7 +1,7 @@
 import fs from 'node:fs';
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { makeVault, pageNote, denied, lintFound } from './fixture.mjs';
+import { makeVault, pageNote, denied, lintFound, editVault } from './fixture.mjs';
 
 const SID = '9f8e7d6c-0000-4000-8000-000000000003';
 const REL = 'wiki/glim/concepts/journal.md';
@@ -16,14 +16,15 @@ function vault(t, { text = mine(), rel = REL } = {}) {
   return v;
 }
 
-const edit = (v, tool, toolInput, rel = REL) => v.edit(SID, tool, { file_path: v.at(...rel.split('/')), ...toolInput });
+// Only a session in the vault folder edits a page by hand; elsewhere a page changes through an offer.
+const edit = (v, tool, toolInput, rel = REL) => editVault(v, SID, rel, tool, toolInput);
 const change = (old_string, new_string) => ({ old_string, new_string });
 
 // The journal preset's page is the user's own, with an empty ## Agent notes section.
 const JOURNAL = 'wiki/journal/concepts/morning-pages.md';
 const journal = t => {
   const v = makeVault(t, { presets: ['journal'] });
-  v.startSession(SID, { cwd: v.projects.journal });
+  v.startSession(SID, { cwd: v.root });
   return v;
 };
 
@@ -305,6 +306,6 @@ test("author: user as a one-item list, or in capitals, still marks the page as t
 test("a tool editTools maps to the file namespace is denied on a user's page rather than failing the hook", t => {
   const v = makeVault(t, { config: { editTools: { mcp__fixture__write_page: { namespace: 'file', path: 'tool_input.path', after: 'tool_input.text' } } } });
   v.write(REL, mine());
-  const out = v.edit(SID, 'mcp__fixture__write_page', { path: v.at(...REL.split('/')), text: 'Cards may be cramped.\n' });
+  const out = v.edit(SID, 'mcp__fixture__write_page', { path: v.at(...REL.split('/')), text: 'Cards may be cramped.\n' }, { cwd: v.root });
   assert.match(denied(out) ?? '', /^wiki\/glim\/concepts\/journal\.md is the user's own writing/);
 });

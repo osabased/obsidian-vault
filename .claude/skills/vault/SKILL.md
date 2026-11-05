@@ -12,7 +12,7 @@ The `proposals` setting in the vault's `vault.config.json` says when agents prop
 - `ask`: an agent offers each rule, and writes it once the user agrees. This is the default when `proposals` is unset.
 - `off`: an agent proposes a rule only when the user asks it to keep one.
 
-A domain may set its own `proposals`, which wins over the top-level one for that domain's rules. Rules to `global` take the top-level one. Sessions in the vault folder, such as `/ingest` and `/lint`, propose as in `corrections` whatever the mode, since they go through each rule with the user.
+A domain may set its own `proposals`, which wins over the top-level one for that domain's rules. Rules to `global` take the top-level one. Sessions in the vault folder, such as `/ingest` and `/lint`, offer each rule as in `ask` whatever the mode, since they go through each one with the user.
 
 For `/vault status`, or when the user asks what the vault does in this session, call the vault's `status` tool. Show the user the lines it returns and stop there.
 

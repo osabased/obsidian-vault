@@ -1,7 +1,8 @@
-import { config } from '../vault.mjs';
+import { config, guarded } from '../vault.mjs';
 import { alwaysIn, ruleLine, pageLine, fitContext, cmp, mentions, byFit } from '../rules.mjs';
 import { touchSession, turnStarted, markAlways, markShown, markExcerpts, markPages, dueAlways, dueExcerpts, duePages } from '../sessions.mjs';
 import { sessionView } from '../reach.mjs';
+import { markDenied } from '../offers.mjs';
 
 // Session start marks the always rules it loads, so these are the ones written, reworded or settled since,
 // or the ones of a domain the session moved into, less any an earlier prompt's keywords brought. A section's keys are the rules its items show, and its mark marks
@@ -40,7 +41,11 @@ export async function prompt(event, agent) {
   const sid = event.session;
   if (!sid) return null;
   turnStarted(sid);
-  touchSession(event, undefined, agent.name);
+  // An adapter that can tell a prompt the user didn't type sets typed false, so only the user's own message counts as
+  // writing past an offer.
+  touchSession(event, undefined, agent.name, { prompted: event.typed !== false });
+  // A Deny at the prompt leaves the keep's record unallowed, which only a prompt agent's records mean.
+  if (agent.consent === 'prompt') guarded('denied offers', () => markDenied(sid));
   const said = String(event.text ?? '');
   const { reach, rules, pages } = await sessionView(sid, event.cwd, agent);
   const sections = [late(sid, reach, rules), excerpts(sid, reach, rules, said), pointers(event, reach, pages, said)];

@@ -218,7 +218,8 @@ export const sessionId = () => `a1b2c3d4-0000-4000-8000-${String(++sessions).pad
 export const editFile = (v, sid, rel, { tool = 'Edit', text = 'set x to 1', abs, cwd, agent, timeout } = {}) => v.edit(sid, tool, {
   file_path: abs ?? path.join(v.project, ...rel.split('/')), ...(tool === 'Write' ? { content: text } : { old_string: 'a', new_string: text }),
 }, { cwd, agent, timeout });
-export const prompt = (v, sid, text, { cwd = v.project } = {}) => v.hook('prompt', { session_id: sid, cwd, prompt: text, hook_event_name: 'UserPromptSubmit' });
+export const editVault = (v, sid, rel, tool, input, cwd = v.root) => v.edit(sid, tool, { file_path: v.at(...rel.split('/')), ...input }, { cwd });
+export const prompt = (v, sid, text,{ cwd = v.project } = {}) => v.hook('prompt', { session_id: sid, cwd, prompt: text, hook_event_name: 'UserPromptSubmit' });
 
 // Rules on three topics that share no words, globs or keywords with each other or the perf notes, so proposing them at
 // once fails only if the proposes race.
@@ -242,11 +243,11 @@ export function proposeAtOnce(v, rules, { timeout } = {}) {
 // at the prompt, through the fixture vault's own lib/calls.mjs. input is the call's input as the hook saw it, which the
 // script must then be given. Returns the call id.
 let calls = 0;
-export function recordedCall(v, sid, { tool = 'keep', offer = null, allow = true, input = {} } = {}) {
+export function recordedCall(v, sid, { tool = 'keep', offer = null, allow = true, input = {}, subagent = null } = {}) {
   const call = `toolu_fixture${String(++calls).padStart(8, '0')}`;
   const lib = pathToFileURL(v.at('tools', 'lib', 'calls.mjs')).href;
   const code = `const c = await import(${JSON.stringify(lib)}); const a = JSON.parse(process.argv[1]); c.recordCall(a); if (a.allow) c.allowCall(a.call);`;
-  execFileSync(process.execPath, ['--input-type=module', '-e', code, JSON.stringify({ call, session: sid, subagent: null, tool, offer, allow, input })], { env: cleanEnv() });
+  execFileSync(process.execPath, ['--input-type=module', '-e', code, JSON.stringify({ call, session: sid, subagent, tool, offer, allow, input })], { env: cleanEnv() });
   return call;
 }
 
@@ -280,6 +281,8 @@ export const pageNote = ({ domain = 'glim', kind = 'topic', topic = 'code', summ
   ...(keywords.length ? list('keywords', keywords) : []), ...(applies_to.length ? list('applies_to', applies_to) : []), ...extra,
   'created: 2026-10-01', 'updated: 2026-10-01', '---', '', ...body, '',
 ].join('\n');
+
+export const zqEntityPage = (reading = 'Zq-lib parses screens.') => pageNote({ kind: 'entity', summary: "'The zq-lib parser.'", body: ["## Agent's reading", reading] });
 
 export const sourcePage = ({ source, dated, body = ['## You said', '', "## Agent's reading", '', '## Rules'], ...opts }) => pageNote({
   ...opts, kind: 'source', extra: [`source: ${source}`, ...(dated ? [`source_date: ${dated}`] : [])], body,

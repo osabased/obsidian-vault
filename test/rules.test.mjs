@@ -205,3 +205,52 @@ test('the linear regex engine works on the installed Node after the flag is set'
   assert.match(rules.regexError('a{1000}'), /linear time/);
   assert.match(rules.regexError('('), /^bad regex in triggers: \($/);
 });
+
+const knowledgeRule = (checked, { domain = 'glim', extra = [] } = {}) => ruleNote({
+  domain, kind: 'knowledge', basis: 'source', keywords: ['react'],
+  extra: ['as_of: 2026-10-01', 'package: { ecosystem: npm, name: react }', `checked_with: '${checked}'`, ...extra],
+  evidence: ['- 2026-10-01 · source · session 1a2b3c4d · https://example.com/react · dated 2026-10-01 · "react"'],
+});
+
+test('checked_with must be a version its ecosystem compares: whole semver where its reader reads semver', async t => {
+  const { v, rules } = await vault(t, { domains: { glim: { readers: ['plain'] } } });
+  v.write('tools/ext/readers/plain.mjs', [
+    "export const ecosystem = 'npm';", "export const lockfiles = ['plain.lock'];", "export const scheme = 'SEMVER';", 'export const read = () => ({});', '',
+  ].join('\n'));
+  for (const bad of ['18', 'v18.2.0', '^18.2.0']) {
+    assert.ok(check(rules, knowledgeRule(bad)).some(e => e.startsWith(`checked_with must be a whole semver version, in quotes, such as '1.4.0', since npm versions are semver: ${bad}`)), bad);
+  }
+  assert.deepEqual(check(rules, knowledgeRule('18.2.0')), []);
+});
+
+test('checked_with is not checked where no reader reads its ecosystem, since nothing compares it there', async t => {
+  const { rules } = await vault(t);
+  for (const any of ['2024.1', 'v18.2.0']) assert.deepEqual(check(rules, knowledgeRule(any)), [], any);
+});
+
+test("checked_with on an ECOSYSTEM reader's ecosystem is checked by that reader's compare", async t => {
+  const { v, rules } = await vault(t, { domains: { glim: { readers: ['dated'] } } });
+  v.write('tools/ext/readers/dated.mjs', [
+    "export const ecosystem = 'npm';", "export const lockfiles = ['dated.lock'];", "export const scheme = 'ECOSYSTEM';", 'export const read = () => ({});',
+    "export const compare = (a, b) => { if (!/^[0-9]{4}-[0-9]{2}$/.test(a) || !/^[0-9]{4}-[0-9]{2}$/.test(b)) throw new Error('not a month'); return a < b ? -1 : a > b ? 1 : 0; };", '',
+  ].join('\n'));
+  assert.deepEqual(check(rules, knowledgeRule('2026-10')), [], 'not semver, but the reader compares it');
+  assert.deepEqual(check(rules, knowledgeRule('18.2.0')), ["checked_with 18.2.0 isn't a version the npm reader can compare"]);
+});
+
+test('an empty requires list leaves checked_with to decide the fit', async t => {
+  const { rules } = await vault(t);
+  const movedOn = (a, b) => Number(b.split('.')[0]) > Number(a.split('.')[0]);
+  const versions = new Map([['glim', [new Map([['npm', { versions: { react: '19.0.0' }, compare: null, movedOn }]])]]]);
+  const pkg = { ecosystem: 'npm', name: 'react' };
+  assert.equal(rules.noteFit({ requires: [], package: pkg, checked_with: '18.2.0', domain: 'glim' }, () => versions)?.fit, 'mismatch');
+  assert.equal(rules.noteFit({ requires: null, package: pkg, checked_with: '18.2.0', domain: 'glim' }, () => versions)?.fit, 'mismatch');
+});
+
+test('a retired field that is not a day is an error, not a retirement', async t => {
+  const { rules } = await vault(t);
+  const n = rules.parseNote(ruleNote({ keywords: ['thing'], extra: ['retired: someday'] }), 'wiki/glim/some-rule.md');
+  assert.equal(rules.isRetired(n), false);
+  assert.equal(rules.undelivered(n), 'retired must be the day the rule was retired, as YYYY-MM-DD');
+  assert.equal(rules.isRetired(rules.parseNote(ruleNote({ keywords: ['thing'], extra: ['retired: 2026-10-02'] }), 'wiki/glim/some-rule.md')), true);
+});

@@ -29,7 +29,7 @@ Work in the vault root. `reference/notes.md` has the page and rule formats. With
    - Give a rule about code or files `applies_to` globs from the project root, fitting the files in the domain's projects. `always` is the user's to set.
    - A rule goes in its source page's domain. A vault-only domain takes no rules, so a rule from its source goes in the domain, or `global`, whose projects its `applies_to` is for.
 
-   End your reply with the lines it returns; the rule applies from then on. If the user doesn't want it, delete its note, and if they want it worded otherwise, edit it. Then propose the next.
+   `propose` returns each rule as an offer: do what it returns, so the user keeps it through the vault's `keep` tool. End your reply with the lines `keep` returns; the rule applies from then on. If the user denies it, ask whether to drop it or word it otherwise, and propose the new wording. Then propose the next.
 6. **Update the pages it touches.** For each topic the source touches, find in `index.md` the topic page and the concept and entity pages under it.
    - Add what the source shows to each page it bears on, citing it with a footnote, and what the user said, linking the source page. Where it contradicts a page and is newer than that page's sources, rewrite the claim from it and say what changed; where it's older, keep the claim and note the disagreement.
    - A page with `author: user` is the user's own writing: add to it only new lines under its `## Agent notes`.
@@ -51,6 +51,6 @@ Done when the source page holds their words, each preference they stated is a ta
    - Step 7: log each source with the `log` tool, `ingest` the source, `batch` true and `pages` the pages.
 2. Offer the user a domain for each source left at step 4, as step 4 above does, and take each through steps 4, 6 and 7 in the domain they agree to, or in `global` if they decline.
 3. When every source has a page, list a knowledge rule for each new fact quoted under `## Agent's reading` on the source pages this batch wrote, numbered, each with its domain and `applies_to` (see step 5), Do, Not, topic, source and date, and ask which to add. `log.md` names those pages on its `· batch` lines from this session, and from an earlier session whose batch stopped before this step: its `· batch` lines are the last before this session's, with no line of its own after them.
-4. Propose the ones the user approves as in step 5. Link each under its source page's `## Rules` and under the `## Rules` of its topic's page, which you start as in step 6 if the topic has none, and the source page under the rule note's `## Examples`. Set `updated` to today on the source page and the topic page, and log each with the `log` tool, `pages` the one page; the `propose` tool logged the rule.
+4. Propose the ones the user approves as in step 5. Link each under its source page's `## Rules` and under the `## Rules` of its topic's page, which you start as in step 6 if the topic has none, and the source page under the rule note's `## Examples`. Set `updated` to today on the source page and the topic page, and log each with the `log` tool, `pages` the one page; `keep` logged the rule.
 
 Done when `node tools/review.mjs sources` lists nothing, each knowledge rule the user approved is written and linked, and lint shows no errors.

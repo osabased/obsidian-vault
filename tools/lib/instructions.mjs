@@ -5,12 +5,18 @@ import { joinList } from './rules.mjs';
 // The tools take their session from the call, so the notes name tools and no path, session id or shell. The callers still
 // pass the id and the agent first.
 
-const WHEN = [
-  'when the user corrects you or says how they want things, in a way that should hold in later sessions too (a taste rule),',
-  "or when something only worked after a failure caused by an API, version or tool your training gets wrong or doesn't know, or a dated source shows it (a knowledge rule)",
-].join(' ');
+const WHEN = 'when the user corrects you or says how they want things, in a way that should hold in later sessions too (a taste rule)';
 
-// What the agent does under each mode of the proposals setting.
+// Gotchas and page changes are held until the task is done, so the user answers them together at the end. Under off the
+// agent proposes only what the user asks to keep, so it holds nothing. The vault folder writes pages directly, so its
+// note leaves out holding a page change.
+const HOLD_RULE = "When something only worked after a failure caused by an API, version or tool your training gets wrong, or a dated source shows it, hold a knowledge rule with the vault's `propose` tool and `hold: true`.";
+const HOLD_PAGE = "Hold a page change the same way when a library needs more than a rule's line.";
+const RELEASE = 'When the task is done, call `propose` with `release: true` and end your final reply with what it returns.';
+const HOLD = [HOLD_RULE, HOLD_PAGE, RELEASE].join(' ');
+const VAULT_HOLD = [HOLD_RULE, RELEASE].join(' ');
+
+// What the agent does under each mode of the proposals setting, for taste rules.
 const WHAT = {
   corrections: `propose a rule ${WHEN}.`,
   ask: `${WHEN}, offer a rule through the vault's \`propose\` tool and do what it returns; nothing is written until the user agrees.`,
@@ -18,12 +24,12 @@ const WHAT = {
 };
 
 // One sentence when every domain the session proposes to has one mode, else one per mode naming its domains. A session
-// in the vault folder proposes as in corrections whatever the mode.
+// in the vault folder offers as in ask whatever the mode.
 export function modeLines(domains, vaultFolder = false) {
-  if (vaultFolder) return WHAT.corrections;
+  if (vaultFolder) return `${WHAT.ask} ${VAULT_HOLD}`;
   const byMode = domainsByMode(domains);
-  if (byMode.size === 1) return WHAT[[...byMode.keys()][0]];
-  return [...byMode].map(([mode, ds]) => `For ${joinList(ds, 'and')} rules, ${WHAT[mode]}`).join(' ');
+  const taste = byMode.size === 1 ? WHAT[[...byMode.keys()][0]] : [...byMode].map(([mode, ds]) => `For ${joinList(ds, 'and')} rules, ${WHAT[mode]}`).join(' ');
+  return [...byMode.keys()].some(m => m !== 'off') ? `${taste} ${HOLD}` : taste;
 }
 
 // The vault skill finds the tool that sets the mode by this sentence.
@@ -65,6 +71,7 @@ export function uncoveredNote({ quiet = false } = {}) {
   return [
     'Taste vault: this project is in no domain.',
     GLOBAL[proposalMode('global')],
+    ...(proposalMode('global') === 'off' ? [] : ['The same holds for knowledge rules and page changes in this project: hold them as `global` rules with `applies_to` globs, and release them before your final reply.']),
     ...(quiet ? [] : [
       "If it holds only for projects like this one, suggest a domain to the user in your reply: a name, a title, and a file here that marks the project's kind.",
       "Once they agree, call the vault's `domain` tool.",

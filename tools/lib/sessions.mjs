@@ -1,14 +1,19 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import {
-  config, vaultPath, statePath, stateDir, readJsonSafe, writeJson, appendJsonl, safeId, shortHash, logError, guarded, hookErrors, errorsLog, domainsFor, sessionReach, toPosix, inVaultFolder, isVaultOnly,
+  config, vaultPath, statePath, stateDir, readJson, readJsonSafe, writeJson, appendJsonl, safeId, shortHash, logError, guarded, hookErrors, errorsLog, domainsFor, sessionReach, pathKey, inVaultFolder, isVaultOnly, olderThan,
 } from './vault.mjs';
 import { noteTimes } from './cache.mjs';
 import { sessionIds, shortName } from './agents.mjs';
+import { refuse } from './input.mjs';
 
 const DAY = 86400e3;
 
 export const registry = id => statePath('sessions', `${id}.json`);
+
+// A session's registry entry, or null when it has none. Any other failure to read or parse it throws, so a caller that
+// takes a missing entry for a session gone never takes an unreadable one for it.
+export const registryEntry = sid => readJson(registry(safeId(sid)), null);
 
 // Scripts take the session id as an argument, so one session can't write under another's.
 export function ownEntry(sid) {
@@ -17,10 +22,24 @@ export function ownEntry(sid) {
   return { entry: readJsonSafe(registry(safeId(sid))), notOwn: null };
 }
 
+export const PASS = "The vault's tools pass the session id themselves. From a shell, pass it as the first argument, or run this from the agent's own shell, which sets its session variable.";
+
+// The registry entry of the session a tool runs for. It refuses with noId when no id came, and when the id isn't this
+// session's or has no entry, followed by pass; a tool with its own refusal for an id with no entry passes optional.
+export function callerEntry(sid, { noId, pass = PASS, optional = false }) {
+  if (!sid) refuse(noId);
+  const { entry, notOwn } = ownEntry(sid);
+  if (notOwn) refuse(notOwn);
+  if (!entry && !optional) refuse(`the taste vault has no session ${sid}.${pass ? ` ${pass}` : ''}`);
+  return entry;
+}
+
 // `cwd` stays where the session registered, so a move into the vault folder doesn't let it propose for every domain;
 // `last_cwd` is the folder of its latest prompt or start, which /vault status counts for. Session start passes what sessionReach found for its folder, markers below it among them, so prompts, pick.mjs and
 // propose.mjs read the domains and their project roots here rather than scan the tree again.
-export function touchSession(event, hits, agent) {
+// last_prompt is set only by a typed message, so the queue's sweep can tell an offer the user wrote past from one a
+// resume merely reopened.
+export function touchSession(event, hits, agent, { prompted = false } = {}) {
   const id = safeId(event.session);
   const file = registry(id);
   const prev = readJsonSafe(file) ?? {};
@@ -31,6 +50,7 @@ export function touchSession(event, hits, agent) {
     cwd: prev.cwd ?? event.cwd ?? null,
     last_cwd: event.cwd ?? prev.last_cwd ?? null,
     last_seen: new Date().toISOString(),
+    ...(prompted ? { last_prompt: new Date().toISOString() } : prev.last_prompt ? { last_prompt: prev.last_prompt } : {}),
     // A start in a folder no domain reaches records the folder alone, so its domains are found again from the config and
     // one added later reaches the session from its next prompt rather than its next start.
     ...(hits?.length
@@ -56,7 +76,7 @@ export function addReach(sid, { domain, root }) {
   writeJson(file, { ...entry, reach: { cwd, domains, roots } });
 }
 
-const samePath = (a, b) => Boolean(a && b) && toPosix(a).toLowerCase() === toPosix(b).toLowerCase();
+const samePath = (a, b) => Boolean(a && b) && pathKey(a) === pathKey(b);
 
 const recorded = (entry, cwd) => (entry?.reach && samePath(entry.reach.cwd, cwd) ? entry.reach : {});
 const domainsIn = (entry, cwd) => {
@@ -86,7 +106,7 @@ export function sessionRoots(entry) {
     : reach ? sessionReach(reach.cwd) : [];
   const first = reach && samePath(reach.cwd, entry?.cwd) ? [] : sessionReach(entry?.cwd);
   const all = [...latest, ...first].filter(r => typeof r?.domain === 'string' && typeof r?.root === 'string').map(({ domain, root }) => ({ domain, root }));
-  const keys = all.map(r => `${r.domain}|${toPosix(r.root).toLowerCase()}`);
+  const keys = all.map(r => `${r.domain}|${pathKey(r.root)}`);
   return all.filter((r, i) => keys.indexOf(keys[i]) === i);
 }
 
@@ -279,19 +299,47 @@ export function shownInContext(sid) {
   return { rules: keys([...allKeys('excerpts', id)].filter(m => m.startsWith('shown|'))), pages: keys([...allKeys('pages', id)]) };
 }
 
-// A marker holds its id, in which a rule's wording hash follows its key. The session whose evidence changed a rule's
-// wording already has it in mind, so its markers move to the new hash and only other sessions get the rule again.
-export const carryMarkers = (sid, key, from, to) => guarded('carry markers', () => {
-  for (const kind of ['gate', 'excerpts']) {
-    const moved = [];
-    for (const id of allKeys(kind, safeId(sid))) {
-      const parts = id.split('|');
-      const i = parts.indexOf(key);
-      if (i >= 0 && parts[i + 1] === from) moved.push(parts.with(i + 1, to).join('|'));
+// The markers that name a rule by its key, split at |: gate and excerpts ids, where its wording hash follows the key,
+// repeats ids (slug|key|hash), and delivered, the bare key.
+const CARRIED = ['gate', 'excerpts', 'repeats', 'delivered'];
+
+// Copies each marker an edit maps to a new id, in the sessions dirsOf lists for a kind, reading each session's markers
+// of a kind once. An edit returns the new parts, or null to leave the marker.
+function carry(dirsOf, edits) {
+  for (const kind of CARRIED) {
+    for (const id of dirsOf(kind)) {
+      const moved = [];
+      for (const m of allKeys(kind, id)) {
+        const parts = m.split('|');
+        for (const edit of edits) {
+          const next = edit(parts);
+          if (next) { moved.push(next.join('|')); break; }
+        }
+      }
+      markMany(kind, id, moved);
     }
-    markMany(kind, sid, moved);
   }
-});
+}
+
+const rehash = ({ key, from, to }) => parts => {
+  const i = parts.indexOf(key);
+  return i >= 0 && parts[i + 1] === from ? parts.with(i + 1, to) : null;
+};
+const rekey = (from, to) => parts => (parts.includes(from) ? parts.map(x => (x === from ? to : x)) : null);
+
+function sessionDirs(kind) {
+  try { return fs.readdirSync(vaultPath('.state', kind)); } catch (e) { if (!stray(e)) throw e; }
+  return [];
+}
+
+// The session whose evidence changed a rule's wording already has it in mind, so its markers move to the new hash and
+// only other sessions get the rule again.
+export const carryMarkers = (sid, key, from, to) => guarded('carry markers', () => carry(() => [safeId(sid)], [rehash({ key, from, to })]));
+
+// A move changes a rule's key and keeps its wording, so every session's markers for the old key are copied to the new
+// one, and a session shown the rule before the move isn't shown it again. rehashed lists the other rules, { key, from,
+// to }, whose wording changed only in the links the move rewrote, and their markers move to the new hash the same way.
+export const carryMove = (from, to, rehashed = []) => guarded('carry markers', () => carry(sessionDirs, [rekey(from, to), ...rehashed.map(rehash)]));
 
 // The registered sessions, with their folder and when they were last seen, and the others the hooks recorded
 // deliveries for, each with the rules it was shown.
@@ -370,20 +418,23 @@ function prune(id, room) {
 const changedAt = file => fs.statSync(file, { throwIfNoEntry: false })?.mtimeMs ?? 0;
 const markersChanged = id => Math.max(...KINDS.flatMap(kind => [changedAt(vaultPath('.state', kind, id)), changedAt(vaultPath('.state', kind, id, BATCH))]));
 
+// A registry that can't be read counts as seen now, so tidy never prunes a live session over a bad read.
+const seenAt = id => { try { return Date.parse(registryEntry(id)?.last_seen); } catch { return Date.now(); } };
+
 // Nothing marks a session's end, so each day's first session start clears sessions idle for 30 days:
 // by last_seen when registered, otherwise by when their markers last changed. Session start removes at most
 // delivery.tidyMaxMarkers marker files a run and tries again at the next, so a long backlog can't hold it up; /lint
 // passes full and clears the lot.
 export function tidy({ full = false } = {}) {
   const stampFile = statePath('tidy.json');
-  if (!full && Date.now() - Date.parse(readJsonSafe(stampFile)?.at) < DAY) return;
+  if (!full && !olderThan(readJsonSafe(stampFile)?.at, DAY)) return;
   let room = full ? Infinity : Math.max(0, Number(config().delivery.tidyMaxMarkers) || 0);
   let finished = true;
   const registered = new Set(registeredIds());
   for (const id of new Set([...registered, ...KINDS.flatMap(kind => fs.readdirSync(stateDir(kind)))])) {
     try {
-      const seen = registered.has(id) ? Date.parse(readJsonSafe(registry(id))?.last_seen) : markersChanged(id);
-      if (Date.now() - seen <= 30 * DAY) continue;
+      const seen = registered.has(id) ? seenAt(id) : markersChanged(id);
+      if (!olderThan(seen, 30 * DAY)) continue;
       if (room <= 0) { finished = false; break; }
       const r = prune(id, room);
       room -= r.removed;
