@@ -1,8 +1,8 @@
 # Self-maintaining vault: design
 
-Status: decided, 2026-11-03, then revised the same day after an independent review and again after a two-researcher panel, which reversed §11.17: automatic commits wait for the code/data split (§3.8, §12). Nothing is built. It follows the user's answers of 2026-11-03, cited here as A1 to A14 (§1). The user took every recommended option, then the review's fixes, including an async SessionStart hook for upkeep, then the panel's fixes. §11 records the decisions. The copy in §7 is approved.
+Status: decided, 2026-11-03, then revised the same day after an independent review and again after a two-researcher panel, which reversed §11.17: automatic commits wait for the code/data split (§3.8, §12). Phases 1 to 3 are built (`e92d0a7`, merged as `bbd7167`). On 2026-11-05 the user dropped the code/data split, and with it the automatic commits and the async upkeep hook; phase 5 became the status-line counts alone (§11.27, §12). The dropped design is in git history at `bbd7167`. It follows the user's answers of 2026-11-03, cited here as A1 to A14 (§1). The user took every recommended option, then the review's fixes, including an async SessionStart hook for upkeep, then the panel's fixes. §11 records the decisions. The copy in §7 is approved.
 
-Scope: how the vault grows from the user's work and keeps itself in order. That covers how project sessions capture rules and page changes, the review queue, how pages build up, how rules age and retire, how domains appear, the upkeep that runs at session start, `/lint`, and commits. The vault is personal, so this designs for one user. Mechanism only: this design adds no domain knowledge. Names of libraries, marker files, readers and thresholds go in `vault.config.json`, in extensions or in notes, never in `tools/`.
+Scope: how the vault grows from the user's work and keeps itself in order. That covers how project sessions capture rules and page changes, the review queue, how pages build up, how rules age and retire, how domains appear, what session start reports, and `/lint`. The vault is personal, so this designs for one user. Mechanism only: this design adds no domain knowledge. Names of libraries, marker files, readers and thresholds go in `vault.config.json`, in extensions or in notes, never in `tools/`.
 
 Inputs: reads of `AGENTS.md`, `reference/delivery.md`, `reference/notes.md`, `tools/CODING_STANDARDS.md`, `tools/lib/instructions.mjs`, `tools/propose.mjs`, `tools/keep.mjs`, `tools/lib/offers.mjs`, `tools/lib/calls.mjs`, `tools/lib/handlers/` (start, prompt, stop, pre-tool, subagent-start, vault-call), `tools/adapters/claude-code/adapter.mjs`, `tools/adapters/codex/adapter.mjs`, `tools/mcp/tools.mjs`, `mcp/launch.mjs`, `tools/review.mjs`, `tools/refresh.mjs`, `tools/lint.mjs`, `tools/lib/git.mjs`, `tools/lib/vault.mjs`, `tools/lib/versions.mjs`, `hooks/launch.mjs`, `hooks/hooks.json`, `.githooks/pre-commit`, `.githooks/post-commit`, `.gitignore`, the `/lint`, `/ingest` and `/vault` skills, at commit `fffd7bc`, and the Claude Code hooks reference (code.claude.com/docs/en/hooks, "Run hooks in the background").
 
@@ -23,9 +23,9 @@ Claims about the code are verified unless marked *(unverified)* or *(inferred)*.
 | A9 | Nothing happens to a rule without the user's click: no new rule, no change, no retirement. | §3.4 |
 | A10 | A knowledge rule whose library version has moved on is flagged. It stops reaching projects on the newer version. It is retired only after the user approves. | §3.4 |
 | A11 | Domains appear when needed. Agents offer them as now. `/lint` also suggests them from `global` rules whose `applies_to` keeps matching one kind of project. | §3.5 |
-| A12 | At each session start, cheap checks run with no model cost. They fix what has one right answer and commit it. The rest is named in the start line. Content waits. No schedules, and no agent runs the user didn't start. | §3.6 |
+| A12 | At each session start, cheap checks run with no model cost. They fix what has one right answer and commit it. The rest is named in the start line. Content waits. No schedules, and no agent runs the user didn't start. The commit was dropped (§11.27). | §3.6 |
 | A13 | `/lint` in the vault folder refreshes sources and makes the fixes. It drafts page updates, roll-ups, domain suggestions and retirements. Then it walks the user through the queue one decision at a time. | §3.7 |
-| A14 | Approved changes, mechanical fixes and logs are committed automatically. The user's Obsidian edits go in their own commit, marked as theirs, with the next vault commit. A commit that pre-commit refuses stays uncommitted and is reported. | §3.8 |
+| A14 | Approved changes, mechanical fixes and logs are committed automatically. The user's Obsidian edits go in their own commit, marked as theirs, with the next vault commit. A commit that pre-commit refuses stays uncommitted and is reported. Dropped (§11.27). | §3.8 |
 
 ## 2. Where it stands
 
@@ -83,7 +83,7 @@ The agent decides when the task ends. The start note tells it: "when the task is
 
 - `propose` with `page` **and** `text` is a page change: `page` is the vault path of a page under `wiki/`, and `text` is the page's whole new content. `page` without `text` keeps its meaning today, a user's page cited for `basis: stated`. Telling them apart by `text` keeps the approved copy in §7.1.
 - For a page change, `propose` checks the page's frontmatter and links as lint does. It refuses `author: user` pages except for lines added under `## Agent notes`. It stores `fields: { page, text, base }`, where `base` is the SHA-256 of the file as it stands, or null for a new page. The offer's lines are the page path, `new` or `change`, and a unified diff, or the whole text for a new page. Those lines are what the prompt shows, so they are never cut: `propose` refuses a page change whose lines exceed `pages.maxOfferChars`, and the agent splits it into smaller changes.
-- `keep` gains `kind: 'page'`. It refuses when the file's hash is no longer `base`, so a page that changed since the offer is offered again. It writes with `writeSettled`, adds the `log.md` line that the `log` tool would add, rebuilds `index.md`, and commits (§3.8).
+- `keep` gains `kind: 'page'`. It refuses when the file's hash is no longer `base`, so a page that changed since the offer is offered again. It writes with `writeSettled`, adds the `log.md` line that the `log` tool would add, and rebuilds `index.md`. It commits nothing (§3.8).
 - **Option B**, not chosen: a separate `page` tool. Each tool's description and schema join every session's context, and `test/context-load.test.mjs` caps the tool list at 12,000 characters. One field and two help lines on `propose` cost less than a new tool. If the cap is breached, this comes back to the user (§11.6).
 
 In the vault folder, pages are still written directly. A9 is about rules, and A3 is about project sessions.
@@ -119,7 +119,7 @@ In the vault folder, pages are still written directly. A9 is about rules, and A3
 
 Options considered:
 - **A, chosen.** `raw/queue/` rows plus a generated `queue.md`. The queue is tracked, keeps its history, and reads in Obsidian.
-- **B.** `.state/queue/`. It is gitignored and "belongs to the hooks". The queue would be lost with `.state/`, and it couldn't be committed (A14).
+- **B.** `.state/queue/`. It is gitignored and "belongs to the hooks". The queue would be lost with `.state/`, and the user couldn't commit it.
 - **C.** A hand-editable `queue.md`. Rows could no longer be checked, and an edit could approve an entry without a click.
 
 **Entry row.**
@@ -185,14 +185,14 @@ None of these writes a note, so none needs consent. A shell in any session can r
 
 **Moves.** `keep` with `kind: 'move'` moves a note to another domain. The key changes from `<old>/<slug>` to `<new>/<slug>`, so the move also rewrites the wiki links that name the note, as `lint --fix` does, and writes `moved_from: <old key>`. Inbox rows, shown-markers and Evidence lines that name the old key resolve through `moved_from`. `propose` refuses a move to a domain that doesn't exist yet, so the walk keeps the domain offer before its moves.
 
-**Version flag (A10).** Where the flag is set is the open point between A10 and A12. A12 makes start upkeep cheap and mechanical. A10 makes a flagged rule stop reaching newer projects. The answer: the flag is not stored anywhere. It is worked out at delivery for each project, as `requires` is today (`rules.mjs:429`).
+**Version flag (A10).** Where the flag is set is the open point between A10 and A12. A12 keeps session start cheap and mechanical. A10 makes a flagged rule stop reaching newer projects. The answer: the flag is not stored anywhere. It is worked out at delivery for each project, as `requires` is today (`rules.mjs:429`).
 
 - A knowledge rule records the library it is about and the version it was checked with. `propose` takes `package` (`ecosystem/name`). It fills a new frontmatter field, `checked_with: '<version>'`, from the project's lockfile through the readers, as `fitOf` reads them. When no reader reads the package, the offer's lines say `version unknown`, and the rule is never flagged. No readers exist today (no `tools/ext/`, `domains: {}`), so every rule kept now lacks `checked_with`. `review.mjs status` lists knowledge rules with a `package` and no `checked_with` once readers are set, and `/lint` drafts a `reword` for each, filling the version from the projects where the rule was shown. The user confirms the version when keeping it.
 - At delivery, a rule with `checked_with` is a mismatch in a project whose version has **moved on** under `knowledge.movedOn`. It isn't delivered there, through the same branch as `requires`. It is still delivered in projects on the old version, and in projects whose version is unknown, where it is labelled as today. A `requires` the user wrote by hand wins over `checked_with`.
 - A project whose lockfile a reader read, and which lacks the package, is a mismatch, as it is for `requires` (`versions.mjs:182`). The rule is about a library that project doesn't use.
 - "Moved on" under `major`: a newer major version, or a newer minor below 1.0, SemVer's breaking line (§11.1). It applies to readers on the SemVer scheme. A reader on the `ECOSYSTEM` scheme (`versions.mjs:167`) may export `movedOn(a, b)`; one that doesn't gives `unknown`, and its rules are never flagged.
 - **Readers for every project.** Global reaches every project, so `projectVersions` reads `global`'s readers at each session's root. A session in no domain has no hit today, so it gets a root: the nearest folder above its `cwd` that holds `.git`, found with `fs`, or the `cwd` itself. Which readers run for `global` is set in `vault.config.json` under `domains.global.readers`, as for any domain. None are set today, so until the user names some, every version is `unknown` and A10 flags nothing. `review.mjs status` says so while it holds.
-- Session start counts the rules flagged in the session's own projects in the status line (§3.6). `/lint` lists every rule flagged in any project in `.state/versions.json` and drafts a `retire` entry for each (§3.7). Retirement waits for the user's click.
+- Session start counts, in the status line, the rules whose version has moved on in the session's own projects (§3.6). A project that lacks the package is a mismatch but isn't counted, since a retirement wouldn't fit it. `/lint` lists every rule whose version has moved on in any project in `.state/versions.json`, naming the project each version was read in, and drafts a `retire` entry for each (§3.7). Retirement waits for the user's click. Neither counts nor lists a rule whose `retire` entry is open in the review queue, which the queue count already shows, or was dropped, which kept the rule (§11.28).
 - New evidence through `repeats`, from a session on the newer version, moves `checked_with` up, as it moves `as_of`. It is a change to the rule, so it is an offer too.
 
 **Option B**, not chosen: `propose` writes OSV `requires` with an upper bound. That puts the "moved on" policy into each note, so changing the policy means rewriting notes, and a user's `requires` can't be told from the agent's.
@@ -207,37 +207,15 @@ Agents offer a domain as they do today. In addition, `review.mjs status` gains a
 
 `/lint` turns each candidate into a `domain` entry, with a name and title the agent proposes and the marker found. It adds one `move` entry per rule. The domain offer and each move are kept one at a time (A9), the domain first.
 
-### 3.6 Upkeep at session start (A12)
+### 3.6 What session start reports (A12)
 
-Two parts. The start hook reports. An async hook fixes and commits, once the vault's data has a repository of its own (§3.8, §12).
+The start hook, under the existing 10-second deadline and `checkDeadline()`:
+- runs `sweep()` (§3.3);
+- adds to the status line what waits for the user: the open review-queue entries and how many are unattended, the rules past their version in this session's projects (§3.4), and "no version readers set" when no domain names readers and a rule that reaches the session names a package.
 
-**In the start hook,** under the existing 10-second deadline and `checkDeadline()`:
-- `sweep()` (§3.3).
-- Counts for the status line: open queue entries, how many are unattended, rules flagged in this session's projects, and the result of the last upkeep run from `.state/upkeep.json`, including a skip and why, and the age of a `.git/index.lock` that keeps blocking commits.
-- The status line is the user's, not the agent's. These counts cost no context and no model time. A12's "named in the start line" lands there (§11.14). The agent's context gets nothing new from upkeep.
+The status line is the user's, not the agent's. These counts cost no context and no model time. A12's "named in the start line" lands there (§11.14). The agent's context gets nothing new.
 
-Until the split is built, session start does only this and the `build` it runs today (`start.mjs:81-86`). The async hook below is built with the split.
-
-**The async upkeep hook (§11.8).** `hooks/hooks.json` gains a second `SessionStart` entry with `"matcher": "startup"` and `"async": true`, running `node ${CLAUDE_PLUGIN_ROOT}/hooks/launch.mjs upkeep`. `hooks/launch.mjs` runs `.live/tools/upkeep.mjs` for it. Claude Code doesn't enforce `timeout` on an async command hook, so git and lint never spend the session hook's 10 seconds. An async hook's JSON output reaches Claude on the next turn, so upkeep prints nothing. In a `claude -p` run, Claude Code kills an async hook still running at teardown (hooks reference, "Run hooks in the background"). Each step below is safe to stop: a commit is atomic, and a half-run upkeep leaves files that the next run commits. Whether a kill mid-commit leaves a stale `.git/index.lock` is *(unverified)*; the status line names a lock's age (§3.8). The same page says work that must outlive `-p` should "start a fully detached process"; if teardown kills prove common, the hook can do that, with its output redirected.
-
-For a client whose adapter declares no async hooks, `mcp/launch.mjs` starts the same run when the tool server starts, detached, with `stdio: 'ignore'` and `windowsHide: true`. It is already the repo root's sanctioned process starter, and Codex starts it per thread (`adapters/codex/adapter.mjs:143`). `tools/mcp/server.mjs` stays pure protocol. Whether Codex supports async hooks is *(unverified)*. The lock and rate limit make a second start harmless.
-
-`upkeep.mjs`:
-1. Takes `.state/upkeep.lock` without waiting, with `staleMs` of 15 minutes. When another run holds it, or a run finished less than `upkeep.minMinutes` ago (10 by default), it exits.
-2. Commits the user's Obsidian edits on their own (§3.8).
-3. Runs the fixes that have one right answer, `lint --fix` (link and footnote spellings, the generated files) and `build`, on settled notes only. A note changed less than `delivery.settleSeconds` ago is skipped, so upkeep never rewrites a note the user is typing. Today `lint fix()` has no such check (`lint.mjs:167-184`); upkeep passes it the settled set.
-4. Commits what tools wrote: fixes, logs, queue rows, and approved changes still uncommitted.
-5. Writes `.state/upkeep.json`: when it ran, what it committed, what it skipped and why, the lint tally left, and a commit the lint gate refused with its first line.
-
-`upkeep.mjs` runs git only through `lib/git.mjs`. `CODING_STANDARDS.md` names it as the one script a hook entry starts that may commit.
-
-Everything about content waits for `/lint`: stale pages, contradictions, drafts and retirements.
-
-Options for where the commit runs:
-- **A, chosen.** The async SessionStart hook, with `mcp/launch.mjs` for clients without async hooks. It is a native Claude Code feature, and it needs no spawn in the launcher or the server. The cost: this session's status line reports the previous run, not this one.
-- **B**, the earlier choice: `hooks/launch.mjs` spawns a detached `upkeep.mjs`. The hooks reference allows this when the child's output is redirected. But the launcher can't see `source === 'startup'`, because `runHook` reads stdin itself (`vault.mjs:451`), so it would start upkeep on every resume and compaction too.
-- **C.** Commit inside the synchronous hook, under the deadline. This breaks the hooks' one-child-process rule. A slow lint gate would cost the session's hook time or be cut off.
-- **D.** Commit only from `keep` and `/lint`. User edits and fixes would then wait for an agent action. That misses A12's "commit" at session start.
+Session start fixes only what it fixed before, the generated files through `build`. It runs no `lint --fix` and commits nothing (§11.27). Everything about content waits for `/lint`: stale pages, contradictions, drafts and retirements.
 
 ### 3.7 `/lint` (A13)
 
@@ -258,7 +236,7 @@ The skill keeps its steps 1 to 3 (refresh, status, `lint --fix`). Step 4, readin
    - Make its offer with `propose` and `queued`. Then call `keep`: Allow once keeps it.
    - On a Deny, ask one question: Later, Drop, or Change. Record Later and Drop with `queue.mjs`. Change revises the text, and the agent offers it again.
    - The user can stop at any entry, and the rest stay open.
-7. **End.** Run `lint --fix` again, then `review.mjs done`, then commit once commits exist (§3.8).
+7. **End.** Run `lint --fix` again, then `review.mjs done`. The user commits (§3.8).
 
 On a client without tool prompts, the walk asks in text, and the user types the entry's code, or Later or Drop.
 
@@ -266,39 +244,17 @@ The walk is one click for each entry kept, and two for the rest (§11.13). **Opt
 
 ### 3.8 Commits (A14)
 
-**Only in a data repository (§11.17).** Automatic commits are built with option A of `docs/design-code-data-split.md`, and only in its data repository: a git repository of its own, with no upstream. Until then, `keep`, `/lint` and upkeep write files as described here and commit nothing; the user commits as today.
+**Dropped on 2026-11-05 (§11.27).** No tool commits. `keep`, `/lint`, `log`, `pick` and session start write files and leave them uncommitted; the user commits the vault as today, and `.githooks/pre-commit` checks each commit. A14 and A12's "commit it" are not built.
 
-The reason: the vault folder today is the checkout of the plugin's upstream (`origin`, `github.com/osabased/obsidian-vault`, private), and the user pushes its `main` often (12 pushes between 2026-10-31 and 11-03, `git reflog show origin/main`). One automatic commit on `main` would make every later push of `main` carry data. A pre-push guard on those commits would refuse every such push, and the only way through would publish the data. That breaks the split's invariant, "upstream never again commits a change to a path that the vault, Obsidian or the user writes" (`design-code-data-split.md:48`), and each clone's next `git pull` would meet diverged branches. A separate data branch in the same repository was rejected by the split for the same reason: `git push --all` publishes the notes. In the data repository none of this arises, so there is no pre-push guard, no branch gate, and no list of code paths to leave out.
-
-**Ledger.** `.state/writes.jsonl` holds `{ path, sha256, by }` for each tracked path an agent or tool wrote. Its writers:
-- `writeText`, `rewriteText`, `writeJson`, `appendJsonl` and `copyNew` in `lib/vault.mjs`, and every removal there. `lib/vault.mjs` and `lib/sessions.mjs` are the only fs writers in `tools/`, and lint enforces that.
-- The edit hook, for each Write, Edit or MultiEdit it lets through: the SHA-256 of the text after the edit, which the adapter already computes (`textAfter`, `adapter.mjs:65-69`). A write the user then denies leaves the file unchanged, so its entry matches nothing.
-- The Stop hook, in a session whose folder is the vault. Today `shellWritten` skips the vault's own paths (`stop.mjs:23`, `vaultOwn`), and by its own comment it can't tell "what a shell command wrote, or the user saved in an editor meanwhile". So it records vault files changed during the turn that no edit call reached as `by: 'turn <session>'`, which means unattributed: a shell command or the user.
-
-`by` is the tool or hook and the session's short name.
-
-**Commit set.** The data repository's tracked files. `raw/` takes new files and appends only.
-
-**User edits.** A changed path in the commit set whose current hash isn't the last one the ledger holds for it. The user's edits are committed first, in their own commit. The message is `Obsidian edits: <paths, cut to 72 characters>`, with the trailer `Vault-Change: user`. Paths the ledger marks unattributed go in their own commit, `Vault-Change: unattributed`, with `Vault-Session: <short name>`. Then come the tool commits: `vault: <what>`, with `Vault-Change: agent` or `Vault-Change: upkeep` and `Vault-Session: <short name>`. Commits use the user's own git identity, since the vault is theirs. Before `keep` writes a file that holds unsaved user edits, it commits those edits first, so its commit doesn't absorb them. Only settled user edits are committed (`delivery.settleSeconds`), so a note being typed waits.
-
-**When.** `keep`, after each write. `/lint`, at its end. `upkeep.mjs`, at session start. `log` and `pick` leave their writes to the next upkeep run, so that recording a pick never spends time on git.
-
-**The lint gate.** The data repository installs no git hooks (`design-code-data-split.md:133`), so `commitPaths` runs the checks the vault's pre-commit runs today: `build`, the generated files staged, lint with `--fail-on error` over the whole vault, and the append-only check on `raw/` (a changed or deleted `raw/` file is refused). One note with a lint error, such as a half-typed one, blocks every automatic commit, `keep`'s included, until it is fixed. The status line names the refusal, so the user sees it at the next start. Whole-vault lint takes about 0.24 s today.
-
-**Keeping clear of the user's own git work.** `lib/git.mjs` gains `commitPaths(paths, { message, trailers })`, run under `withLock(.state/commit.lock)` with `staleMs` of 15 minutes, longer than the 30-second default (`vault.mjs:511`). It commits nothing, and records why in `.state/upkeep.json`, when any of these holds:
-- `.git/index.lock` exists. Upkeep never deletes it; the status line names its age (§3.6);
-- a merge, rebase, cherry-pick, revert or bisect is in progress (`MERGE_HEAD`, `rebase-merge/`, `rebase-apply/`, `CHERRY_PICK_HEAD`, `REVERT_HEAD`, `BISECT_LOG`);
-- anything is staged (`git diff --cached --quiet` fails), since the user is composing a commit.
-
-Otherwise it runs the lint gate, `git add -- <paths>`, and a plain `git commit`. The index was empty before the add, so the commit holds exactly those paths and the generated files. Afterwards `git diff --cached --quiet` must pass. It never pushes. When the gate refuses, it leaves the files as they are and records the refusal's first line. The status line names it (A14). Each git call has a timeout, and `GIT_TERMINAL_PROMPT=0`, as refresh's calls do.
+They waited for option A of `docs/design-code-data-split.md`, since the vault folder is the checkout of the plugin's upstream (`origin`, `github.com/osabased/obsidian-vault`, private), and one automatic commit on `main` would make every later push of `main` carry data (§11.17). The split was then dropped, and with it the ledger of who wrote each file, the commit set, user-edit commits, the lint gate and `commitPaths`. Their design is at `bbd7167`.
 
 ## 4. The open points, as settled
 
-1. **A10 against A12, the version flag.** No flag is stored, and upkeep stops nothing. Delivery works out "moved on" for each project from `checked_with` and the lockfile, through the existing `requires` branch. Session start only counts the flagged rules in the status line. `/lint` drafts the retirements, and `keep` retires (§3.4). Flags need readers named under `domains.global.readers` or a domain's `readers`.
+1. **A10 against A12, the version flag.** No flag is stored, and session start stops nothing. Delivery works out "moved on" for each project from `checked_with` and the lockfile, through the existing `requires` branch. Session start only counts the flagged rules in the status line. `/lint` drafts the retirements, and `keep` retires (§3.4). Flags need readers named under `domains.global.readers` or a domain's `readers`.
 2. **End of task.** The agent's own judgement, told in the start note. The agent holds offers, then releases them before its final reply, and is reminded after compaction. Stop isn't used, because it can't tell the last turn. A missed release is caught by the sweep as `unreleased`, so a client without Stop loses nothing (§3.1).
 3. **The queue.** `raw/queue/<date>-<session>.jsonl` entry rows and decision rows, with a generated `queue.md`. Unattended entries carry `unattended: subagent | headless | left` (§3.3).
 4. **Page offers.** `propose` with `page` and `text`. `keep` with `kind: 'page'`, a `base` hash, and the prompt showing a diff. The edit hook refuses wiki writes from project sessions, and rule-text writes from every agent session (§3.2, §3.4).
-5. **Session-start commits.** Built with the code/data split, and only in its data repository, which has no upstream. An async SessionStart hook runs `upkeep.mjs`, outside the 10-second limit, locked and rate-limited. It fixes settled notes only, and skips on an index lock, a git operation in progress or anything staged. `commitPaths` runs its own lint gate, since the data repository has no git hooks. The start hook only reports the last run (§3.6, §3.8, §12).
+5. **Session-start commits.** Dropped with the code/data split (§11.27). Session start counts what waits in the status line, and fixes and commits nothing beyond `build` (§3.6, §3.8).
 
 ## 5. Files that change
 
@@ -307,25 +263,20 @@ Otherwise it runs the lint gate, `git add -- <paths>`, and a plain `git commit`.
 | `tools/lib/instructions.mjs` | `WHEN` splits: taste offered at once, knowledge and pages held and released before the final reply. `uncoveredNote` gains the knowledge and page sentences. The vault-folder note says rules are offered. The compaction reminder. Copy in §7. |
 | `tools/mcp/tools.mjs` | `propose` gets `(sid, call)`, as `keep` does. |
 | `tools/propose.mjs`, `tools/lib/propose-rule.mjs` | Accept the call id and read the call record. Fields `hold`, `release`, `text` (a page change with `page`), `package`, `queued`, and `change` (`reword`, `retire`, `move`) with `key`. A page change over `pages.maxOfferChars` is refused. A subagent's call queues. `checked_with` is filled from the lockfile. The entity-page hint. The vault folder offers instead of writing, without the `off` gate. `hold` and `release` in each mode. |
-| `tools/keep.mjs` | Kinds `page`, `reword`, `retire`, `move`. The `base` hash check. A queued offer refused with its entry id. Commits user edits before the write and the change after it. Appends the `kept` decision row. |
+| `tools/keep.mjs` | Kinds `page`, `reword`, `retire`, `move`. The `base` hash check. A queued offer refused with its entry id. Appends the `kept` decision row. |
 | `tools/lib/offers.mjs` | `held`, `denied` and `queued` states. Release resets `typed` and stamps `released_at`. The purge spares held and pending offers. |
 | `tools/lib/calls.mjs`, `tools/lib/handlers/prompt.mjs`, `tools/lib/sessions.mjs` | Mark a denied offer `denied` from its call record on the next prompt. Stamp `last_prompt` on each typed message. |
 | `tools/lib/queue.mjs` (new), `tools/queue.mjs` (new) | Entry and decision rows, open entries, `sweep()` under `offers.lock`. The command line: `list`, `show`, `draft`, `later`, `drop`. |
-| `tools/lib/handlers/pre-tool.mjs` | `newRuleGuard` becomes a wiki guard: any note under `wiki/` from a session outside the vault folder is refused and pointed to `propose`. A rule guard for every agent session: rule frontmatter and Do, Not, Because. The ledger entry for each edit let through. `queue.md` joins the generated files. |
-| `tools/lib/handlers/stop.mjs` | In a vault-folder session, ledger entries marked unattributed for vault files changed during the turn that no edit call reached. |
+| `tools/lib/handlers/pre-tool.mjs` | `newRuleGuard` becomes a wiki guard: any note under `wiki/` from a session outside the vault folder is refused and pointed to `propose`. A rule guard for every agent session: rule frontmatter and Do, Not, Because. `queue.md` joins the generated files. |
 | `tools/lib/rules.mjs`, `tools/lib/versions.mjs` | `checked_with` against the project's version under `knowledge.movedOn`. An optional `movedOn` export for `ECOSYSTEM` readers. A root for sessions in no domain. `retired` notes skipped. `moved_from` resolves old keys. |
 | `tools/lib/lint.mjs` | Shapes of `package`, `checked_with`, `retired`, `moved_from`, `job` and `compares`. One entity page per package. `## Gotchas` and `## Docs read` line forms. Queue rows and their quotes. |
 | `tools/review.mjs` | Sections: open queue, drops and who made them, version-flagged rules, no readers set, domain candidates, entity-page candidates, comparison candidates, roll-up candidates. |
-| `tools/lib/handlers/start.mjs`, `tools/lib/status.mjs` | `sweep()`. Queue, flag, last-upkeep and index-lock counts in the status line. The compaction reminder. The vault folder's mode is no longer `corrections` (`status.mjs:8`). |
-| `tools/upkeep.mjs` (new), `tools/lib/git.mjs`, `tools/lib/lint.mjs` | The upkeep run, built with the split. `commitPaths` with its guards, its lint and `raw/` gate, and long `staleMs`. `lint fix()` takes a set of settled notes. |
-| `tools/lib/vault.mjs` | The write ledger in the write, copy and remove helpers. |
+| `tools/lib/handlers/start.mjs`, `tools/lib/status.mjs` | `sweep()`. The queue and version counts in the status line, and "no version readers set". The compaction reminder. The vault folder's mode is no longer `corrections` (`status.mjs:10`). |
 | `tools/lib/build.mjs` | Writes `queue.md`. Marks retired notes in `index.md`. |
-| `hooks/hooks.json`, `hooks/launch.mjs`, `tools/adapters/claude-code/adapter.mjs` | The async `startup` upkeep entry; `launch.mjs` routes `upkeep` to `.live/tools/upkeep.mjs`; the adapter declares async hooks. |
-| `mcp/launch.mjs` | Starts the detached upkeep, output ignored, for an adapter without async hooks. |
-| `.githooks/pre-commit` | Until the split, adds `queue.md` to the files it rebuilds and stages. |
-| `vault.config.json` defaults (in `config()`) | `queue.sweepAfterHours` 12, `pages.entityAfterRules` 3, `pages.rollupAfterRules` 3, `pages.maxOfferChars`, `knowledge.movedOn` `major`, `domains.suggestAfterProjects` 2, `upkeep.minMinutes` 10. |
+| `.githooks/pre-commit` | Adds `queue.md` to the files it rebuilds and stages. |
+| `vault.config.json` defaults (in `config()`) | `queue.sweepAfterHours` 12, `pages.entityAfterRules` 3, `pages.rollupAfterRules` 3, `pages.maxOfferChars`, `knowledge.movedOn` `major`, `domains.suggestAfterProjects` 2. |
 | `.claude/skills/lint/SKILL.md`, `.claude/skills/ingest/SKILL.md`, `.claude/skills/vault/SKILL.md` | The draft and walk steps; steps 2 and 5 offer instead of editing rules. `/ingest` keeps rules through `keep`. The vault folder no longer writes as in `corrections`. |
-| `AGENTS.md`, `reference/delivery.md`, `reference/notes.md`, `tools/CODING_STANDARDS.md` | Held offers, page offers, rewording, the queue, `checked_with`, `retired`, `moved_from`, entity page sections, commits and when they start, the ledger. `upkeep.mjs` as the one hook-started script that commits. File back from a project session becomes a page offer. The vault folder's mode (`delivery.md`). The hooks' Never list gains the rule guard. |
+| `AGENTS.md`, `reference/delivery.md`, `reference/notes.md`, `tools/CODING_STANDARDS.md` | Held offers, page offers, rewording, the queue, `checked_with`, `retired`, `moved_from`, entity page sections. File back from a project session becomes a page offer. The vault folder's mode (`delivery.md`). The hooks' Never list gains the rule guard. |
 
 ## 6. Checks that go red first
 
@@ -351,7 +302,7 @@ All of these build on `test/fixture.mjs` and run with `node --test test/*.test.m
 10. `keep.test.mjs`: a `retire` offer, once kept, writes `retired`, the note stops being delivered, and `index.md` marks it. A `move` rewrites links and writes `moved_from`. Today both are unknown kinds.
 11. `proposals.test.mjs`: in the vault folder, `propose` returns an offer, also under `off`. Today it writes.
 12. `start.test.mjs` or `status.test.mjs`: after `compact`, a session with held offers gets the reminder. Today it doesn't.
-13. `upkeep.test.mjs` (new), in scratch git repositories with no git hooks, as the data repository has none:
+13. Dropped with commits (§11.27). It was `upkeep.test.mjs` (new), in scratch git repositories with no git hooks, as the data repository has none:
     - (a) a user-edited page plus a tool-written `log.md` give two commits, the user's first with `Vault-Change: user`;
     - (b) a page an agent wrote through the Write tool is committed as the agent's;
     - (c) a vault file a shell command wrote during a vault-folder turn is committed as `Vault-Change: unattributed`, not as the user's;
@@ -362,8 +313,8 @@ All of these build on `test/fixture.mjs` and run with `node --test test/*.test.m
     - (h) a note changed within `delivery.settleSeconds` is not rewritten by `lint --fix`.
 
     Today there is no `upkeep.mjs`, and `lint fix()` rewrites unsettled notes.
-14. `plugin.test.mjs`: `hooks/hooks.json` holds the async `startup` entry, and the claude-code adapter declares it. Today it doesn't.
-15. `reminder.test.mjs` or `status.test.mjs`: the status line names the open queue count, the unattended count, a refused commit and an index lock's age. A start with 500 offers on disk stays within the deadline (`test/perf`).
+14. Dropped with the async hook (§11.27). It was `plugin.test.mjs`: `hooks/hooks.json` holds the async `startup` entry, and the claude-code adapter declares it.
+15. `status.test.mjs` and `versions.test.mjs`: the status line names the open queue count and the unattended count, which a `later` decision leaves open, in a project and in the vault folder, and skips a queue line that holds no row; the rules past their version in the session's projects, leaving out a rule with `requires`, a retired rule, a project without the package, and a rule whose `retire` entry is open or dropped; and "no version readers set" only when a rule that reaches the session names a package, in `package` or in `requires`. `review.mjs status` leaves out the same rules and names the project each version was read in, not a project below it. Today the line ends at the proposals mode. `test/perf/latency.perf.mjs`: a start with 2,000 open queue entries takes under 500 ms, and a start that sweeps 500 offers into the queue stays within the start hook's 9-second deadline.
 16. `status.test.mjs`: from fixture sessions in three projects sharing one root file, `review.mjs status` lists the domain candidate. Today the section doesn't exist.
 17. `wiki.test.mjs`: lint warns on two entity pages with one `package`, and on a `## Gotchas` line in another form.
 18. `context-load.test.mjs` is green today and must stay green after the new `propose` fields (§11.6) and the §7 copy. Measured during the panel: tools/list 10,265 of 12,000 characters; with the §7.1 copy, the domain note about 1,563 of 1,600 and the no-domain note about 746 of 850. Little room is left.
@@ -381,7 +332,7 @@ The copy in §7 is approved, so its tests can pin the wording.
 - **Held reply:** "Held `o-…`; nothing is written yet. Don't show it now. Release it with the others when the task is done."
 - **Subagent reply:** "Queued `u-…` for the user's review; nothing is written. Tell your caller what you queued."
 - **Wiki guard refusal:** "`<path>` is a vault page. Outside the vault folder, pages change only through the vault's `propose` tool with `page` and `text`, so the user agrees to each change."
-- **Status line additions:** "· queue 4 (1 unattended)", "· 2 rules past their version here", "· last commit refused: <first line>", "· upkeep skipped: <why>".
+- **Status line additions:** "· queue 4 (1 unattended)", "· 2 rules past their version here". "· last commit refused: <first line>" and "· upkeep skipped: <why>" were dropped with commits (§11.27).
 
 The first line says "end your final reply with what it returns". On a client that prompts, the agent calls `keep` first and the reply says what was kept (§3.1). The line stays as approved; the release reply says which applies.
 
@@ -391,34 +342,35 @@ The first line says "end your final reply with what it returns". On a client tha
 - **Rule guard refusal:** "`<path>` is a rule. Its Do, Not, Because and frontmatter change only through the vault's `propose` tool with `key`, so the user agrees to each change. Add Evidence lines as before."
 - **Queued offer refusal (`keep`):** "Offer `o-…` went to the review queue as `u-…`. Propose it again with `queued: \"u-…\"`."
 - **Release reply, prompt client:** "Call `keep` for each offer below, then say in your final reply what was kept."
-- **Status line additions:** "· git index locked for 2 h", "· no version readers set".
+- **Status line additions:** "· no version readers set". "· git index locked for 2 h" was dropped with commits (§11.27).
+
+### 7.3 Added for phase 5, approved on 2026-11-05
+
+- **Status line, one rule past its version:** "· 1 rule past its version here", the singular of the approved "· 2 rules past their version here".
 
 ## 8. Unverified claims the design leans on
 
 - Claude Code shows parallel `keep` calls as separate prompts, one after another. *(unverified)*
 - The permission prompt shows the whole `offer` argument, a long page diff included, without cutting it. Page-offer consent depends on it. `pages.maxOfferChars` bounds the risk. *(unverified)*
-- In an interactive session, Claude Code lets an async SessionStart hook run to its end after the user closes the session, or kills it safely. The hooks reference says only that `-p` kills it at teardown. Each upkeep step is safe to stop. *(unverified)*
-- Codex supports async hooks. *(unverified; `mcp/launch.mjs` covers it)*
-- A `claude -p` teardown that kills upkeep mid-commit leaves no stale `.git/index.lock`. *(unverified; the status line names a lock's age)*
 - Claude Code exposes no field or variable that marks a `claude -p` run to hooks. `initialUserMessage` is a SessionStart output field, not an input marker. *(unverified; the sweep doesn't depend on it)*
 - The Deny dialog's text field reaches the agent, so the user can say "later" there. *(unverified; the walk asks the question anyway)*
 
-Settled since the first draft: Codex's hooks don't run through `hooks/launch.mjs`. They run `.live/tools/adapters/codex/launch.mjs`, and its server is `mcp/launch.mjs` (`adapters/codex/adapter.mjs:134`, `:143`). The detached spawn from a hook, the first draft's runner, is replaced by the async hook.
+Settled since the first draft: Codex's hooks don't run through `hooks/launch.mjs`. They run `.live/tools/adapters/codex/launch.mjs`, and its server is `mcp/launch.mjs` (`adapters/codex/adapter.mjs:134`, `:143`).
 
 ## 9. Not doing
 
-- No schedule, cron, `/loop` or background agent run. Upkeep is mechanical code. Everything that needs a model waits for a session the user starts (A12).
-- No push and no sync between machines. Automatic commits happen only in the data repository, which has no upstream.
+- No schedule, cron, `/loop` or background agent run. Session start's work is mechanical code. Everything that needs a model waits for a session the user starts (A12).
+- No automatic commit, no push and no sync between machines (§11.27).
 - No web search on its own. `/lint` lists gaps with their searches, as today.
 - No automatic retirement, rewording or move of a rule (A9). Version flags filter delivery only (A10).
 - No readers chosen for the user. `domains.global.readers` stays empty until they set it.
 - No multi-user attribution beyond "user" and "agent" (one user).
-- No change to `docs/design-code-data-split.md` or to where the code lives.
+- No change to where the code lives. The split is dropped (§11.27).
 - No new consent path. Held offers, page offers, rewordings and queue keeps all go through `keep` as today.
 
 ## 10. Recommendation
 
-Extend what exists rather than add parallel paths. Held offers are released before the final reply. Page offers and rule rewordings go through `propose` and `keep`, and the edit hook makes that the only way an agent changes a rule or, from a project, a page. The queue is append-only rows under `raw/queue/`, with a generated `queue.md`, swept without reading transcripts and never fed by a Deny. Version flags are worked out at delivery from a new `checked_with` field, once the user names readers. Automatic commits wait for the code/data split and happen only in its data repository: an async SessionStart hook runs `upkeep.mjs`, which commits through its own lint gate and keeps clear of the user's own git work. §12 gives the build order. The `/lint` walk is one `keep` prompt per entry.
+Extend what exists rather than add parallel paths. Held offers are released before the final reply. Page offers and rule rewordings go through `propose` and `keep`, and the edit hook makes that the only way an agent changes a rule or, from a project, a page. The queue is append-only rows under `raw/queue/`, with a generated `queue.md`, swept without reading transcripts and never fed by a Deny. Version flags are worked out at delivery from a new `checked_with` field, once the user names readers. Session start counts what waits for the user in the status line. Nothing commits on its own; the user commits the vault (§11.27). §12 gives the build order. The `/lint` walk is one `keep` prompt per entry.
 
 ## 11. Decisions
 
@@ -431,25 +383,27 @@ The user took every recommended option on 2026-11-03, and then the independent r
 5. **`corrections` mode:** kept as the user's opt-in through `proposals`. Not chosen: removed under A9.
 6. **Page offers:** extend `propose` and `keep`, told apart from a stated `page` by `text`, as long as `test/context-load.test.mjs` stays green. If it doesn't, this comes back to the user. Not chosen: a new `page` tool.
 7. **Where the queue lives:** `raw/queue/` rows plus a generated `queue.md`. Not chosen: `.state/queue/`; a hand-editable `queue.md`.
-8. **Where session-start commits run:** an async SessionStart hook with `matcher: "startup"`, and `mcp/launch.mjs` for clients without async hooks. Decided after the review; it replaces a detached spawn from `hooks/launch.mjs`, which can't tell a fresh start from a resume (§3.6, option B). Built with the split (§12). Not chosen: in the hook under the deadline; only from `keep` and `/lint`.
+8. **Where session-start commits run:** an async SessionStart hook with `matcher: "startup"`, and `mcp/launch.mjs` for clients without async hooks. Decided after the review; it replaces a detached spawn from `hooks/launch.mjs`, which can't tell a fresh start from a resume (§3.6, option B). Built with the split (§12). Not chosen: in the hook under the deadline; only from `keep` and `/lint`. Dropped with §11.27.
 9. **Branch gate:** dropped with §11.17. The data repository holds no code branches. It was: commit only when HEAD is on `commits.branch`, default `main`.
 10. **Link fixes inside rule notes at session start:** not a rule change, since the delivered text is unchanged. Not chosen: limit session-start fixes to pages and generated files.
 11. **Retiring a rule:** a `retired` field that keeps the note and its links. Not chosen: deleting the note.
 12. **File back from project sessions** (`AGENTS.md`): becomes a page offer under the wiki guard. Not chosen: a direct write.
 13. **The `/lint` walk:** the `keep` prompt first, with a question only after a Deny. Not chosen: a question first, then the prompt.
 14. **Where session start names what waits (A12's "start line"):** the user's status line, which costs no context. Not chosen: a start line the agent also sees.
-15. **Defaults:** sweep after 12 hours quiet; 3 rules for an entity page or a roll-up; 2 projects for a domain suggestion; upkeep at most every 10 minutes.
+15. **Defaults:** sweep after 12 hours quiet; 3 rules for an entity page or a roll-up; 2 projects for a domain suggestion. Upkeep at most every 10 minutes was dropped with §11.27.
 16. **The copy in §7.1:** approved as drafted.
-17. **Keeping automatic commits off the upstream:** reversed after the panel review. Automatic commits wait for option A of the code/data split and happen only in its data repository. Not chosen: a pre-push guard on `Vault-Change:` commits, which would refuse every push of `main` after the first automatic commit, and whose only way through publishes the data.
+17. **Keeping automatic commits off the upstream:** reversed after the panel review. Automatic commits wait for option A of the code/data split and happen only in its data repository. Not chosen: a pre-push guard on `Vault-Change:` commits, which would refuse every push of `main` after the first automatic commit, and whose only way through publishes the data. Dropped with §11.27.
 18. **Held rules under `corrections` mode:** held, then written at release without a prompt, since the mode is the user's consent; page changes still need `keep`. Not chosen: offered as in `ask`.
 19. **Gotchas under `off` mode:** captured only when the user asks, as `off` means today. Not chosen: held and offered anyway.
 20. **A project that lacks a rule's package:** the rule isn't delivered there, as for `requires`. Not chosen: delivered, labelled `version unknown`.
 21. **Readers for `global`:** left for the user to name in `domains.global.readers`, with `review.mjs status` saying none are set. Not chosen: default readers in the design, which would put ecosystem names into `tools/`.
 22. **Changes to an existing rule:** an explicit `change` field (`reword`, `retire`, `move`) with `key`, so one field doesn't carry three meanings.
 23. **Long page offers:** refused above `pages.maxOfferChars`, never cut, so the user approves only what the prompt shows.
-24. **Shell writes in the vault folder:** committed as unattributed, since the Stop hook can't tell a shell write from the user's save.
-25. **Unattended fixes:** upkeep's `lint --fix` rewrites settled notes only.
+24. **Shell writes in the vault folder:** committed as unattributed, since the Stop hook can't tell a shell write from the user's save. Dropped with §11.27.
+25. **Unattended fixes:** upkeep's `lint --fix` rewrites settled notes only. Dropped with §11.27.
 26. **The copy in §7.2:** approved as drafted.
+27. **The code/data split and automatic commits:** dropped on 2026-11-05. The vault is personal, so separating its code from its data isn't worth the split's cost. Without the split, automatic commits would land on the plugin's upstream `main` (§11.17). An independent review then found they add little on their own terms: a note reaches sessions as soon as it is written, committed or not, and an automatic commit in a checkout that concurrent sessions share can take in another session's unfinished work. Phase 5 keeps the status-line counts, which need neither. A12's "commit it" and A14 are not built; the user commits the vault as before. Not chosen: the split with automatic commits in its data repository (§11.8, §11.17); automatic commits on `main` without it.
+28. **A dropped retirement:** decided on 2026-11-05. A rule whose `retire` entry is open or dropped leaves the status line's past-version count and `/lint`'s list. While the entry is open, the queue count alone shows it. A drop is final, even if the project later moves on again; the rule still isn't delivered where its version has moved on. Not chosen: leave out only an open entry, so a dropped rule is counted and drafted again at every `/lint`; after a drop, draft a reword that moves `checked_with` up to the project's version.
 
 ## 12. Build order
 
@@ -458,7 +412,7 @@ Each phase ships with its checks from §6 green.
 1. **Queue and held offers.** `hold`, `release`, the sweep with `last_prompt`, `denied`, the queue files and `queue.mjs`, subagent queueing, the compaction reminder. Checks 4, 6, 7, 8, 12.
 2. **Page and rule guards.** Page offers, the wiki guard, the rule guard, `change: reword`, the vault folder offering instead of writing, the `/lint` and `/ingest` skill steps. Checks 1, 2, 3, 5, 11, 17, 18.
 3. **Versions, retirement and moves.** `package`, `checked_with`, readers for every project, `retire`, `move`, domain and page candidates in `review.mjs status`. Checks 9, 10, 16.
-4. **The code/data split**, option A of `docs/design-code-data-split.md`, built as that design says.
-5. **Upkeep and commits,** in the data repository: the async hook, `upkeep.mjs`, the ledger, `commitPaths` with its lint gate, the status-line counts. Checks 13, 14, 15.
+4. **The code/data split.** Dropped (§11.27).
+5. **Status-line counts.** The open queue entries and how many are unattended, the rules past their version in the session's projects, and "no version readers set". Check 15. The async hook, `upkeep.mjs`, the ledger and `commitPaths` were dropped with phase 4 (§11.27).
 
-Phases 1 to 3 write files and commit nothing. Until phase 5, the user commits the vault as today.
+No phase commits. The user commits the vault as today.

@@ -6,11 +6,12 @@ import {
 import {
   clip, normTopic, topicNotes, loadNotes, liveRules, evidenceSessions, validDay, byKey, cmp, sharedFiles, resolver, linkedKeys, evidenceSources, isSourcePage, joinList,
   rankPair, sourceItem, fitIn, readDerived, isDocSet, folderNames, unverifiedNow, packageId, comparedKeys, isTopicPage, linksUnder, byTopic, noteKeys,
-  hasRequires, filled,
+  namesPackage, checkedWithOnly, hasRequires, pastVersions, filled,
 } from './lib/rules.mjs';
 import { lint, tally } from './lib/lint.mjs';
 import { lintRan, lintDone, tidy, trackedSessions, sessionDomains, sessionName, sessionHits } from './lib/sessions.mjs';
-import { readerNames, liveRoots, projectVersions, movedOnFrom, rootOutside } from './lib/versions.mjs';
+import { anyReaders, liveRoots, projectVersions, rootOutside } from './lib/versions.mjs';
+import { retirementsAsked } from './lib/queue.mjs';
 import { subjectRows, liveRows, newestFirst, projectName } from './lib/picks.mjs';
 import { UsageError } from './lib/input.mjs';
 import { refSources, sourceVersion, sourceChains, noteCitations, newerCopies } from './lib/sources.mjs';
@@ -224,23 +225,31 @@ function queueDrops() {
     .map(r => `- ${r.decides} · ${keyOf.get(r.decides) ?? 'no entry'} · dropped ${localDay(r.at)} in session ${sessionName(String(r.session), r.agent)}`);
 }
 
-const anyReaders = () => ['global', ...Object.keys(config().domains)].some(d => readerNames(d).length);
-const knowledgeWithPackage = () => liveNotes().filter(([, r]) => r.kind === 'knowledge' && packageId(r.package));
+const knowledgeWithPackage = () => liveNotes().filter(([, r]) => namesPackage(r));
 
-// /lint drafts a reword that fills each version in, once a reader can say what it is.
+// /lint drafts a reword that fills each version in, once a reader can say what it is. A requires the user wrote wins over
+// checked_with, so a rule with one needs none.
 function uncheckedVersions() {
   if (!anyReaders()) return ['No version readers set.'];
-  return knowledgeWithPackage().filter(([, r]) => !r.checked_with).map(([k, r]) => `- ${k}: ${packageId(r.package)}`);
+  return knowledgeWithPackage().filter(([, r]) => !r.checked_with && !hasRequires(r)).map(([k, r]) => `- ${k}: ${packageId(r.package)}`);
 }
 
-// Every project a reader has read, not only this folder's, since /lint drafts a retirement for each rule listed. A
-// requires the user wrote wins over checked_with, as at delivery.
+// The versions read at one project root: those of the domains whose project it is, and global's. A domain whose project
+// is a folder above it is read at that folder, its own root, so each version is named for the folder it was read in.
+function rootVersions(root) {
+  const own = domainsFor(root).filter(h => pathKey(h.root) === pathKey(root));
+  return projectVersions(own, root, root);
+}
+
+// Every project a reader has read, not only this folder's, since /lint drafts a retirement for each rule listed. A rule
+// whose retirement is open, or the user dropped, is left out.
 function pastVersion() {
-  const rules = knowledgeWithPackage().filter(([, r]) => r.checked_with && !hasRequires(r));
+  const asked = retirementsAsked();
+  const rules = liveNotes().filter(([k, r]) => checkedWithOnly(r) && !asked.has(k));
   if (!rules.length) return [];
-  const projects = liveRoots().map(root => ({ root, versions: projectVersions(domainsFor(root), root) }));
+  const projects = liveRoots().map(root => ({ root, versions: rootVersions(root) }));
   return rules.flatMap(([k, r]) => {
-    const found = projects.flatMap(({ root, versions }) => movedOnFrom(r.package, r.checked_with, r.domain, versions).map(v => `${v} in ${root}`));
+    const found = projects.flatMap(({ root, versions }) => pastVersions(r, versions).map(v => `${v} in ${root}`));
     return found.length ? [`- ${k}: checked with ${r.checked_with} · ${packageId(r.package)} ${joinList(found, 'and')}`] : [];
   });
 }
