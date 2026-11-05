@@ -1,10 +1,16 @@
-import { config, plural, toPosix, guarded, hookErrors, errorsLog, localDay, appendLog, isVaultOnly, sessionReach, cwdOf, queueRows } from './lib/vault.mjs';
+import fs from 'node:fs';
+import path from 'node:path';
+import {
+  config, plural, toPosix, pathKey, guarded, hookErrors, errorsLog, localDay, appendLog, isVaultOnly, sessionReach, cwdOf, queueRows, isMarkerName, domainsFor, isFileAt,
+} from './lib/vault.mjs';
 import {
   clip, normTopic, topicNotes, loadNotes, liveRules, evidenceSessions, validDay, byKey, cmp, sharedFiles, resolver, linkedKeys, evidenceSources, isSourcePage, joinList,
-  rankPair, sourceItem, fitIn, readDerived, isDocSet, folderNames, unverifiedNow,
+  rankPair, sourceItem, fitIn, readDerived, isDocSet, folderNames, unverifiedNow, packageId, comparedKeys, isTopicPage, linksUnder, byTopic, noteKeys,
+  hasRequires, filled,
 } from './lib/rules.mjs';
 import { lint, tally } from './lib/lint.mjs';
-import { lintRan, lintDone, tidy, trackedSessions, sessionDomains, sessionName } from './lib/sessions.mjs';
+import { lintRan, lintDone, tidy, trackedSessions, sessionDomains, sessionName, sessionHits } from './lib/sessions.mjs';
+import { readerNames, liveRoots, projectVersions, movedOnFrom, rootOutside } from './lib/versions.mjs';
 import { subjectRows, liveRows, newestFirst, projectName } from './lib/picks.mjs';
 import { UsageError } from './lib/input.mjs';
 import { refSources, sourceVersion, sourceChains, noteCitations, newerCopies } from './lib/sources.mjs';
@@ -58,17 +64,19 @@ const liveNotes = once(() => {
   return Object.entries(liveRules(notes())).sort(byKey).map(([k, r]) => [k, r, byNote.get(k)]);
 });
 const tracked = once(trackedSessions);
+// A session shown a rule before its move recorded the key it had then.
+const shownTo = (t, n) => noteKeys(n).some(k => t.keys.has(k));
 
 // Sessions are known only by the prefix an Evidence line gives; one whose markers were pruned, or that ran before
 // the hooks recorded deliveries, is unknown.
 function correctedAgain() {
-  const seen = (s, k) => {
+  const seen = (s, n) => {
     const t = tracked().find(x => x.id.startsWith(s));
-    return !t ? 'unknown' : t.keys.has(k) ? 'shown' : 'not shown';
+    return !t ? 'unknown' : shownTo(t, n) ? 'shown' : 'not shown';
   };
   return liveNotes().flatMap(([k, , n]) => {
     const later = evidenceSessions(n).slice(1);
-    return later.length ? [`- ${k}: ${later.map(s => `session ${s} ${seen(s, k)}`).join(', ')}`] : [];
+    return later.length ? [`- ${k}: ${later.map(s => `session ${s} ${seen(s, n)}`).join(', ')}`] : [];
   });
 }
 
@@ -77,7 +85,7 @@ function neverShown() {
   const registered = tracked().filter(t => t.cwd !== null);
   const domains = new Map(registered.map(t => [t.id, sessionDomains(t.id, t.cwd)]));
   return liveNotes().flatMap(([k, r, n]) => {
-    if (tracked().some(t => t.keys.has(k))) return [];
+    if (tracked().some(t => shownTo(t, n))) return [];
     const created = validDay(n.data.created) ? n.data.created : '';
     const behind = new Set(evidenceSessions(n));
     const missed = registered.filter(t => (r.domain === 'global' || domains.get(t.id).includes(r.domain))
@@ -89,7 +97,7 @@ function neverShown() {
 function globPairs() {
   const rules = liveNotes().filter(([, r]) => r.applies_to?.length);
   // Knowledge rules rank first by how their versions fit the projects this folder reaches.
-  const fit = fitIn(sessionReach(cwdOf({})));
+  const fit = fitIn(sessionReach(cwdOf({})), cwdOf({}));
   const order = (na, nb) => {
     const rank = rankPair(na, nb, { fit });
     return !rank ? '' : ` · ${rank.first ? `${rank.first.key} ranks first` : 'neither ranks first'}: ${rank.why}`;
@@ -216,6 +224,104 @@ function queueDrops() {
     .map(r => `- ${r.decides} · ${keyOf.get(r.decides) ?? 'no entry'} · dropped ${localDay(r.at)} in session ${sessionName(String(r.session), r.agent)}`);
 }
 
+const anyReaders = () => ['global', ...Object.keys(config().domains)].some(d => readerNames(d).length);
+const knowledgeWithPackage = () => liveNotes().filter(([, r]) => r.kind === 'knowledge' && packageId(r.package));
+
+// /lint drafts a reword that fills each version in, once a reader can say what it is.
+function uncheckedVersions() {
+  if (!anyReaders()) return ['No version readers set.'];
+  return knowledgeWithPackage().filter(([, r]) => !r.checked_with).map(([k, r]) => `- ${k}: ${packageId(r.package)}`);
+}
+
+// Every project a reader has read, not only this folder's, since /lint drafts a retirement for each rule listed. A
+// requires the user wrote wins over checked_with, as at delivery.
+function pastVersion() {
+  const rules = knowledgeWithPackage().filter(([, r]) => r.checked_with && !hasRequires(r));
+  if (!rules.length) return [];
+  const projects = liveRoots().map(root => ({ root, versions: projectVersions(domainsFor(root), root) }));
+  return rules.flatMap(([k, r]) => {
+    const found = projects.flatMap(({ root, versions }) => movedOnFrom(r.package, r.checked_with, r.domain, versions).map(v => `${v} in ${root}`));
+    return found.length ? [`- ${k}: checked with ${r.checked_with} · ${packageId(r.package)} ${joinList(found, 'and')}`] : [];
+  });
+}
+
+// A session's projects: the roots of its domains, or the work tree its cwd is in.
+const projectsOf = t => {
+  const hits = sessionHits(t.id, t.cwd);
+  return hits.length ? hits.map(h => h.root) : [rootOutside(hits, t.cwd)].filter(Boolean);
+};
+// A marker is a file or a link to one, as reach reads it. A worktree's or submodule's .git file marks no kind of project.
+const rootFiles = root => {
+  try {
+    return fs.readdirSync(root, { withFileTypes: true })
+      .filter(e => (e.isFile() || (e.isSymbolicLink() && isFileAt(path.join(root, e.name)))) && isMarkerName(e.name) && e.name.toLowerCase() !== '.git')
+      .map(e => e.name);
+  } catch { return []; }
+};
+
+// A file every project shown a global rule has at its root, and some other project lacks, marks the kind of project the
+// rule is about. No name is built in. A name every project has is in every other project too, so it marks none.
+function domainCandidates() {
+  const registered = tracked().filter(t => t.cwd !== null).map(t => ({ t, roots: projectsOf(t) }));
+  const files = new Map();
+  for (const { roots } of registered) for (const root of roots) if (!files.has(pathKey(root))) files.set(pathKey(root), new Set(rootFiles(root)));
+  const [any, ...more] = files.values();
+  const everywhere = new Set([...(any ?? [])].filter(name => more.every(f => f.has(name))));
+  const byName = new Map();
+  for (const [k, r, n] of liveNotes()) {
+    if (r.domain !== 'global' || !r.applies_to?.length) continue;
+    const shown = new Set(registered.filter(x => shownTo(x.t, n)).flatMap(x => x.roots.map(root => pathKey(root))));
+    if (shown.size < config().suggestAfterProjects) continue;
+    const [first, ...rest] = [...shown].map(root => files.get(root));
+    for (const name of first) {
+      if (everywhere.has(name) || !rest.every(f => f.has(name))) continue;
+      const got = byName.get(name) ?? byName.set(name, { roots: new Set(), rules: [] }).get(name);
+      for (const root of shown) got.roots.add(root);
+      got.rules.push(k);
+    }
+  }
+  return [...byName].sort(([a], [b]) => cmp(a, b)).map(([name, { roots, rules }]) => `- ${name}: ${plural(roots.size, 'project')} · ${rules.join(', ')}`);
+}
+
+const pagesOf = kind => notes().filter(n => n.type === 'page' && n.kind === kind);
+
+function entityCandidates() {
+  const paged = new Set(pagesOf('entity').map(n => packageId(n.data.package)).filter(Boolean));
+  const byPackage = new Map();
+  for (const [k, r] of knowledgeWithPackage()) {
+    const id = packageId(r.package);
+    if (!paged.has(id)) byPackage.set(id, [...(byPackage.get(id) ?? []), k]);
+  }
+  return [...byPackage].filter(([, keys]) => keys.length >= config().pages.entityAfterRules).sort(byKey)
+    .map(([id, keys]) => `- ${id}: ${plural(keys.length, 'rule')} · ${keys.join(', ')}`);
+}
+
+// Two entity pages in one domain that do the same job, with no synthesis page comparing them.
+function comparisonCandidates() {
+  const compared = pagesOf('synthesis').map(n => new Set(comparedKeys(n, resolve())));
+  const byJob = new Map();
+  for (const n of pagesOf('entity')) {
+    if (!filled(n.data.job)) continue;
+    const job = `${n.domain}|${n.data.job.trim().toLowerCase()}`;
+    byJob.set(job, [...(byJob.get(job) ?? []), n]);
+  }
+  return [...byJob.values()].flatMap(pages => pages.flatMap((a, i) => pages.slice(i + 1).flatMap(b => (
+    compared.some(keys => keys.has(a.key) && keys.has(b.key)) ? [] : [`- ${a.key} and ${b.key}: ${a.data.job.trim()}`]))));
+}
+
+// A topic page links its rules under ## Rules, so a session that reads it finds them all.
+function rollupCandidates() {
+  const pages = byTopic(notes().filter(isTopicPage));
+  return [...topicNotes(notes())].flatMap(([d, topics]) => [...topics].flatMap(([t, rules]) => {
+    if (rules.length < config().pages.rollupAfterRules) return [];
+    const page = pages.get(d)?.get(t)?.[0];
+    if (!page) return [`- ${d}, ${t}: ${plural(rules.length, 'rule')}, no topic page`];
+    const linked = new Set(linksUnder(page, 'Rules').map(x => resolve()(x)));
+    const missing = rules.map(r => r.key).filter(k => !linked.has(k));
+    return missing.length ? [`- ${d}, ${t}: ${page.rel} doesn't link ${joinList(missing, 'or')} under ## Rules`] : [];
+  })).sort();
+}
+
 const status = () => [
   lintLine(), '', 'Hook health', ...hookHealth(),
   ...section('Listed topics no rule has yet', emptyTopics),
@@ -228,6 +334,12 @@ const status = () => [
   ...section("Quotes lint can't check", uncheckedQuotes),
   ...section('Provisional picks not yet confirmed', provisional),
   ...section('Review queue entries dropped', queueDrops),
+  ...section('Knowledge rules with a package and no checked_with', uncheckedVersions),
+  ...section('Rules past their version in a project', pastVersion),
+  ...section('Global rules that keep matching one kind of project', domainCandidates),
+  ...section('Libraries with enough rules for an entity page', entityCandidates),
+  ...section('Entity pages that do the same job, with no comparison', comparisonCandidates),
+  ...section('Topics whose rules need a topic page to roll them up', rollupCandidates),
   ...section('Sources in raw/refs/ no source page names', () => unnamedSources().map(f => `- ${f}`)),
 ].join('\n');
 

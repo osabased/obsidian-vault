@@ -1,7 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import {
-  config, vaultPath, statePath, stateDir, readJson, readJsonSafe, writeJson, appendJsonl, safeId, shortHash, logError, guarded, hookErrors, errorsLog, domainsFor, sessionReach, toPosix, inVaultFolder, isVaultOnly, olderThan,
+  config, vaultPath, statePath, stateDir, readJson, readJsonSafe, writeJson, appendJsonl, safeId, shortHash, logError, guarded, hookErrors, errorsLog, domainsFor, sessionReach, pathKey, inVaultFolder, isVaultOnly, olderThan,
 } from './vault.mjs';
 import { noteTimes } from './cache.mjs';
 import { sessionIds, shortName } from './agents.mjs';
@@ -76,7 +76,7 @@ export function addReach(sid, { domain, root }) {
   writeJson(file, { ...entry, reach: { cwd, domains, roots } });
 }
 
-const samePath = (a, b) => Boolean(a && b) && toPosix(a).toLowerCase() === toPosix(b).toLowerCase();
+const samePath = (a, b) => Boolean(a && b) && pathKey(a) === pathKey(b);
 
 const recorded = (entry, cwd) => (entry?.reach && samePath(entry.reach.cwd, cwd) ? entry.reach : {});
 const domainsIn = (entry, cwd) => {
@@ -106,7 +106,7 @@ export function sessionRoots(entry) {
     : reach ? sessionReach(reach.cwd) : [];
   const first = reach && samePath(reach.cwd, entry?.cwd) ? [] : sessionReach(entry?.cwd);
   const all = [...latest, ...first].filter(r => typeof r?.domain === 'string' && typeof r?.root === 'string').map(({ domain, root }) => ({ domain, root }));
-  const keys = all.map(r => `${r.domain}|${toPosix(r.root).toLowerCase()}`);
+  const keys = all.map(r => `${r.domain}|${pathKey(r.root)}`);
   return all.filter((r, i) => keys.indexOf(keys[i]) === i);
 }
 
@@ -299,19 +299,47 @@ export function shownInContext(sid) {
   return { rules: keys([...allKeys('excerpts', id)].filter(m => m.startsWith('shown|'))), pages: keys([...allKeys('pages', id)]) };
 }
 
-// A marker holds its id, in which a rule's wording hash follows its key. The session whose evidence changed a rule's
-// wording already has it in mind, so its markers move to the new hash and only other sessions get the rule again.
-export const carryMarkers = (sid, key, from, to) => guarded('carry markers', () => {
-  for (const kind of ['gate', 'excerpts']) {
-    const moved = [];
-    for (const id of allKeys(kind, safeId(sid))) {
-      const parts = id.split('|');
-      const i = parts.indexOf(key);
-      if (i >= 0 && parts[i + 1] === from) moved.push(parts.with(i + 1, to).join('|'));
+// The markers that name a rule by its key, split at |: gate and excerpts ids, where its wording hash follows the key,
+// repeats ids (slug|key|hash), and delivered, the bare key.
+const CARRIED = ['gate', 'excerpts', 'repeats', 'delivered'];
+
+// Copies each marker an edit maps to a new id, in the sessions dirsOf lists for a kind, reading each session's markers
+// of a kind once. An edit returns the new parts, or null to leave the marker.
+function carry(dirsOf, edits) {
+  for (const kind of CARRIED) {
+    for (const id of dirsOf(kind)) {
+      const moved = [];
+      for (const m of allKeys(kind, id)) {
+        const parts = m.split('|');
+        for (const edit of edits) {
+          const next = edit(parts);
+          if (next) { moved.push(next.join('|')); break; }
+        }
+      }
+      markMany(kind, id, moved);
     }
-    markMany(kind, sid, moved);
   }
-});
+}
+
+const rehash = ({ key, from, to }) => parts => {
+  const i = parts.indexOf(key);
+  return i >= 0 && parts[i + 1] === from ? parts.with(i + 1, to) : null;
+};
+const rekey = (from, to) => parts => (parts.includes(from) ? parts.map(x => (x === from ? to : x)) : null);
+
+function sessionDirs(kind) {
+  try { return fs.readdirSync(vaultPath('.state', kind)); } catch (e) { if (!stray(e)) throw e; }
+  return [];
+}
+
+// The session whose evidence changed a rule's wording already has it in mind, so its markers move to the new hash and
+// only other sessions get the rule again.
+export const carryMarkers = (sid, key, from, to) => guarded('carry markers', () => carry(() => [safeId(sid)], [rehash({ key, from, to })]));
+
+// A move changes a rule's key and keeps its wording, so every session's markers for the old key are copied to the new
+// one, and a session shown the rule before the move isn't shown it again. rehashed lists the other rules, { key, from,
+// to }, whose wording changed only in the links the move rewrote, and their markers move to the new hash the same way.
+export const carryMove = (from, to, rehashed = []) => guarded('carry markers', () => carry(sessionDirs, [rekey(from, to), ...rehashed.map(rehash)]));
 
 // The registered sessions, with their folder and when they were last seen, and the others the hooks recorded
 // deliveries for, each with the rules it was shown.

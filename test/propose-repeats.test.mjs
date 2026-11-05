@@ -1,9 +1,12 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
 import { makeVault, ruleNote, userTurn, sessionId, denied, editFile as edit, unrelatedRules, proposeAtOnce } from './fixture.mjs';
 import { setField, parse } from '../tools/lib/frontmatter.mjs';
 import { sessionVar } from '../tools/adapters/claude-code/adapter.mjs';
+import { codexInput } from './codex.mjs';
 
 function setup(t, { quote } = {}) {
   const v = makeVault(t);
@@ -312,4 +315,40 @@ test('propose and pick refuse a missing or unknown session before they read thei
     assert.equal(unknown.code, 1, script);
     assert.match(unknown.stderr, /has no session/, script);
   }
+});
+
+const ledgerFailure = o => ({
+  domain: 'almanac', kind: 'knowledge', topic: 'ledger', basis: 'failure', error: 'TypeError: ledger.shut is not a function', fix: 'Called ledger.close.', file: 'src/ledger.txt',
+  slug: 'ledger-shut', do: 'Close a ledger with ledger.close.', not: 'Call ledger.shut.', keywords: ['shutz'], ...o,
+});
+const checkedRule = (v, checked) => v.write('wiki/almanac/rules/ledger-close.md', ruleNote({
+  domain: 'almanac', topic: 'ledger', kind: 'knowledge', basis: 'source', applies_to: ['src/**'], doLine: 'Close the ledger zz.', notLine: 'Leave the ledger open.',
+  extra: ['as_of: 2026-10-01', 'package: { ecosystem: fixture, name: pkg }', `checked_with: '${checked}'`],
+  evidence: ['- 2026-10-01 · source · session 1a2b3c4d · raw/refs/ledger-guide.md · dated 2026-10-01 · "openLedger takes a path and returns the ledger" (a-00000002)'],
+}));
+
+test('a session resumed in another folder reads the package version in the folder it is in now', t => {
+  const v = makeVault(t, { presets: ['almanac'], config: { proposals: 'corrections' } });
+  const away = fs.mkdtempSync(path.join(os.tmpdir(), 'vault-first-'));
+  t.after(() => fs.rmSync(away, { recursive: true, force: true }));
+  const sid = sessionId();
+  v.startSession(sid, { cwd: away });
+  v.startSession(sid, { cwd: v.projects.almanac });
+  const propose = () => v.propose(sid, ledgerFailure({ package: 'fixture/pkg' }));
+  const first = propose();
+  const r = /may repeat/.test(first.stderr) ? propose() : first;
+  assert.equal(r.code, 0, r.stderr);
+  assert.match(r.stdout, /Checked with fixture\/pkg 2\.4\.0\./, r.stdout);
+});
+
+test("under corrections, evidence from a session that agrees by code and has no transcript is written without moving the rule's checked_with", t => {
+  const v = makeVault(t, { presets: ['almanac'], config: { agents: ['claude-code', 'codex'], proposals: 'corrections' } });
+  checkedRule(v, '2.1.0');
+  const sid = '019a0fb1-cccc-7000-8000-000000000101';
+  v.hook('session-start', codexInput('SessionStart', { session_id: sid, cwd: v.projects.almanac, transcript_path: null }), { agent: 'codex' });
+  const r = v.propose(sid, ledgerFailure({ repeats: 'almanac/ledger-close' }));
+  assert.equal(r.code, 0, r.stderr);
+  const note = v.read('wiki/almanac/rules/ledger-close.md');
+  assert.match(note, /· failure · .*TypeError: ledger\.shut is not a function/);
+  assert.match(note, /^checked_with: '2\.1\.0'\r?$/m);
 });

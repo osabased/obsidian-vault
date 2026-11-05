@@ -351,3 +351,35 @@ test('lint warns on a ## Gotchas or ## Docs read line in another form', async t 
   const found = await lintFound(v, /## Gotchas|## Docs read/);
   assert.deepEqual(found.map(f => f.msg.match(/It breaks on Tuesdays|the zq docs/)?.[0]).sort(), ['It breaks on Tuesdays', 'the zq docs']);
 });
+
+test('lint warns on a job outside an entity page and on compares that names fewer than two entity pages', async t => {
+  const v = makeVault(t);
+  v.write('wiki/glim/entities/zq-lib.md', page({ kind: 'entity', extra: ['job: parse screens'] }));
+  v.write('wiki/glim/entities/zr-lib.md', page({ kind: 'entity', extra: ['job: parse screens'] }));
+  v.write('wiki/glim/concepts/screens.md', page({ kind: 'concept', extra: ['job: parse screens'] }));
+  v.write('wiki/glim/syntheses/zq-or-zr.md', page({ kind: 'synthesis', extra: ['compares: [glim/zq-lib, glim/zr-lib]'] }));
+  v.write('wiki/glim/syntheses/zq-alone.md', page({ kind: 'synthesis', extra: ['compares: [glim/zq-lib, glim/screens]'] }));
+  const found = await lintFound(v, /\bjob\b|compares/);
+  assert.deepEqual(found.map(f => [f.file, f.msg]).sort(), [
+    ['wiki/glim/concepts/screens.md', 'job is for entity pages, the task the library does'],
+    ['wiki/glim/syntheses/zq-alone.md', 'compares must list two or more entity pages by key, such as [global/react, global/vue]'],
+  ]);
+});
+
+test('lint warns on a synthesis page whose compares is empty, and goes on', async t => {
+  const v = makeVault(t);
+  v.write('wiki/glim/syntheses/empty.md', page({ kind: 'synthesis', extra: ['compares:'] }));
+  assert.equal((await lintFound(v, /^compares must list two or more entity pages/)).length, 1);
+});
+
+test('a rule whose retired is not a day is listed as not delivered, and the session start and search name it', async t => {
+  const v = makeVault(t);
+  v.write('wiki/glim/rules/typo.md', ruleNote({ keywords: ['typo'], doLine: 'Spell the thing.', extra: ['retired: someday'] }));
+  v.run('build.mjs');
+  const line = v.read('index.md').split('\n').find(l => l.includes('typo|'));
+  assert.match(line, / · not delivered: retired must be the day the rule was retired, as YYYY-MM-DD/);
+  assert.doesNotMatch(line, /retired on/);
+  assert.match(v.run('search.mjs', ['spell']).stdout, /glim\/typo .* · not delivered: retired must be the day/);
+  const start = v.startSession('9f8e7d6c-0000-4000-8000-000000000005', { cwd: v.project });
+  assert.match(start?.hookSpecificOutput?.additionalContext ?? '', /glim\/typo \(retired must be the day/);
+});

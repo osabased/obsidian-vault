@@ -1,6 +1,6 @@
 import { sessionReach, isQuiet, vaultPath, toPosix, guarded, config, plural, clock, daysBetween, skipIfLocked } from '../vault.mjs';
 import { statusLine } from '../status.mjs';
-import { alwaysContext, alwaysIn, fitContext, indexNote, scopeTopics, loadNotesAsync, settledNotes, deliveryFor, readDerived, clip, undelivered, knownDomain, joinList } from '../rules.mjs';
+import { alwaysContext, alwaysIn, fitContext, indexNote, scopeTopics, loadNotesAsync, settledNotes, deliveryFor, readDerived, clip, undelivered, knownDomain, joinList, isRetired } from '../rules.mjs';
 import { build } from '../build.mjs';
 import { remaining } from '../deadline.mjs';
 import { changedSinceBuild, noteTimes, refStats } from '../cache.mjs';
@@ -22,7 +22,7 @@ function errorsNote() {
 // Notes go live without a commit, so a note an error keeps from delivery would otherwise go unnoticed until /lint.
 // A session in this folder also hears of notes outside any domain in vault.config.json.
 function undeliveredNote(scope, vaultFolder, notes) {
-  const broken = notes.filter(n => !n.superseded_by && (scope.includes(n.domain) || (vaultFolder && !knownDomain(n.domain))))
+  const broken = notes.filter(n => !isRetired(n) && (scope.includes(n.domain) || (vaultFolder && !knownDomain(n.domain))))
     .flatMap(n => {
       const why = undelivered(n);
       return why ? [`${n.key} (${clip(why, 120)})`] : [];
@@ -87,7 +87,7 @@ export async function start(event, agent) {
     derived = undefined;
     skipIfLocked(() => build({ waitMs: Math.min(2000, remaining()), refs }));
   });
-  const view = viewOf(reach, settledNotes(notes), deliveryFor(hits, derived && { derived }));
+  const view = viewOf(reach, settledNotes(notes), deliveryFor(hits, derived && { derived }, event.cwd));
   const { notes: ready, ctx, rules } = view;
   const always = alwaysContext(reach.always, rules);
   const topics = guarded('index note', () => scopeTopics(readable, ready), []);

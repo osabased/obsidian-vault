@@ -39,8 +39,9 @@ const fields = () => [
   { name: 'release', type: 'boolean', help: ['true, alone: returns every offer this session holds'] },
   { name: 'queued', type: S, help: ['the id of a review queue entry (u-) to offer again; besides it, only asked, and repeats or slug for a rule entry'] },
   { name: 'text', type: S, help: ["with page: a page change, the page's whole new text. Always an offer"] },
-  { name: 'change', type: S, label: 'change, key', enum: ['reword'], help: ["reword, with the rule's key: replaces the do, not, because, applies_to or keywords you give;", 'it needs a basis like a new rule'] },
-  { name: 'key', type: S, describe: 'see change' },
+  { name: 'package', type: S, help: ['knowledge only: the library the rule is about, as ecosystem/name like npm/react'] },
+  { name: 'change', type: S, label: 'change, key', enum: ['reword', 'retire', 'move'], help: ["with the rule's key. reword replaces the do, not, because, applies_to, keywords or checked_with you", 'give and needs a basis like a new rule, unless it gives checked_with alone; retire takes because and', 'superseded_by; move takes domain'] },
+  ...['key', 'superseded_by', 'checked_with'].map(name => ({ name, type: S, describe: 'see change' })),
 ];
 
 const help = () => renderHelp([RUN, '', 'rule.json is an object with these fields:'], fields(), [

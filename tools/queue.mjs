@@ -1,5 +1,7 @@
 import { localDay } from './lib/vault.mjs';
-import { proposeRule, changeKind } from './lib/propose-rule.mjs';
+import { proposeRule, citesNoOne } from './lib/propose-rule.mjs';
+import { addDomain } from './lib/add-domain.mjs';
+import { mainWorktree } from './lib/git.mjs';
 import { entryOf, openEntries, decide } from './lib/queue.mjs';
 import { callerEntry } from './lib/sessions.mjs';
 import { currentSession } from './lib/agents.mjs';
@@ -33,14 +35,18 @@ function show(id) {
   return [lineOf(entry), ...(decided ? [`It was ${decided}.`] : []), '', entry.text, '', JSON.stringify(entry.fields, null, 2)].join('\n');
 }
 
+const DRAFTED = { why: 'drafted', unattended: null, reply: id => `Drafted \`${id}\` into the review queue; nothing is written.` };
+
 // A draft is the agent's own: it can't plant words as the user's, nor spend a pick the user never saw offered. A page
-// change cites no one, so it takes no basis.
+// change, a retirement, a move, a reword of checked_with alone and a domain cite no one, so they take no basis. A
+// domain's fields are the domain tool's, which name it.
 function draft(sid) {
   sessionOf(sid);
   const p = readInput();
   for (const k of ['hold', 'release', 'queued']) if (Object.hasOwn(p, k)) refuse(`a draft is one rule's fields; ${k} isn't one of them.`);
-  if (changeKind(p) !== 'page' && !['reading', 'source', 'failure'].includes(p.basis)) refuse(`a draft takes basis reading, source or failure, so basis ${p.basis} is refused.`);
-  return proposeRule(sid, p, { queueAs: { why: 'drafted', unattended: null, reply: id => `Drafted \`${id}\` into the review queue; nothing is written.` } });
+  if (Object.hasOwn(p, 'name')) return addDomain(sid, p, { mainWorktree, queueAs: DRAFTED });
+  if (!citesNoOne(p) && !['reading', 'source', 'failure'].includes(p.basis)) refuse(`a draft takes basis reading, source or failure, so basis ${p.basis} is refused.`);
+  return proposeRule(sid, p, { queueAs: DRAFTED });
 }
 
 function close(id, decision, sid) {

@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { makeVault, sessionId, userTurn, assistantTurn, offerOf, pageNote, zqEntityPage, keepAllowed } from './fixture.mjs';
+import { makeVault, sessionId, userTurn, assistantTurn, offerOf, pageNote, zqEntityPage, keepAllowed, ruleNote } from './fixture.mjs';
 
 const typed = said => said.flatMap(s => [userTurn(s), assistantTurn('Noted.')]);
 function started(v) {
@@ -72,4 +72,16 @@ test('a lone CR in page text is turned into a line break, so keep accepts the of
   const k = keepAllowed(v, sid, o.id, o.text);
   assert.equal(k.code, 0, k.stderr);
   assert.match(v.read('wiki/glim/topics/cr-page.md'), /Line one\nmid CR here\./);
+});
+
+test("a page can't take the key a moved rule had before its move", t => {
+  const v = makeVault(t, { config: { proposals: 'ask' }, domains: { quill: { title: 'Quill', topics: ['code'], markers: ['quill.project'] } } });
+  v.write('wiki/glim/rules/the-thing.md', ruleNote({ keywords: ['thing'] }));
+  const sid = started(v);
+  const move = v.propose(sid, { change: 'move', key: 'glim/the-thing', domain: 'quill' });
+  const o = offerOf(move.stdout);
+  assert.ok(o, move.stderr);
+  assert.equal(keepAllowed(v, sid, o.id, o.text).code, 0);
+  const r = v.propose(sid, { page: 'wiki/glim/concepts/the-thing.md', text: pageNote({ kind: 'concept', summary: "'A concept.'" }) });
+  assert.equal(r.stderr, 'Not proposed: wiki/quill/rules/the-thing.md already exists. Pick another slug, or leave that note to the user.\n');
 });

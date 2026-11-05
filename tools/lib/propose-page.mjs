@@ -1,6 +1,6 @@
 import fs from 'node:fs';
 import { vaultPath, writeSettled, appendLog, config, plainText, plainLayout, restore, inside } from './vault.mjs';
-import { KEY_RE, PAGE_WHERE, parseNote, noteErrors, noteLinks, vaultFile, knownDomain, joinList, loadNotes, rulePath, kindFolder, kindPlace, PAGE_KINDS } from './rules.mjs';
+import { KEY_RE, PAGE_WHERE, parseNote, noteErrors, noteLinks, vaultFile, knownDomain, joinList, loadNotes, readNote, rulePath, kindFolder, kindPlace, PAGE_KINDS } from './rules.mjs';
 import { userNoteGuard } from './note-guards.mjs';
 import { lintLinks, linkIndex, markdownFiles } from './lint.mjs';
 import { openOffers } from './offers.mjs';
@@ -186,9 +186,9 @@ export function pageChange(p, { sid, domains, vault, kept, queued = null, base: 
   if (!KEY_RE.test(key)) refuse('slug must be lowercase-kebab-case.');
   const file = vaultPath(...rel.split('/'));
   if (inside(vaultPath('wiki', domain), file) === null) refuse(PAGE_WHERE);
-  // Every domain, since a page may link a note in any of them.
+  // Every domain, since a page may link a note in any of them. A moved rule keeps its old key, which a page can't take.
   const notes = loadNotes();
-  const taken = notes.find(n => n.key === key && n.rel.toLowerCase() !== rel.toLowerCase());
+  const taken = readNote(key, notes.filter(n => n.rel.toLowerCase() !== rel.toLowerCase()));
   if (taken) refuse(`${taken.rel} already exists. Pick another slug, or leave that note to the user.`);
   const raw = fs.existsSync(file) ? fs.readFileSync(file) : null;
   const base = raw && sha256(raw);

@@ -13,6 +13,22 @@ export const queueLocked = (fn, waitMs = 5000) => withLock(statePath('queue.lock
 
 export const CLOSING = ['kept', 'dropped'];
 
+// Each kind of change an offer holds, in the order lint lists them. noun is what keep calls it. queued: the review queue
+// holds it, and propose takes its entry again. offerOnly: an offer in every mode, since corrections writes only what the
+// user corrected. citesNoOne: it takes no one's words as evidence. change: propose takes it as a change to a live rule.
+export const CHANGE_KINDS = {
+  rule: { noun: 'rule', queued: true },
+  evidence: { noun: 'rule', queued: true },
+  page: { noun: 'page', queued: true, offerOnly: true, citesNoOne: true },
+  reword: { noun: 'rule', queued: true, change: true },
+  retire: { noun: 'rule', queued: true, offerOnly: true, citesNoOne: true, change: true },
+  domain: { noun: 'domain', queued: true, offerOnly: true },
+  move: { noun: 'rule', queued: true, offerOnly: true, citesNoOne: true, change: true },
+  mode: { noun: 'setting', offerOnly: true },
+};
+export const kindIs = (kind, fact) => Object.hasOwn(CHANGE_KINDS, kind) && CHANGE_KINDS[kind][fact] === true;
+export const kindsThat = fact => Object.keys(CHANGE_KINDS).filter(k => CHANGE_KINDS[k][fact] === true);
+
 // Each closed entry's id, with the decision of the last row that closed it.
 function closedBy(rows) {
   const closed = new Map();

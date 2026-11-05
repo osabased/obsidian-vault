@@ -1,25 +1,17 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { execFileSync } from 'node:child_process';
-import { toPosix } from './vault.mjs';
+import { toPosix, topOf } from './vault.mjs';
 import { checkDeadline, remaining } from './deadline.mjs';
 
 // GIT_DIR and the like, as a git hook sets them, would point git away from the folder asked about.
 const gitEnv = () => Object.fromEntries(Object.entries(process.env).filter(([k]) => !/^GIT_(?:DIR|WORK_TREE|INDEX_FILE|COMMON_DIR)$/i.test(k)));
 
-// git status prints paths from the top of the work tree whatever folder it runs in, so they are read from there. A
-// worktree or submodule has a .git file in place of the folder.
-function topOf(dir) {
-  for (let d = path.resolve(dir); ; d = path.dirname(d)) {
-    if (fs.existsSync(path.join(d, '.git'))) return d;
-    if (path.dirname(d) === d) return null;
-  }
-}
-
 // lib/git.mjs is the one place tools/ runs another program, git, and hooks call only changedFiles from it. Null, not an
 // empty list, when git is missing, the folder isn't in a repository, or git fails or runs past the timeout or the time
 // left before a hook's deadline, so a caller never takes a failure for a clean tree.
 export function changedFiles(cwd, pathspec = [], { ignored = false, timeout = 2000 } = {}) {
+  // git status prints paths from the top of the work tree whatever folder it runs in, so they are read from there.
   const top = topOf(cwd);
   if (!top) return null;
   checkDeadline();

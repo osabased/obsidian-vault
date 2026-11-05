@@ -8,6 +8,7 @@ import { usersOwn, userNoteGuard, ruleChange, changeOf } from '../note-guards.mj
 import { matchTarget, targetNames, specificity, bySpecificity } from '../glob.mjs';
 import { matcher, fileScope, fires, dueRules, gatedFile } from '../scope.mjs';
 import { extension } from '../ext.mjs';
+import { rootOutside } from '../versions.mjs';
 import { mark, marked, markMany, markShown, markPages, duePages, agentKey, keyHash, sessionHits, turnStart, registry } from '../sessions.mjs';
 
 function vaultGuard(rel, file, cwd) {
@@ -242,7 +243,7 @@ export async function preTool(event) {
   const { domains, hits: reach, matching } = scopeOf(event, t, cwd);
   const notes = settledNotes(await loadNotesAsync(domains));
   const text = plainText(newText(event));
-  const ctx = deliveryFor(reach);
+  const ctx = deliveryFor(reach, null, cwd, rootOutside(reach, cwd, t?.namespace === 'file' ? t.path : undefined));
   const matched = deliverable(matching(liveRules(notes)), ctx);
   const hits = dueRules(event, matched, text);
   // A page is told of once per session wherever it comes up, and is gated on each file as a rule is, so a page the

@@ -3,7 +3,7 @@ import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { makeVault, sessionId, denied, ledgerEdit, prompt, ruleNote, withFields, LEDGER_GUIDE, sha256 } from './fixture.mjs';
+import { makeVault, sessionId, denied, editFile, ledgerEdit, prompt, ruleNote, withFields, LEDGER_GUIDE, sha256, sectionOf, keepAllowed, offerOf } from './fixture.mjs';
 import { compareSemver, inRange, fitOf } from '../tools/lib/versions.mjs';
 
 const V2 = /almanac\/ledger-v2: Do: Call openLedger with the path\./;
@@ -82,7 +82,7 @@ test('a lockfile changed to 3.1.0 delivers the v3 rule instead', t => {
 
 test("a lockfile at a monorepo's root serves its packages, and the search stops at a folder holding .git", t => {
   const v = makeVault(t, { presets: ['almanac'] });
-  const root = folder(t, { 'almanac.lock': 'pkg 2.4.0\n', 'packages/a/almanac.project': '', 'packages/b/almanac.project': '', 'packages/b/.git/HEAD': '' });
+  const root = folder(t, { '.git/HEAD': '', 'almanac.lock': 'pkg 2.4.0\n', 'packages/a/almanac.project': '', 'packages/b/almanac.project': '', 'packages/b/.git/HEAD': '' });
   const sid = sessionId();
   v.startSession(sid, { cwd: root });
   const a = ledgerEdit(v, sid, path.join(root, 'packages', 'a'));
@@ -315,4 +315,266 @@ test('a newer copy with no fetched day labels the rule source changed, as review
   v.startSession(sid, { cwd });
   assert.match(lineOf(ledgerEdit(v, sid), 'almanac/ledger-v2'), / · source changed$/);
   assert.match(v.run('review.mjs', ['status'], { cwd }).stdout, /^- almanac\/ledger-v2: since \(no date\)/m);
+});
+
+// A project of the almanac domain, or with marker false a plain folder, whose lockfile pins pkg at version.
+function almanacAt(t, version, { marker = true, lock = `pkg ${version}\n` } = {}) {
+  const dir = folder(t, { 'almanac.lock': lock, ...(marker ? { 'almanac.project': '' } : {}) });
+  return dir;
+}
+const EVIDENCE = '- 2026-10-01 · source · session 1a2b3c4d · raw/refs/ledger-guide.md · dated 2026-10-01 · "openLedger takes a path and returns the ledger" (a-00000002)';
+const checkedRule = (v, slug, { domain = 'almanac', checked, pkg = 'fixture, name: pkg', extra = [], doLine = 'Close the ledger zz.' } = {}) => v.write(`wiki/${domain}/rules/${slug}.md`, ruleNote({
+  domain, topic: 'ledger', kind: 'knowledge', basis: 'source', applies_to: ['src/**'], doLine, notLine: 'Leave the ledger open.',
+  extra: ['as_of: 2026-10-01', `package: { ecosystem: ${pkg} }`, ...(checked ? [`checked_with: '${checked}'`] : []), ...extra],
+  evidence: [EVIDENCE],
+}));
+const deliveredAt = (v, dir) => {
+  const sid = sessionId();
+  v.startSession(sid, { cwd: dir });
+  return ledgerEdit(v, sid, dir);
+};
+
+test('a rule checked with 1.4.0 is delivered at 1.9.0 and not at 2.0.0, a 0.x rule stops at the next minor, and a project without the package gets none', t => {
+  const v = makeVault(t, { presets: ['almanac'] });
+  checkedRule(v, 'ledger-close', { checked: '1.4.0' });
+  checkedRule(v, 'ledger-early', { checked: '0.3.1', doLine: 'Flush the early ledger zz.' });
+  const at = version => deliveredAt(v, almanacAt(t, version));
+  assert.match(lineOf(at('1.9.0'), 'almanac/ledger-close'), /Close the ledger zz./);
+  assert.equal(lineOf(at('2.0.0'), 'almanac/ledger-close'), '', 'a newer major has moved on under knowledge.movedOn major');
+  assert.match(lineOf(at('0.3.9'), 'almanac/ledger-early'), /Flush the early ledger zz./);
+  assert.equal(lineOf(at('0.4.0'), 'almanac/ledger-early'), '', 'below 1.0 a newer minor has moved on');
+  assert.match(lineOf(at('1.2.0'), 'almanac/ledger-close'), /Close the ledger zz./, 'an older version is still delivered');
+  const without = deliveredAt(v, almanacAt(t, null, { lock: 'other 1.0.0\n' }));
+  assert.equal(lineOf(without, 'almanac/ledger-close'), '', 'a lockfile the reader read without the package rules the note out');
+});
+
+test("a rule no reader reads the package of is delivered labelled version unknown, and a hand-written requires wins over checked_with", t => {
+  const v = makeVault(t, { presets: ['almanac'] });
+  checkedRule(v, 'ledger-other', { checked: '1.4.0', pkg: 'elsewhere, name: pkg', doLine: 'Close the other ledger zz.' });
+  checkedRule(v, 'ledger-pinned', { checked: '1.4.0', doLine: 'Pin the ledger zz.', extra: ["requires: [{ package: { ecosystem: fixture, name: pkg }, ranges: [{ type: SEMVER, events: [{ introduced: '1.0.0' }] }] }]"] });
+  const refusal = deliveredAt(v, almanacAt(t, '2.4.0'));
+  assert.match(lineOf(refusal, 'almanac/ledger-other'), / · version unknown$/);
+  assert.match(lineOf(refusal, 'almanac/ledger-pinned'), /Pin the ledger zz./, 'requires matches 2.4.0, so checked_with 1.4.0 is not read');
+});
+
+test("a session in no domain reads its git root's lockfile through global's readers", t => {
+  const v = makeVault(t, { presets: ['almanac'], domains: { global: { readers: ['fixture'] } } });
+  checkedRule(v, 'ledger-old', { domain: 'global', checked: '1.0.0', doLine: 'Open the old ledger zz.' });
+  checkedRule(v, 'ledger-now', { domain: 'global', checked: '2.1.0', doLine: 'Open the current ledger zz.' });
+  const root = almanacAt(t, '2.4.0', { marker: false });
+  fs.mkdirSync(path.join(root, '.git'));
+  const cwd = path.join(root, 'app');
+  fs.mkdirSync(cwd);
+  const refusal = deliveredAt(v, cwd);
+  assert.equal(lineOf(refusal, 'global/ledger-old'), '', 'pkg 2.4.0 has moved on from 1.0.0');
+  assert.match(lineOf(refusal, 'global/ledger-now'), /Open the current ledger zz./);
+  assert.doesNotMatch(refusal, /version unknown/);
+});
+
+test('propose with package records checked_with from the lockfile, or says version unknown where none reads it', t => {
+  const v = makeVault(t, { presets: ['almanac'] });
+  const cwd = v.projects.almanac;
+  const sid = sessionId();
+  v.startSession(sid, { cwd });
+  const rule = o => ({
+    domain: 'almanac', kind: 'knowledge', topic: 'ledger', basis: 'failure', error: 'TypeError: ledger.shut is not a function', fix: 'Called ledger.close.', file: 'src/ledger.txt',
+    do: 'Close a ledger with ledger.close.', not: 'Call ledger.shut.', keywords: ['shutz'], ...o,
+  });
+  const run = input => v.run('propose.mjs', [sid], { cwd, input: JSON.stringify(input) });
+  // The first call lists the ledger rules it may repeat and refuses once.
+  run(rule({ slug: 'ledger-shut', package: 'fixture/pkg' }));
+  const r = run(rule({ slug: 'ledger-shut', package: 'fixture/pkg' }));
+  assert.equal(r.code, 0, r.stderr);
+  const note = v.read('wiki/almanac/rules/ledger-shut.md');
+  assert.match(note, /^package: \{ ecosystem: fixture, name: pkg \}$/m);
+  assert.match(note, /^checked_with: '2\.4\.0'$/m);
+  assert.match(r.stdout, /Checked with fixture\/pkg 2\.4\.0\./);
+  run(rule({ slug: 'ledger-gone', package: 'fixture/nope', do: 'Drop the nope ledger.', keywords: ['nopez'] }));
+  const u = run(rule({ slug: 'ledger-gone', package: 'fixture/nope', do: 'Drop the nope ledger.', keywords: ['nopez'] }));
+  assert.equal(u.code, 0, u.stderr);
+  assert.doesNotMatch(v.read('wiki/almanac/rules/ledger-gone.md'), /checked_with/);
+  assert.match(u.stdout, /fixture\/nope: version unknown/);
+  assert.match(run(rule({ slug: 'ledger-bad', package: 'pkg' })).stderr, /package must be ecosystem\/name/);
+  assert.match(run(rule({ slug: 'ledger-taste', kind: 'taste', basis: 'reading', reading: 'Seen.', package: 'fixture/pkg' })).stderr, /package is for knowledge rules/);
+});
+
+test('review status says no readers are set, then lists a rule with no checked_with and one a project has moved past', t => {
+  const bare = makeVault(t);
+  checkedRule(bare, 'ledger-open', {});
+  assert.deepEqual(sectionOf(bare.run('review.mjs', ['status']).stdout, 'Knowledge rules with a package and no checked_with'), ['No version readers set.']);
+
+  const v = makeVault(t, { presets: ['almanac'] });
+  checkedRule(v, 'ledger-close', { checked: '1.4.0' });
+  checkedRule(v, 'ledger-open', { doLine: 'Open the ledger zz.' });
+  deliveredAt(v, almanacAt(t, '1.9.0'));
+  deliveredAt(v, almanacAt(t, '2.0.0'));
+  const out = v.run('review.mjs', ['status']).stdout;
+  assert.deepEqual(sectionOf(out, 'Knowledge rules with a package and no checked_with'), ['- almanac/ledger-open: fixture/pkg'], out);
+  const past = sectionOf(out, 'Rules past their version in a project');
+  assert.equal(past.length, 1, out);
+  assert.match(past[0], /^- almanac\/ledger-close: checked with 1\.4\.0 · fixture\/pkg 2\.0\.0 in \S+$/);
+});
+
+test('/lint drafts the checked_with a rule lacks as a reword with no basis, and keeping it writes the version and no Evidence line', t => {
+  const v = makeVault(t, { presets: ['almanac'] });
+  checkedRule(v, 'ledger-open', { doLine: 'Open the ledger zz.' });
+  const rel = 'wiki/almanac/rules/ledger-open.md';
+  const sid = sessionId();
+  v.startSession(sid, { cwd: v.root });
+  const env = { CLAUDE_CODE_SESSION_ID: sid };
+  const draft = input => v.run('queue.mjs', ['draft'], { input: JSON.stringify({ change: 'reword', key: 'almanac/ledger-open', ...input }), env });
+  assert.match(draft({ checked_with: '1.9.0', basis: 'reading', reading: 'The lockfile says 1.9.0.' }).stderr, /knowledge rule/, 'with a basis it is an ordinary reword, which a knowledge rule takes no reading for');
+  const d = draft({ checked_with: '1.9.0' });
+  assert.equal(d.code, 0, d.stderr);
+  const queued = v.read(fs.readdirSync(v.at('raw', 'queue')).map(f => `raw/queue/${f}`)[0]).trim().split('\n').map(l => JSON.parse(l));
+  const r = v.propose(sid, { queued: queued[0].id });
+  assert.equal(r.code, 0, r.stderr);
+  const o = offerOf(r.stdout);
+  assert.equal(o.text, '**Change this rule?** almanac/ledger-open: Do: Open the ledger zz. Not: Leave the ledger open. As of 2026-10-01.\nWas: Package fixture/pkg: version unknown.\nNow: Checked with fixture/pkg 1.9.0.');
+  const before = v.read(rel);
+  const k = keepAllowed(v, sid, o.id, o.text);
+  assert.equal(k.code, 0, k.stderr);
+  const after = v.read(rel);
+  assert.match(after, /^checked_with: '?1\.9\.0'?$/m);
+  assert.equal(after.split('## Evidence')[1], before.split('## Evidence')[1], 'the version cites no one, so the note gets no Evidence line');
+  assert.match(v.propose(sid, { change: 'reword', key: 'almanac/ledger-open', checked_with: '1.9.0' }).stderr, /leaves almanac\/ledger-open as it is/);
+});
+
+test('a reword that gives checked_with alone is an offer even under corrections', t => {
+  const v = makeVault(t, { presets: ['almanac'], config: { proposals: 'corrections' } });
+  checkedRule(v, 'ledger-open', { doLine: 'Open the ledger zz.' });
+  const rel = 'wiki/almanac/rules/ledger-open.md';
+  const before = v.read(rel);
+  const sid = sessionId();
+  v.startSession(sid, { cwd: v.projects.almanac });
+  const r = v.run('propose.mjs', [sid], { cwd: v.projects.almanac, input: JSON.stringify({ change: 'reword', key: 'almanac/ledger-open', checked_with: '2.4.0' }) });
+  assert.equal(r.code, 0, r.stderr);
+  assert.match(offerOf(r.stdout)?.text ?? '', /Now: Checked with fixture\/pkg 2\.4\.0\./, r.stdout);
+  assert.equal(v.read(rel), before, 'the version decides which projects the rule reaches, so the user agrees to it first');
+});
+
+const failureRule = o => ({
+  domain: 'almanac', kind: 'knowledge', topic: 'ledger', basis: 'failure', error: 'TypeError: ledger.shut is not a function', fix: 'Called ledger.close.', file: 'src/ledger.txt',
+  slug: 'ledger-shut', do: 'Close a ledger with ledger.close.', not: 'Call ledger.shut.', keywords: ['shutz'], ...o,
+});
+
+test('evidence through repeats from a project on a newer version offers to move checked_with up, and keeping it writes the version', t => {
+  const v = makeVault(t, { presets: ['almanac'], config: { proposals: 'corrections' } });
+  checkedRule(v, 'ledger-close', { checked: '2.1.0' });
+  const rel = 'wiki/almanac/rules/ledger-close.md';
+  const cwd = v.projects.almanac;
+  const sid = sessionId();
+  v.startSession(sid, { cwd });
+  const r = v.run('propose.mjs', [sid], { cwd, input: JSON.stringify(failureRule({ repeats: 'almanac/ledger-close' })) });
+  assert.equal(r.code, 0, r.stderr);
+  const o = offerOf(r.stdout);
+  assert.match(o?.text ?? '', /Its checked_with would move from 2\.1\.0 to 2\.4\.0, the version of fixture\/pkg here\./, r.stdout);
+  assert.match(v.read(rel), /^checked_with: '2\.1\.0'$/m, 'moving the version is an offer even under corrections');
+  const k = keepAllowed(v, sid, o.id, o.text);
+  assert.equal(k.code, 0, k.stderr);
+  assert.match(v.read(rel), /^checked_with: '?2\.4\.0'?$/m);
+});
+
+test('a queued rule proposed again with repeats leaves the version it was offered with out of the evidence', t => {
+  const v = makeVault(t, { presets: ['almanac'] });
+  checkedRule(v, 'ledger-close', { checked: '1.4.0' });
+  const sid = sessionId();
+  v.startSession(sid, { cwd: v.root });
+  const fields = { ...failureRule(), package: 'fixture/pkg', checked_with: '1.0.0' };
+  v.write('raw/queue/2026-11-01-0badc0de.jsonl', `${JSON.stringify({
+    id: 'u-0badc0de', at: '2026-11-01T10:00:00.000Z', kind: 'rule', why: 'ignored', unattended: 'left', from: 'o-0badc0de',
+    session: '0badc0de-0000-4000-8000-000000000001', agent: null, transcript: null, cwd: v.projects.almanac, domain: 'almanac', key: 'almanac/ledger-shut',
+    fields, text: '**Keep this rule?** almanac/ledger-shut', quote: null, checked: '2026-11-01',
+  })}\n`);
+  const r = v.propose(sid, { queued: 'u-0badc0de', repeats: 'almanac/ledger-close' });
+  assert.equal(r.code, 0, r.stderr);
+  assert.doesNotMatch(r.stdout, /checked_with would move/, 'the queued version was read for another rule, so it moves nothing');
+});
+
+test('a rule with a package names the missing entity page once its library has entityAfterRules rules', t => {
+  const v = makeVault(t, { presets: ['almanac'], config: { proposals: 'corrections' } });
+  checkedRule(v, 'ledger-close', { checked: '2.4.0' });
+  checkedRule(v, 'ledger-open', { checked: '2.4.0', doLine: 'Open the ledger zz.' });
+  const cwd = v.projects.almanac;
+  const sid = sessionId();
+  v.startSession(sid, { cwd });
+  const run = input => v.run('propose.mjs', [sid], { cwd, input: JSON.stringify(input) });
+  run(failureRule({ package: 'fixture/pkg' }));
+  const r = run(failureRule({ package: 'fixture/pkg' }));
+  assert.equal(r.code, 0, r.stderr);
+  assert.match(r.stdout, /3 live rules now name fixture\/pkg, and no entity page does\. Hold a page change that adds wiki\/almanac\/entities\/<library>\.md with kind: entity and this package, and release it before your final reply\./);
+});
+
+const globalLedger = (v, slug, checked, doLine) => v.write(`wiki/global/rules/${slug}.md`, ruleNote({
+  domain: 'global', topic: 'ledger', kind: 'knowledge', basis: 'source', applies_to: ['**/ledger.txt'], doLine, notLine: 'Leave the ledger open.',
+  extra: ['as_of: 2026-10-01', 'package: { ecosystem: fixture, name: pkg }', `checked_with: '${checked}'`], evidence: [EVIDENCE],
+}));
+
+test("an edit in no domain, in a repository nested below the session's folder, reads that repository's lockfile", t => {
+  const v = makeVault(t, { presets: ['almanac'], domains: { global: { readers: ['fixture'] } } });
+  globalLedger(v, 'ledger-old', '1.0.0', 'Open the old ledger zz.');
+  const home = almanacAt(t, '2.4.0', { marker: false });
+  fs.mkdirSync(path.join(home, '.git'));
+  const sub = path.join(home, 'sub');
+  fs.mkdirSync(path.join(sub, '.git'), { recursive: true });
+  fs.writeFileSync(path.join(sub, 'almanac.lock'), 'pkg 1.2.0\n');
+  const sid = sessionId();
+  v.startSession(sid, { cwd: home });
+  const edit = rel => denied(editFile(v, sid, rel, { abs: path.join(home, ...rel.split('/')), cwd: home })) ?? '';
+  assert.match(lineOf(edit('sub/src/ledger.txt'), 'global/ledger-old'), /Open the old ledger zz\./, 'sub holds pkg 1.2.0, which has not moved on from 1.0.0');
+  assert.equal(lineOf(edit('src/ledger.txt'), 'global/ledger-old'), '', "the session folder's own repository holds pkg 2.4.0");
+});
+
+test('outside any repository, a lockfile above the session folder is not its project', t => {
+  const v = makeVault(t, { presets: ['almanac'], domains: { global: { readers: ['fixture'] } } });
+  globalLedger(v, 'ledger-old', '1.0.0', 'Open the old ledger zz.');
+  const above = almanacAt(t, '2.4.0', { marker: false });
+  const cwd = path.join(above, 'app');
+  fs.mkdirSync(cwd);
+  const refusal = deliveredAt(v, cwd);
+  assert.match(lineOf(refusal, 'global/ledger-old'), /Open the old ledger zz\..* · version unknown$/, refusal);
+});
+
+test("outside any repository, a lockfile above a domain's project is not its own", t => {
+  const v = makeVault(t, { presets: ['almanac'] });
+  const root = folder(t, { 'almanac.lock': 'pkg 2.4.0\n', 'app/almanac.project': '' });
+  const sid = sessionId();
+  v.startSession(sid, { cwd: root });
+  const app = ledgerEdit(v, sid, path.join(root, 'app'));
+  assert.match(lineOf(app, 'almanac/ledger-v2'), / · version unknown$/, app);
+});
+
+test("a rule's package name is read trimmed when its version is checked", t => {
+  const v = makeVault(t, { presets: ['almanac'] });
+  checkedRule(v, 'ledger-close', { checked: '1.4.0', pkg: "fixture, name: ' pkg '" });
+  const at = version => deliveredAt(v, almanacAt(t, version));
+  assert.match(lineOf(at('1.9.0'), 'almanac/ledger-close'), /Close the ledger zz\.[^·]*$/, 'pkg 1.9.0 is read for the name, so the version is known');
+  assert.equal(lineOf(at('2.0.0'), 'almanac/ledger-close'), '');
+});
+
+test('one project reached by two spellings of its folder is one project in versions.json and in review status', { skip: !['win32', 'darwin'].includes(process.platform) }, t => {
+  const v = makeVault(t, { presets: ['almanac'] });
+  checkedRule(v, 'ledger-close', { checked: '1.4.0' });
+  const dir = path.join(almanacAt(t, '2.0.0', { marker: false }), 'Proj');
+  fs.mkdirSync(dir);
+  fs.writeFileSync(path.join(dir, 'almanac.lock'), 'pkg 2.0.0\n');
+  fs.writeFileSync(path.join(dir, 'almanac.project'), '');
+  deliveredAt(v, dir);
+  deliveredAt(v, path.join(path.dirname(dir), 'proj'));
+  const keys = Object.keys(JSON.parse(v.read('.state/versions.json'))).filter(k => k.endsWith('|fixture'));
+  assert.equal(keys.length, 1, keys.join('\n'));
+  const past = sectionOf(v.run('review.mjs', ['status']).stdout, 'Rules past their version in a project');
+  assert.equal(past.length, 1);
+  assert.match(past[0], /^- almanac\/ledger-close: checked with 1\.4\.0 · fixture\/pkg 2\.0\.0 in \S+\/Proj$/);
+});
+
+test('review status forgets a project whose folder is gone', t => {
+  const v = makeVault(t, { presets: ['almanac'] });
+  checkedRule(v, 'ledger-close', { checked: '1.4.0' });
+  const dir = almanacAt(t, '2.0.0');
+  deliveredAt(v, dir);
+  fs.rmSync(dir, { recursive: true, force: true });
+  assert.deepEqual(sectionOf(v.run('review.mjs', ['status']).stdout, 'Rules past their version in a project'), ['None.']);
+  const posix = dir.replace(/\\/g, '/').toLowerCase();
+  assert.ok(!Object.keys(JSON.parse(v.read('.state/versions.json'))).some(k => k.toLowerCase().startsWith(posix)), 'the gone root is dropped');
 });
