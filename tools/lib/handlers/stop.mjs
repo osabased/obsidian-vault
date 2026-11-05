@@ -1,10 +1,11 @@
 import fs from 'node:fs';
-import { vaultRel, vaultOwn, cwdOf, plainText } from '../vault.mjs';
+import { vaultRel, vaultOwn, cwdOf, plainText, pathKey } from '../vault.mjs';
 import { loadNotesAsync, settledNotes, liveRules, deliverable, deliveryFor, ruleLine, fitContext } from '../rules.mjs';
 import { changedFiles } from '../git.mjs';
 import { checkDeadline } from '../deadline.mjs';
 import { fileScope, dueRules, gatedFile } from '../scope.mjs';
 import { turnStart, marked, markMany, markShown } from '../sessions.mjs';
+import { rootOutside } from '../versions.mjs';
 
 // Triggers are tested against the whole file as it is now, since a shell command leaves no new text to test. A file too
 // big to read in a hook fires no trigger.
@@ -42,9 +43,18 @@ export async function stop(event) {
   const listed = new Set();
   const sections = [];
   const shared = deliveryFor([]);
+  // Files of one project share its context, so its lockfiles are read once.
+  const contexts = new Map();
+  const contextFor = (reach, file) => {
+    const fallback = rootOutside(reach, cwd, file);
+    const fold = root => (typeof root === 'string' ? pathKey(root) : '');
+    const key = JSON.stringify([...reach.map(h => [h.domain, fold(h.root)]), fold(fallback)]);
+    if (!contexts.has(key)) contexts.set(key, deliveryFor(reach, shared, cwd, fallback));
+    return contexts.get(key);
+  };
   for (const { file, size, matching, hits: reach } of scoped) {
     checkDeadline();
-    const hits = dueRules(event, deliverable(matching(rules), deliveryFor(reach, shared)), () => textOf(file, size));
+    const hits = dueRules(event, deliverable(matching(rules), contextFor(reach, file)), () => textOf(file, size));
     if (!hits.length) continue;
     sections.push({
       noun: 'rule', head: `${hits[0].rel}:`, hits,

@@ -7,6 +7,7 @@ import { addDomain } from './lib/add-domain.mjs';
 import { mainWorktree } from './lib/git.mjs';
 import { localDay } from './lib/vault.mjs';
 import { setMode } from './lib/set-mode.mjs';
+import { CHANGE_KINDS } from './lib/queue.mjs';
 import { UsageError, readInput, refuse, failure, line, renderHelp, schemaOf, schemaArg } from './lib/input.mjs';
 
 const RUN = 'usage: node tools/keep.mjs [session-id] [call-id] < keep.json';
@@ -24,8 +25,6 @@ const SUMMARY = {
   code: "Keeps an offer that propose, domain or proposals returned, and writes it once the user's next message has the offer's code.",
 };
 
-const NOUN = { rule: 'rule', evidence: 'rule', reword: 'rule', page: 'page', domain: 'domain', mode: 'setting' };
-
 function notPending(o) {
   if (o.state === 'kept') return `offer \`${o.id}\` was already kept. Nothing more was written.`;
   if (o.state === 'held') return `offer \`${o.id}\` is held. Call \`propose\` with \`release: true\` first.`;
@@ -33,7 +32,7 @@ function notPending(o) {
     const u = o.queued_as ?? `u-${o.id.slice(2)}`;
     return `Offer \`${o.id}\` went to the review queue as \`${u}\`. Propose it again with \`queued: "${u}"\`.`;
   }
-  if (o.state === 'superseded') return `offer \`${o.id}\` was replaced by a later offer of the same ${NOUN[o.kind] ?? 'change'}. Keep that one.`;
+  if (o.state === 'superseded') return `offer \`${o.id}\` was replaced by a later offer of the same ${CHANGE_KINDS[o.kind]?.noun ?? 'change'}. Keep that one.`;
   if (o.state === 'denied') return `the user denied keeping offer \`${o.id}\` at the prompt in this session. Don't offer it again unless they ask.`;
   return `offer \`${o.id}\` was already tried once. Propose it again.`;
 }

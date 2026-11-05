@@ -3,7 +3,7 @@ import os from 'node:os';
 import path from 'node:path';
 import {
   config, vaultPath, statePath, withLock, writeText, appendLog, toPosix, inside, inVaultFolder, isMarkerName, isFileAt, markerDomains, mainCheckout,
-  readJson, guarded, reloadConfig,
+  readJson, guarded, reloadConfig, newId, today,
 } from './vault.mjs';
 import { build } from './build.mjs';
 import { KEBAB, joinList } from './rules.mjs';
@@ -14,7 +14,7 @@ import { valuesOf, addMember } from './json.mjs';
 import { typedFor, shortName } from './agents.mjs';
 import { refuse, line, lines } from './input.mjs';
 import { makeOffer, offerText, consentOf, declined } from './offers.mjs';
-import { entryOf, closeEntry, queueLocked } from './queue.mjs';
+import { entryOf, closeEntry, queueLocked, queueEntry, appendEntry } from './queue.mjs';
 
 function openEntry(id) {
   const { entry, decided } = entryOf(id);
@@ -169,8 +169,9 @@ function offerLines(f, vaultFolder) {
 // says that first: p is the input, or a function that reads it. kept is the consent keep found, with the offer's text and
 // code, which the fields must still give. mainWorktree is lib/git.mjs's, passed in by the script, since hooks load lib/
 // and may take only changedFiles from lib/git.mjs. queued is the review queue entry propose offers the domain again from;
-// the offer names it in its fields, so keep closes it once the domain is written.
-export function addDomain(sid, p, { kept = null, mainWorktree, queued = null }) {
+// the offer names it in its fields, so keep closes it once the domain is written. queueAs drafts the domain into the
+// review queue, as /lint does for a kind of project its rules keep matching, instead of offering it.
+export function addDomain(sid, p, { kept = null, mainWorktree, queued = null, queueAs = null }) {
   const { entry: session, folder } = sessionOf(sid);
   const vaultFolder = inVaultFolder(folder);
   if (typeof p === 'function') p = p();
@@ -181,6 +182,14 @@ export function addDomain(sid, p, { kept = null, mainWorktree, queued = null }) 
   const f = fields(p, { folder, vaultFolder, mainWorktree });
   clashes(f);
   const offer = offerLines(f, vaultFolder);
+  if (queueAs) {
+    const id = newId('u');
+    appendEntry(queueEntry({
+      id, kind: 'domain', why: queueAs.why, unattended: queueAs.unattended, from: null, session: sid, entry: session,
+      domain: f.name, key: f.name, fields: p, text: offerText(offer, null), quote: null, checked: today(),
+    }), shortName(sid, session.agent));
+    return queueAs.reply(id);
+  }
   if (!kept) {
     if (consentOf(session) === 'code' && !typedFor(session)) refuse("the taste vault has no transcript for this session, so it can't check the user agreed. Ask the user to add the domain to vault.config.json.");
     if (consentOf(session) === 'prompt' && declined(sid, offerText(offer, null))) refuse("the user denied starting this domain at the prompt in this session. Don't offer it again unless they ask.");

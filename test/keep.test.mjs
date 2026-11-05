@@ -1,7 +1,9 @@
 import fs from 'node:fs';
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { makeVault, sessionId, userTurn, assistantTurn, ruleNote, zqEntityPage as entityPage, recordedCall, keepAllowed, offerOf, lintFound } from './fixture.mjs';
+import path from 'node:path';
+import { pathToFileURL } from 'node:url';
+import { makeVault, sessionId, userTurn, assistantTurn, ruleNote, zqEntityPage as entityPage, recordedCall, keepAllowed, offerOf, lintFound, prompt, pageNote } from './fixture.mjs';
 import { codexInput, codexRollout } from './codex.mjs';
 
 // Outside the vault folder in ask and off, propose.mjs, domain.mjs and proposals.mjs only offer, and keep.mjs writes the
@@ -594,7 +596,7 @@ test('change without key, key without change, and a change other than reword are
   assert.equal(v.propose(sid, { ...rule(), key: 'glim/the-thing' }).code, 1);
   const rename = v.propose(sid, reword({ change: 'rename' }));
   assert.equal(rename.code, 1);
-  assert.equal(rename.stderr, 'Not proposed: change must be reword.\n');
+  assert.equal(rename.stderr, 'Not proposed: change must be reword, retire or move.\n');
   assert.match(v.propose(sid, reword({ key: 'glim/no-such-rule' })).stderr, /glim\/no-such-rule/);
 });
 
@@ -612,4 +614,173 @@ test('a reword of a note that starts with a byte order mark replaces its Do line
   const front = s => s.slice(0, s.indexOf('\n---\n') + 5).replace(/^updated: .*$/m, 'updated:');
   assert.equal(front(after), front(note), 'the frontmatter keeps its lines, updated aside');
   assert.match(after, /\n---\n\n\*\*Do:\*\* Do the thing twice\.\n\*\*Not:\*\* Skip the thing\.\n/);
+});
+
+const TOPIC_PAGE = 'wiki/glim/topics/code.md';
+const linkingPage = () => `---\ntype: page\nkind: topic\ndomain: glim\ntopic: code\nsummary: 'Code taste.'\n---\n\nSee [[wiki/glim/rules/the-thing|the-thing]] and [[wiki/glim/rules/the-thing]].\n\n## Rules\n- [[wiki/glim/rules/the-thing|the-thing]]\n`;
+const thingRow = { id: 'a-00000001', at: '2026-10-01T10:00:00.000Z', source: 'agent', kind: 'stated', text: 'do the thing', note: 'glim/the-thing', session: '1a2b3c4d-0000-4000-8000-000000000001', transcript: null, cwd: null, domain: 'glim' };
+
+test('a retire offer, once kept, writes retired and why, the rule stops reaching sessions, and index.md marks it', async t => {
+  const v = makeVault(t, { config: { proposals: 'corrections' } });
+  v.write(OLD_RULE, ruleNote({ keywords: ['thing'] }));
+  v.write('wiki/glim/rules/the-thing-two.md', ruleNote({ keywords: ['thing'], doLine: 'Do the newer thing.' }));
+  v.write(TOPIC_PAGE, linkingPage());
+  const sid = started(v);
+  const o = offered(v.propose(sid, { change: 'retire', key: 'glim/the-thing', because: 'The thing moved to a newer rule.', superseded_by: 'glim/the-thing-two' }));
+  assert.equal(o.text, '**Retire this rule?** glim/the-thing: Do: Do the thing. Not: Skip the thing.\nBecause: The thing moved to a newer rule. Superseded by glim/the-thing-two.');
+  assert.doesNotMatch(v.read(OLD_RULE), /retired/, 'a retirement is an offer even under corrections');
+  const k = keepAllowed(v, sid, o.id, o.text);
+  assert.equal(k.code, 0, k.stderr);
+  const after = v.read(OLD_RULE);
+  assert.match(after, /^retired: \d{4}-\d\d-\d\d$/m);
+  assert.match(after, /^retired_because: The thing moved to a newer rule\.$/m);
+  assert.match(after, /^superseded_by: glim\/the-thing-two$/m);
+  assert.match(k.stdout, /To bring it back, delete its retired lines and its superseded_by line in /);
+  assert.match(v.read('index.md'), /the-thing\]\].*retired/);
+  const other = started(v);
+  const said = prompt(v, other, 'do the thing please');
+  assert.doesNotMatch(said?.hookSpecificOutput?.additionalContext ?? '', /glim\/the-thing:/);
+  // A retirement changes the rule, so the page may also read as stale when the test crosses midnight; only its links count here.
+  assert.deepEqual(await lintFound(v, /links \[\[.*the-thing/), [], 'the links to a retired rule still resolve');
+  assert.match(v.propose(sid, { change: 'retire', key: 'glim/the-thing', because: 'Again.' }).stderr, /isn't a delivered rule/);
+});
+
+test('a move offer, once kept, moves the note, rewrites the links to it and writes moved_from, and its old key still resolves', async t => {
+  const v = makeVault(t, { config: { proposals: 'corrections' }, domains: { quill: { title: 'Quill', topics: ['code'], markers: ['quill.project'] }, shelf: { title: 'Shelf', vaultOnly: true } } });
+  v.write(OLD_RULE, ruleNote({ keywords: ['thing'] }));
+  v.write(TOPIC_PAGE, linkingPage());
+  v.write('raw/inbox/2026-10-01-1a2b3c4d.jsonl', `${JSON.stringify(thingRow)}\n`);
+  v.write('wiki/quill/rules/taken.md', ruleNote({ domain: 'quill', keywords: ['taken'] }));
+  const sid = started(v);
+  const move = to => v.propose(sid, { change: 'move', key: 'glim/the-thing', domain: to });
+  assert.match(move('nope').stderr, /there's no domain nope/);
+  assert.match(move('shelf').stderr, /shelf is vaultOnly/);
+  const o = offered(move('quill'));
+  assert.equal(o.text, '**Move this rule?** glim/the-thing to quill/the-thing: Do: Do the thing. Not: Skip the thing.');
+  const k = keepAllowed(v, sid, o.id, o.text);
+  assert.equal(k.code, 0, k.stderr);
+  assert.ok(!v.exists(OLD_RULE));
+  const moved = v.read('wiki/quill/rules/the-thing.md');
+  assert.match(moved, /^domain: quill$/m);
+  assert.match(moved, /^moved_from: glim\/the-thing$/m);
+  const page = v.read(TOPIC_PAGE);
+  assert.doesNotMatch(page, /wiki\/glim\/rules\/the-thing/);
+  assert.equal((page.match(/\[\[wiki\/quill\/rules\/the-thing\|the-thing\]\]/g) ?? []).length, 3);
+  assert.deepEqual(await lintFound(v, /the-thing|a-00000001/), [], "the inbox row naming the old key still backs the moved note's Evidence");
+  v.write('wiki/glim/rules/taken.md', ruleNote({ keywords: ['taken'], doLine: 'Do the taken thing.' }));
+  assert.match(v.propose(sid, { change: 'move', key: 'glim/taken', domain: 'quill' }).stderr, /wiki\/quill\/rules\/taken\.md already exists/);
+});
+
+test('a moved rule can move back, a session shown it before the move is not shown it again, and lint points a user page at its new path', async t => {
+  const v = makeVault(t, { config: { proposals: 'corrections' }, domains: { quill: { title: 'Quill', topics: ['code'], markers: ['quill.project'] } } });
+  fs.writeFileSync(path.join(v.project, 'quill.project'), '');
+  v.write(OLD_RULE, ruleNote({ keywords: ['thing'] }));
+  const MINE = 'wiki/glim/concepts/mine.md';
+  v.write(MINE, pageNote({ kind: 'concept', extra: ['author: user'], body: ['See [[wiki/glim/rules/the-thing]].'] }));
+  const context = out => out?.hookSpecificOutput?.additionalContext ?? '';
+  const seen = started(v);
+  assert.match(context(prompt(v, seen, 'do the thing please')), /glim\/the-thing:/);
+  const sid = started(v);
+  const move = (key, to) => {
+    const o = offered(v.propose(sid, { change: 'move', key, domain: to }));
+    const k = keepAllowed(v, sid, o.id, o.text);
+    assert.equal(k.code, 0, k.stderr);
+  };
+  move('glim/the-thing', 'quill');
+  assert.doesNotMatch(context(prompt(v, seen, 'do the thing once more')), /the-thing:/, 'a session shown the rule before its move has it in mind');
+  assert.match(context(prompt(v, started(v), 'do the thing please')), /quill\/the-thing:/);
+  assert.match(v.read(MINE), /\[\[wiki\/glim\/rules\/the-thing\]\]/, "the move leaves the user's page as they wrote it");
+  assert.deepEqual((await lintFound(v, /the-thing/)).map(f => f.msg), ['links [[wiki/glim/rules/the-thing]], a note at wiki/quill/rules/the-thing.md. Link it by that path, as [[wiki/quill/rules/the-thing|the-thing]]']);
+  move('quill/the-thing', 'glim');
+  assert.match(v.read(OLD_RULE), /^moved_from: quill\/the-thing$/m);
+  assert.deepEqual(await lintFound(v, /the-thing/), []);
+});
+
+const QUILL_DOMAIN = { quill: { title: 'Quill', topics: ['code'], markers: ['quill.project'] } };
+function quillVault(t, said) {
+  const v = makeVault(t, { config: { proposals: 'corrections' }, domains: QUILL_DOMAIN });
+  fs.writeFileSync(path.join(v.project, 'quill.project'), '');
+  return { v, sid: started(v, said) };
+}
+function moveKept(v, sid, key, to, env) {
+  const o = offered(v.propose(sid, { change: 'move', key, domain: to }));
+  return v.run('keep.mjs', [sid, recordedCall(v, sid, { offer: o.id, input: { id: o.id, offer: o.text } })], { input: { id: o.id, offer: o.text }, env });
+}
+
+test('repeats naming a moved rule by its old key backs the moved note, and the same words back it once whichever key names it', t => {
+  const quote = 'do the thing always';
+  const { v, sid } = quillVault(t, [quote, 'the thing again please']);
+  const base = { domain: 'quill', slug: 'x', topic: 'code', basis: 'stated', quote, do: 'A.', not: 'B.', applies_to: ['src/new/**'] };
+  const w = v.propose(sid, { ...base, domain: 'glim', slug: 'the-thing', do: 'Zebra quartz mango.', not: 'Plover lantern ember.' });
+  assert.equal(w.code, 0, w.stderr);
+  assert.equal(moveKept(v, sid, 'glim/the-thing', 'quill').code, 0);
+  assert.equal(v.propose(sid, { ...base, repeats: 'quill/the-thing' }).stderr, 'Not proposed: these words already back quill/the-thing.\n');
+  assert.equal(v.propose(sid, { ...base, repeats: 'glim/the-thing' }).stderr, 'Not proposed: these words already back quill/the-thing.\n');
+  const r = v.propose(sid, { ...base, quote: 'the thing again please', repeats: 'glim/the-thing' });
+  assert.equal(r.code, 0, r.stderr);
+  assert.match(r.stdout, /\*\*Rule backed again\*\* quill\/the-thing: /);
+  assert.equal(v.read('wiki/quill/rules/the-thing.md').split('\n').filter(l => l.includes('"the thing again please"')).length, 1);
+  assert.equal(inboxRows(v).at(-1).note, 'quill/the-thing');
+});
+
+test("a retirement can't name the rule's own key from before its move as the rule that supersedes it", t => {
+  const { v, sid } = quillVault(t);
+  v.write(OLD_RULE, ruleNote({ keywords: ['thing'] }));
+  assert.equal(moveKept(v, sid, 'glim/the-thing', 'quill').code, 0);
+  const r = v.propose(sid, { change: 'retire', key: 'quill/the-thing', because: 'Replaced.', superseded_by: 'glim/the-thing' });
+  assert.equal(r.stderr, "Not proposed: superseded_by names glim/the-thing, which isn't another delivered rule.\n");
+});
+
+test('a move whose rename fails writes nothing: the note stays where it was and no link changes', t => {
+  const { v, sid } = quillVault(t);
+  v.write(OLD_RULE, ruleNote({ keywords: ['thing'] }));
+  v.write(TOPIC_PAGE, linkingPage());
+  // Windows refuses to rename or remove a file another program holds open; the stub fails both for the old note.
+  const stub = path.join(v.root, 'busy.mjs');
+  fs.writeFileSync(stub, [
+    "import fs from 'node:fs';",
+    "const busy = p => String(p).split(String.fromCharCode(92)).join('/').endsWith('wiki/glim/rules/the-thing.md');",
+    "const fail = () => Object.assign(new Error('EBUSY: resource busy or locked'), { code: 'EBUSY' });",
+    'for (const name of ["renameSync", "rmSync", "unlinkSync"]) {',
+    '  const real = fs[name];',
+    '  fs[name] = (p, ...rest) => { if (busy(p)) throw fail(); return real(p, ...rest); };',
+    '}',
+  ].join('\n'));
+  const before = { note: v.read(OLD_RULE), page: v.read(TOPIC_PAGE), log: v.exists('log.md') ? v.read('log.md') : '' };
+  const k = moveKept(v, sid, 'glim/the-thing', 'quill', { NODE_OPTIONS: `--import=${pathToFileURL(stub).href}` });
+  assert.equal(k.code, 1, k.stdout);
+  assert.match(k.stderr, /^Not kept: /);
+  assert.equal(v.exists('wiki/quill/rules/the-thing.md'), false, 'no second copy of the rule');
+  assert.equal(v.read(OLD_RULE), before.note);
+  assert.equal(v.read(TOPIC_PAGE), before.page);
+  assert.equal(v.exists('log.md') ? v.read('log.md') : '', before.log);
+});
+
+test('a move that relinks another rule leaves that rule shown to the sessions it was shown to', t => {
+  const { v, sid } = quillVault(t);
+  v.write(OLD_RULE, ruleNote({ keywords: ['thing'] }));
+  v.write('wiki/glim/rules/other-thing.md', ruleNote({ keywords: ['gadget'], doLine: 'Do the gadget after [[wiki/glim/rules/the-thing|the-thing]].' }));
+  const context = out => out?.hookSpecificOutput?.additionalContext ?? '';
+  const seen = started(v);
+  assert.match(context(prompt(v, seen, 'fix the gadget')), /glim\/other-thing:/);
+  assert.equal(moveKept(v, sid, 'glim/the-thing', 'quill').code, 0);
+  assert.match(v.read('wiki/glim/rules/other-thing.md'), /\[\[wiki\/quill\/rules\/the-thing\|the-thing\]\]/);
+  assert.doesNotMatch(context(prompt(v, seen, 'fix the gadget again')), /other-thing:/, 'its wording is new only in its link');
+  assert.match(context(prompt(v, started(v), 'fix the gadget')), /glim\/other-thing:/);
+});
+
+test("a move carries the moved rule's delivered and repeat-list markers to its new key", t => {
+  const v = makeVault(t, { config: { proposals: 'corrections' } });
+  const sid = started(v);
+  v.write(OLD_RULE, ruleNote({ keywords: ['thing'], applies_to: ['src/new/**'] }));
+  const shown = started(v);
+  prompt(v, shown, 'do the thing please');
+  const proposal = { domain: 'glim', slug: 'new-rule', topic: 'code', basis: 'stated', quote: 'call them by their screen', do: 'Zebra quartz mango.', not: 'Plover lantern ember.', applies_to: ['src/new/**'] };
+  assert.match(v.propose(sid, proposal).stderr, /- glim\/the-thing: /);
+  // A global rule stays in a glim proposal's scope, so the retry lists it again under its new key.
+  assert.equal(moveKept(v, sid, 'glim/the-thing', 'global').code, 0);
+  const retry = v.propose(sid, proposal);
+  assert.equal(retry.code, 0, retry.stderr);
+  const delivered = v.read(`.state/delivered/${shown}/keys.jsonl`).trim().split('\n').map(l => JSON.parse(l));
+  assert.ok(delivered.includes('global/the-thing'), delivered.join(', '));
 });

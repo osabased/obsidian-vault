@@ -327,6 +327,32 @@ test('queue.mjs draft takes a reword, and the entry offered again changes the ru
   assert.match(v.read('wiki/glim/rules/the-thing.md'), /\*\*Do:\*\* Do the thing twice\.\r?\n/);
 });
 
+test('queue.mjs draft takes a domain and a move into it, and walking the domain first lets the move be kept', async t => {
+  const v = makeVault(t, { config: { proposals: 'ask' } });
+  v.write('wiki/glim/rules/the-thing.md', ruleNote({ keywords: ['thing'] }));
+  const sid = sessionId();
+  v.startSession(sid, { cwd: v.root, transcript: v.transcript(sid, typed(['call them by their screen'])) });
+  const draft = input => v.run('queue.mjs', ['draft'], { input: JSON.stringify(input), env: { CLAUDE_CODE_SESSION_ID: sid } });
+  const move = { change: 'move', key: 'glim/the-thing', domain: 'quill' };
+  assert.match(draft(move).stderr, /there's no domain quill/);
+  const d = draft({ name: 'quill', title: 'Quill', topics: ['code'], marker: 'quill.project' });
+  assert.equal(d.code, 0, d.stderr);
+  assert.match(d.stdout, /^Drafted `u-[0-9a-f]{8}` into the review queue; nothing is written\.$/m);
+  assert.equal(JSON.parse(v.read('vault.config.json')).domains.quill, undefined);
+  assert.equal(draft(move).code, 0);
+  assert.match(v.propose(sid, move).stderr, /there's no domain quill/, 'only a draft may name a domain the queue holds');
+  const [domain, moved] = entries(v);
+  assert.deepEqual([domain.kind, domain.key, moved.kind, moved.key], ['domain', 'quill', 'move', 'glim/the-thing']);
+  assert.deepEqual(await queueLint(v), []);
+  const o = offered(v.propose(sid, { queued: domain.id }));
+  assert.equal(keepAllowed(v, sid, o.id, o.text).code, 0);
+  const m = offered(v.propose(sid, { queued: moved.id }));
+  const k = keepAllowed(v, sid, m.id, m.text);
+  assert.equal(k.code, 0, k.stderr);
+  assert.match(v.read('wiki/quill/rules/the-thing.md'), /^moved_from: glim\/the-thing$/m);
+  assert.deepEqual(entries(v).filter(r => !queueRows(v).some(x => x.decides === r.id)), []);
+});
+
 test('queue.mjs lists open entries oldest first, marks unattended ones, and later and drop append decision rows', async t => {
   const v = makeVault(t, { config: { proposals: 'ask' } });
   const a = started(v);
@@ -653,4 +679,43 @@ test("queue rows keep the session's agent, so a Codex session is named by its la
   const r = v.run('review.mjs', ['status']);
   assert.equal(r.code, 0, r.stderr);
   assert.deepEqual(sectionOf(r.stdout, 'Review queue entries dropped'), [`- ${u} · glim/tidy-names · dropped ${today()} in session ${codex.slice(-8)}`]);
+});
+
+const ledgerFailure = o => ({
+  domain: 'almanac', kind: 'knowledge', topic: 'ledger', basis: 'failure', error: 'TypeError: ledger.shut is not a function', fix: 'Called ledger.close.', file: 'src/ledger.txt',
+  slug: 'ledger-shut', do: 'Close a ledger with ledger.close.', not: 'Call ledger.shut.', keywords: ['shutz'], ...o,
+});
+function queuedEvidence(v, key, fields) {
+  v.write('raw/queue/2026-11-01-0badc0de.jsonl', `${JSON.stringify({
+    id: 'u-0badc0de', at: '2026-11-01T10:00:00.000Z', kind: 'evidence', why: 'ignored', unattended: 'left', from: 'o-0badc0de',
+    session: '0badc0de-0000-4000-8000-000000000001', agent: null, transcript: null, cwd: v.projects.almanac, domain: 'almanac', key,
+    fields, text: `**Back this rule again?** ${key}`, quote: null, checked: '2026-11-01',
+  })}\n`);
+}
+
+test('a queued evidence entry naming a rule by its key from before a move is proposed against the moved note', t => {
+  const v = makeVault(t, { presets: ['almanac'] });
+  v.write('wiki/global/rules/ledger-close.md', ruleNote({
+    domain: 'global', topic: 'code', keywords: ['ledgerz'], doLine: 'Close the ledger zz.', notLine: 'Leave the ledger open.', extra: ['moved_from: almanac/ledger-close'],
+  }));
+  const sid = sessionId();
+  v.startSession(sid, { cwd: v.root });
+  queuedEvidence(v, 'almanac/ledger-close', ledgerFailure({ repeats: 'almanac/ledger-close' }));
+  const r = v.propose(sid, { queued: 'u-0badc0de' });
+  const o = offered(r);
+  assert.match(o.text, /global\/ledger-close/);
+});
+
+test("a queued evidence entry whose stored checked_with is older than the rule's leaves checked_with where it is", t => {
+  const v = makeVault(t, { presets: ['almanac'] });
+  v.write('wiki/almanac/rules/ledger-close.md', ruleNote({
+    domain: 'almanac', topic: 'ledger', kind: 'knowledge', basis: 'source', applies_to: ['src/**'], doLine: 'Close the ledger zz.', notLine: 'Leave the ledger open.',
+    extra: ['as_of: 2026-10-01', 'package: { ecosystem: fixture, name: pkg }', "checked_with: '2.4.0'"],
+    evidence: ['- 2026-10-01 · source · session 1a2b3c4d · raw/refs/ledger-guide.md · dated 2026-10-01 · "openLedger takes a path and returns the ledger" (a-00000002)'],
+  }));
+  const sid = sessionId();
+  v.startSession(sid, { cwd: v.root });
+  queuedEvidence(v, 'almanac/ledger-close', { ...ledgerFailure({ repeats: 'almanac/ledger-close' }), checked_with: '2.1.0' });
+  const o = offered(v.propose(sid, { queued: 'u-0badc0de' }));
+  assert.doesNotMatch(o.text, /checked_with would move/, o.text);
 });

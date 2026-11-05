@@ -20,7 +20,7 @@ export const toolsPath = (...xs) => path.join(import.meta.dirname, '..', ...xs);
 
 export const DEFAULTS = {
   delivery: { maxRulesPerEdit: 3, maxRuleChars: 300, maxKnowledgeRuleChars: 600, maxBlockChars: 1200, maxPromptExcerpts: 3, maxPages: 3, maxContextChars: 8000, activeMaxLines: 60, activeMaxBytes: 4096, settleSeconds: 60, tidyMaxMarkers: 2000 },
-  knowledge: { staleAfterDays: 180, checkAfterDays: 14 },
+  knowledge: { staleAfterDays: 180, checkAfterDays: 14, movedOn: 'major' },
   refresh: { timeoutSeconds: 20, maxBytes: 5_000_000 },
   docSets: { manifests: ['llms.txt'] },
   lint: { remindAfterDays: 14, remindAfterNotes: 10 },
@@ -31,14 +31,17 @@ export const DEFAULTS = {
   privacy: { allow: [] },
   compile: { maxBytes: 16_384 },
   queue: { sweepAfterHours: 12 },
-  pages: { maxOfferChars: 4000 },
+  pages: { maxOfferChars: 4000, entityAfterRules: 3, rollupAfterRules: 3 },
 };
+// domains holds one setting of its own beside the domains it maps.
+export const DOMAIN_SETTINGS = { suggestAfterProjects: 2 };
+export const domainEntries = ds => Object.entries(ds && typeof ds === 'object' && !Array.isArray(ds) ? ds : {}).filter(([d]) => !Object.hasOwn(DOMAIN_SETTINGS, d));
 
 const strings = xs => (Array.isArray(xs) ? xs.filter(x => typeof x === 'string' && x.trim()) : []);
 const local = () => readJsonSafe(vaultPath('vault.local.json')) ?? {};
 
 export const aboveZero = (x, whole = false) => typeof x === 'number' && (whole ? Number.isInteger(x) : Number.isFinite(x)) && x > 0;
-const POSITIVE = [['queue', 'sweepAfterHours', false], ['pages', 'maxOfferChars', true]];
+export const POSITIVE = [['queue', 'sweepAfterHours', false], ['pages', 'maxOfferChars', true], ['pages', 'entityAfterRules', true], ['pages', 'rollupAfterRules', true]];
 
 // Paths differ per machine, so they come from the untracked vault.local.json; a file lint finds broken gives none.
 let loaded;
@@ -46,13 +49,16 @@ export function config() {
   if (!loaded) {
     const c = readJson(vaultPath('vault.config.json'), {});
     const mine = local();
-    const domains = Object.fromEntries(Object.entries(c.domains ?? {}).map(([d, x]) => [d, { ...x, paths: strings(mine.domains?.[d]?.paths) }]));
+    const domains = Object.fromEntries(domainEntries(c.domains).map(([d, x]) => [d, { ...x, paths: strings(mine.domains?.[d]?.paths) }]));
     const extractors = Array.isArray(c.extractors) ? c.extractors : [];
     // The agents whose tool names lint checks, in the order a script looks for its own session, each a folder in tools/adapters/.
     const agents = Array.isArray(c.agents) ? c.agents : ['claude-code'];
     loaded = { domains, extractors, agents, proposals: c.proposals, quiet: strings(mine.quiet).filter(g => validGlob(g)), ...Object.fromEntries(Object.entries(DEFAULTS).map(([k, d]) => [k, { ...d, ...c[k] }])) };
     // Lint reports these; until the user fixes one, its default keeps the sweep off live sessions and the page cap on.
     for (const [k, f, whole] of POSITIVE) if (!aboveZero(loaded[k][f], whole)) loaded[k][f] = DEFAULTS[k][f];
+    if (loaded.knowledge.movedOn !== 'major') loaded.knowledge.movedOn = DEFAULTS.knowledge.movedOn;
+    const suggest = c.domains?.suggestAfterProjects;
+    loaded.suggestAfterProjects = aboveZero(suggest, true) ? suggest : DOMAIN_SETTINGS.suggestAfterProjects;
   }
   return loaded;
 }
@@ -71,9 +77,12 @@ export function toPosix(p, base = process.cwd()) {
   return /^[a-z]:\/$/i.test(s) ? s : s.replace(/\/+$/, '');
 }
 
+// Hooks get one folder spelled in more than one case, so paths are compared folded.
+export const pathKey = (p, base) => toPosix(p, base).toLowerCase();
+
 export function inside(root, p, base) {
   const target = toPosix(p, base);
-  const r = toPosix(root).toLowerCase();
+  const r = pathKey(root);
   const lower = target.toLowerCase();
   if (lower === r) return '';
   const prefix = r.endsWith('/') ? r : `${r}/`;
@@ -274,6 +283,23 @@ export function writeText(file, text) {
   }
 }
 
+// The top of the work tree dir is in, found without running git. A worktree or submodule has a .git file in place of
+// the folder.
+export function topOf(dir) {
+  for (let d = path.resolve(dir); ; d = path.dirname(d)) {
+    if (fs.existsSync(path.join(d, '.git'))) return d;
+    if (path.dirname(d) === d) return null;
+  }
+}
+
+// Only for a note a tool moves. A rename keeps the file's times, and leaves one copy whether it lands or not. Windows
+// would replace a file already at to, so that is refused instead.
+export function moveFile(from, to) {
+  fs.mkdirSync(path.dirname(to), { recursive: true });
+  if (fs.existsSync(to)) throw Object.assign(new Error(`${to} already exists`), { code: 'EEXIST' });
+  retry(() => fs.renameSync(from, to));
+}
+
 // Only for a folder the tools keep for themselves, such as a clone in .sources/.
 export const removeDir = dir => fs.rmSync(dir, { recursive: true, force: true, maxRetries: 3, retryDelay: 50 });
 
@@ -296,8 +322,9 @@ export function writeSettled(file, text) {
 
 // For a change that leaves what a note says as it was. The file keeps the day it was saved, so the pages that watch the
 // note don't go stale, but moves on a second, since editors such as VS Code tell a file changed by its time and size.
-export function rewriteText(file, text) {
-  const { atime, mtime } = fs.statSync(file);
+// A move writes the note at its new path, from, and keeps that file's day.
+export function rewriteText(file, text, from = file) {
+  const { atime, mtime } = fs.statSync(from);
   writeText(file, text);
   fs.utimesSync(file, atime, new Date(mtime.getTime() + 1000));
 }

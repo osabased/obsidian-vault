@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { makeVault, ruleNote, pageNote, sessionId, prompt, editFile, userTurn } from './fixture.mjs';
+import { makeVault, ruleNote, pageNote, sessionId, prompt, editFile, userTurn, sectionOf } from './fixture.mjs';
 
 // The status line the user sees at session start, /vault status, and folders the user keeps quiet.
 const context = out => out?.hookSpecificOutput?.additionalContext ?? '';
@@ -210,4 +210,120 @@ test('status.mjs prints the line and what the session was shown', t => {
   v.startSession(sid, { source: 'compact' });
   assert.equal(v.run('status.mjs', [sid]).stdout.split('\n')[1], `${SHOWN}1 rule, glim/brief`, 'rules and pages both start again');
   assert.equal(v.run('status.mjs', ['no-such-session']).code, 1);
+});
+
+test('review status lists a root file that the projects shown a global rule share and another project lacks, as a domain candidate', t => {
+  const v = makeVault(t);
+  v.write('wiki/global/rules/lua-names.md', ruleNote({ domain: 'global', applies_to: ['src/**/*.lua'], doLine: 'Name modules after their file.', notLine: 'Name modules freely.' }));
+  const shared = ['one', 'two', 'three'].map(n => {
+    const dir = folder(t, `vault-lua-${n}-`);
+    fs.writeFileSync(path.join(dir, 'wally.toml'), '');
+    fs.writeFileSync(path.join(dir, `${n}.txt`), '');
+    return dir;
+  });
+  const plain = folder(t, 'vault-plain-');
+  fs.writeFileSync(path.join(plain, 'readme.md'), '');
+  for (const dir of shared) {
+    const sid = sessionId();
+    v.startSession(sid, { cwd: dir });
+    editFile(v, sid, 'src/a.lua', { abs: path.join(dir, 'src', 'a.lua'), cwd: dir });
+  }
+  v.startSession(sessionId(), { cwd: plain });
+  const out = v.run('review.mjs', ['status']).stdout;
+  assert.deepEqual(sectionOf(out, 'Global rules that keep matching one kind of project'), ['- wally.toml: 3 projects · global/lua-names'], out);
+});
+
+// Shown a global rule from each of the folders, then a folder the rule never matched, which the candidate is checked against.
+function candidatesAfter(v, dirs, plain) {
+  for (const dir of dirs) {
+    const sid = sessionId();
+    v.startSession(sid, { cwd: dir });
+    editFile(v, sid, 'src/a.lua', { abs: path.join(dir, 'src', 'a.lua'), cwd: dir });
+  }
+  v.startSession(sessionId(), { cwd: plain });
+  const out = v.run('review.mjs', ['status']).stdout;
+  return { out, found: sectionOf(out, 'Global rules that keep matching one kind of project') };
+}
+const luaRule = v => v.write('wiki/global/rules/lua-names.md', ruleNote({ domain: 'global', applies_to: ['src/**/*.lua'], doLine: 'Name modules after their file.', notLine: 'Name modules freely.' }));
+
+test('two worktrees of one project count as one project for a domain candidate', t => {
+  const v = makeVault(t);
+  luaRule(v);
+  const main = folder(t, 'vault-lua-main-');
+  fs.mkdirSync(path.join(main, '.git'));
+  fs.writeFileSync(path.join(main, 'wally.toml'), '');
+  const trees = ['a', 'b'].map(n => {
+    const dir = path.join(main, '.claude', 'worktrees', n);
+    fs.mkdirSync(dir, { recursive: true });
+    fs.writeFileSync(path.join(dir, '.git'), `gitdir: ${posix(main)}/.git/worktrees/${n}\n`);
+    fs.writeFileSync(path.join(dir, 'wally.toml'), '');
+    return dir;
+  });
+  const plain = folder(t, 'vault-plain-');
+  fs.writeFileSync(path.join(plain, 'readme.md'), '');
+  const { out, found } = candidatesAfter(v, trees, plain);
+  assert.deepEqual(found, ['None.'], out);
+});
+
+test('a .git file at a project root is never a domain candidate', t => {
+  const v = makeVault(t);
+  luaRule(v);
+  const shared = ['one', 'two', 'three'].map(n => {
+    const dir = folder(t, `vault-lua-${n}-`);
+    fs.writeFileSync(path.join(dir, '.git'), `gitdir: ${posix(dir)}.git\n`);
+    fs.writeFileSync(path.join(dir, 'wally.toml'), '');
+    return dir;
+  });
+  const plain = folder(t, 'vault-plain-');
+  fs.writeFileSync(path.join(plain, 'readme.md'), '');
+  const { out, found } = candidatesAfter(v, shared, plain);
+  assert.deepEqual(found, ['- wally.toml: 3 projects · global/lua-names'], out);
+});
+
+test('a root file that is a link to a file counts as a domain candidate', t => {
+  const v = makeVault(t);
+  luaRule(v);
+  const store = folder(t, 'vault-store-');
+  fs.writeFileSync(path.join(store, 'wally.toml'), '');
+  const shared = [];
+  for (const n of ['one', 'two', 'three']) {
+    const dir = folder(t, `vault-lua-${n}-`);
+    try {
+      fs.symlinkSync(path.join(store, 'wally.toml'), path.join(dir, 'wally.toml'), 'file');
+    } catch (err) {
+      if (err.code === 'EPERM') return t.skip('this account cannot make symbolic links');
+      throw err;
+    }
+    shared.push(dir);
+  }
+  const plain = folder(t, 'vault-plain-');
+  fs.writeFileSync(path.join(plain, 'readme.md'), '');
+  const { out, found } = candidatesAfter(v, shared, plain);
+  assert.deepEqual(found, ['- wally.toml: 3 projects · global/lua-names'], out);
+});
+
+test('review status lists a library with enough rules and no entity page, two entity pages with one job and no comparison, and a topic its page leaves rules out of', t => {
+  const v = makeVault(t);
+  const knowledge = (slug, topic) => v.write(`wiki/glim/rules/${slug}.md`, ruleNote({
+    topic, kind: 'knowledge', basis: 'source', keywords: [slug], doLine: `Use ${slug}.`, notLine: `Skip ${slug}.`,
+    extra: ['as_of: 2026-10-01', 'package: { ecosystem: npm, name: zq-lib }'],
+    evidence: ['- 2026-10-01 · source · session 1a2b3c4d · https://example.com/zq · dated 2026-10-01 · "zq parses screens"'],
+  }));
+  for (const slug of ['zq-one', 'zq-two', 'zq-three']) knowledge(slug, 'parsing');
+  for (const slug of ['ui-one', 'ui-two', 'ui-three']) v.write(`wiki/glim/rules/${slug}.md`, ruleNote({ topic: 'ui', keywords: [slug], doLine: `Do ${slug}.` }));
+  v.write('wiki/glim/topics/ui.md', pageNote({ topic: 'ui', body: ['## Rules', '- [[wiki/glim/rules/ui-one|ui-one]]'] }));
+  for (const name of ['zr-lib', 'zs-lib']) v.write(`wiki/glim/entities/${name}.md`, pageNote({ kind: 'entity', topic: 'parsing', extra: ['job: Parse screens'] }));
+  const out = v.run('review.mjs', ['status']).stdout;
+  assert.deepEqual(sectionOf(out, 'Libraries with enough rules for an entity page'), ['- npm/zq-lib: 3 rules · glim/zq-one, glim/zq-three, glim/zq-two'], out);
+  assert.deepEqual(sectionOf(out, 'Entity pages that do the same job, with no comparison'), ['- glim/zr-lib and glim/zs-lib: Parse screens'], out);
+  assert.deepEqual(sectionOf(out, 'Topics whose rules need a topic page to roll them up'), [
+    '- glim, parsing: 3 rules, no topic page',
+    "- glim, ui: wiki/glim/topics/ui.md doesn't link glim/ui-three or glim/ui-two under ## Rules",
+  ], out);
+
+  v.write('wiki/glim/entities/zq-lib.md', pageNote({ kind: 'entity', topic: 'parsing', extra: ['package: { ecosystem: npm, name: zq-lib }'] }));
+  v.write('wiki/glim/syntheses/zr-or-zs.md', pageNote({ kind: 'synthesis', topic: 'parsing', extra: ['compares: [glim/zr-lib, glim/zs-lib]'] }));
+  const after = v.run('review.mjs', ['status']).stdout;
+  assert.deepEqual(sectionOf(after, 'Libraries with enough rules for an entity page'), ['None.'], after);
+  assert.deepEqual(sectionOf(after, 'Entity pages that do the same job, with no comparison'), ['None.'], after);
 });

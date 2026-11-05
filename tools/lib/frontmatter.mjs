@@ -366,20 +366,27 @@ function valueEnd(rest) {
   return end < 0 ? rest.length : end;
 }
 
+// Adds lines before the closing line, each ending as the first line does.
+function addLines(text, added) {
+  const lines = text.split('\n');
+  const end = closing(lines);
+  if (end < 1) return text;
+  const eol = lines[0].endsWith('\r') ? '\r' : '';
+  lines.splice(end, 0, ...added.map(l => `${l}${eol}`));
+  return lines.join('\n');
+}
+
 // A top-level list's lines are the key's line and the indented or `-` lines below it. A key that isn't there is added
 // before the closing line.
 export function setList(text, key, items) {
   const lines = text.split('\n');
   const end = closing(lines);
   if (end < 1) return text;
-  const eol = lines[0].endsWith('\r') ? '\r' : '';
   const bare = l => l.replace(/\r$/, '');
-  const written = yamlList(key, items).map(l => `${l}${eol}`);
   const at = lines.findIndex((l, i) => i > 0 && i < end && bare(l).match(KV)?.[1] === key);
-  if (at < 0) {
-    lines.splice(end, 0, ...written);
-    return lines.join('\n');
-  }
+  if (at < 0) return addLines(text, yamlList(key, items));
+  const eol = lines[0].endsWith('\r') ? '\r' : '';
+  const written = yamlList(key, items).map(l => `${l}${eol}`);
   let stop = at + 1;
   while (stop < end && /^(?:[ \t]|-)/.test(bare(lines[stop]))) stop++;
   lines.splice(at, stop - at, ...written);
@@ -406,4 +413,10 @@ export function setField(text, key, val) {
   const written = plainSafe(s) && !/^['"]/.test(old) ? s : yamlQuote(s);
   lines.splice(at.i, at.n, `${/\s$/.test(head) ? head : `${head} `}${written}${comment}${eol}`);
   return lines.join('\n');
+}
+
+// As setField, and a key the frontmatter lacks is added at its end, plain when it reads back as itself.
+export function putField(text, key, val) {
+  if (Object.hasOwn(parse(text).data, key)) return setField(text, key, val);
+  return addLines(text, [`${key}: ${yamlScalar(String(val))}`]);
 }
