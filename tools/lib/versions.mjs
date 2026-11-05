@@ -80,6 +80,8 @@ export const readerNames = d => {
   return Array.isArray(names) ? names.filter(x => typeof x === 'string') : [];
 };
 
+export const anyReaders = () => ['global', ...Object.keys(config().domains)].some(d => readerNames(d).length);
+
 const readers = new Map();
 export function reader(name) {
   if (!readers.has(name)) readers.set(name, extension('readers', name, ['read']));

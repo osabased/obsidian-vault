@@ -81,6 +81,21 @@ test("a tools rule counts when the session's agent sends its edit hook a tool it
   assert.match(v.run('status.mjs', [sid]).stdout, /^vault: glim · 4 rules /);
 });
 
+test('the status line counts the open review queue entries, and how many of them are unattended', t => {
+  const v = filled(t);
+  const entry = (id, o = {}) => ({ id, at: '2026-11-01T10:00:00.000Z', kind: 'rule', why: 'ignored', unattended: null, from: `o-${id.slice(2)}`, session: '1a2b3c4d-0000', agent: 'claude-code', domain: 'glim', key: `glim/r-${id.slice(2)}`, ...o });
+  const decision = (id, decides, decision) => ({ id, at: '2026-11-01T11:00:00.000Z', decides, decision, offer: null, session: '1a2b3c4d-0000' });
+  const queue = rows => v.write('raw/queue/2026-11-01-1a2b3c4d.jsonl', rows.map(r => `${JSON.stringify(r)}\n`).join(''));
+  queue([entry('u-0000000a'), entry('u-0000000b', { unattended: 'left' }), entry('u-0000000c', { unattended: 'subagent' }), entry('u-0000000d'),
+    decision('d-0000000a', 'u-0000000c', 'dropped'), decision('d-0000000b', 'u-0000000d', 'kept'), decision('d-0000000c', 'u-0000000a', 'later')]);
+  const sid = sessionId();
+  assert.equal(v.startSession(sid).systemMessage, 'vault: glim · 3 rules (1 always) · 1 page · proposals: corrections · queue 2 (1 unattended)', 'a later decision leaves its entry open');
+  assert.match(v.run('status.mjs', [sid]).stdout, / · queue 2 \(1 unattended\)$/m);
+  queue([entry('u-0000000a')]);
+  assert.match(v.startSession(sessionId()).systemMessage, / · proposals: corrections · queue 1$/);
+  assert.match(v.startSession(sessionId(), { cwd: v.root }).systemMessage, / · queue 1$/, 'the vault folder counts the queue too');
+});
+
 test('/vault status counts for the folder the latest prompt came from', t => {
   const v = filled(t);
   const sid = sessionId();

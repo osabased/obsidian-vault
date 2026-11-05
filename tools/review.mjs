@@ -10,7 +10,7 @@ import {
 } from './lib/rules.mjs';
 import { lint, tally } from './lib/lint.mjs';
 import { lintRan, lintDone, tidy, trackedSessions, sessionDomains, sessionName, sessionHits } from './lib/sessions.mjs';
-import { readerNames, liveRoots, projectVersions, movedOnFrom, rootOutside } from './lib/versions.mjs';
+import { anyReaders, liveRoots, projectVersions, movedOnFrom, rootOutside } from './lib/versions.mjs';
 import { subjectRows, liveRows, newestFirst, projectName } from './lib/picks.mjs';
 import { UsageError } from './lib/input.mjs';
 import { refSources, sourceVersion, sourceChains, noteCitations, newerCopies } from './lib/sources.mjs';
@@ -224,7 +224,6 @@ function queueDrops() {
     .map(r => `- ${r.decides} · ${keyOf.get(r.decides) ?? 'no entry'} · dropped ${localDay(r.at)} in session ${sessionName(String(r.session), r.agent)}`);
 }
 
-const anyReaders = () => ['global', ...Object.keys(config().domains)].some(d => readerNames(d).length);
 const knowledgeWithPackage = () => liveNotes().filter(([, r]) => r.kind === 'knowledge' && packageId(r.package));
 
 // /lint drafts a reword that fills each version in, once a reader can say what it is.

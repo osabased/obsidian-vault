@@ -415,6 +415,29 @@ test('review status says no readers are set, then lists a rule with no checked_w
   assert.match(past[0], /^- almanac\/ledger-close: checked with 1\.4\.0 · fixture\/pkg 2\.0\.0 in \S+$/);
 });
 
+test("the status line counts the rules past their version in the session's projects, and says when no version readers are set", t => {
+  const v = makeVault(t, { presets: ['almanac'] });
+  checkedRule(v, 'ledger-close', { checked: '1.4.0' });
+  const status = dir => v.startSession(sessionId(), { cwd: dir }).systemMessage;
+  assert.doesNotMatch(status(almanacAt(t, '1.9.0')), /version/);
+  assert.match(status(almanacAt(t, '2.0.0')), / · 1 rule past its version here$/);
+  checkedRule(v, 'ledger-flush', { checked: '1.2.0', doLine: 'Flush the ledger zz.' });
+  // A requires the user wrote wins over checked_with, as at delivery, and 2.0.0 is in its range.
+  checkedRule(v, 'ledger-pinned', { checked: '1.4.0', doLine: 'Pin the ledger zz.', extra: ["requires: [{ package: { ecosystem: fixture, name: pkg }, ranges: [{ type: SEMVER, events: [{ introduced: '1.0.0' }] }] }]"] });
+  checkedRule(v, 'ledger-taken', { checked: '1.4.0', doLine: 'Take the ledger zz.', extra: ['retired: 2026-11-01', 'retired_because: Replaced.'] });
+  assert.match(status(almanacAt(t, '2.0.0')), / · 2 rules past their version here$/);
+  const sid = sessionId();
+  v.startSession(sid, { cwd: almanacAt(t, '2.0.0') });
+  assert.match(v.run('status.mjs', [sid]).stdout, / · 2 rules past their version here$/m, '/vault status counts them too');
+  assert.doesNotMatch(status(almanacAt(t, null, { lock: 'other 1.0.0\n' })), /past/, "a project without the package isn't past a version of it");
+  assert.doesNotMatch(status(v.root), /past|readers/, 'the vault folder reaches no project');
+
+  const bare = makeVault(t);
+  assert.doesNotMatch(bare.startSession(sessionId()).systemMessage, /readers/, 'no rule names a package');
+  checkedRule(bare, 'ledger-open', { domain: 'global' });
+  assert.match(bare.startSession(sessionId()).systemMessage, / · proposals: corrections · no version readers set$/);
+});
+
 test('/lint drafts the checked_with a rule lacks as a reword with no basis, and keeping it writes the version and no Evidence line', t => {
   const v = makeVault(t, { presets: ['almanac'] });
   checkedRule(v, 'ledger-open', { doLine: 'Open the ledger zz.' });

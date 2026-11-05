@@ -3,7 +3,7 @@
 // pre-commit hook runs.
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { sessionId, denied, editFile, unrelatedRules, proposeAtOnce } from '../fixture.mjs';
+import { makeVault, sessionId, denied, editFile, unrelatedRules, proposeAtOnce } from '../fixture.mjs';
 import { bigVault, addNotes, GATED } from './notes.mjs';
 
 const perf = { skip: !process.env.VAULT_PERF && 'set VAULT_PERF=1 to run the timing tests' };
@@ -65,4 +65,23 @@ test('three parallel proposes at 3,000 notes all succeed', perf, async t => {
   const results = await proposeAtOnce(v, unrelatedRules('ui', `parallel-${Date.now()}`), { timeout: 120e3 });
   t.diagnostic(`3 proposes in ${Math.round(performance.now() - start)} ms`);
   assert.deepEqual(results.filter(r => r.code !== 0).map(r => `exit ${r.code ?? r.signal}: ${r.stderr.trim().split(/\r?\n/)[0]}`), []);
+});
+
+test('a session start with 2,000 open review queue entries takes under 500 ms', perf, t => {
+  const v = makeVault(t);
+  const rows = Array.from({ length: 2000 }, (_, i) => {
+    const n = String(i).padStart(8, '0');
+    return JSON.stringify({ id: `u-${n}`, at: '2026-11-01T10:00:00.000Z', kind: 'rule', why: 'ignored', unattended: i % 4 ? null : 'left', from: `o-${n}`, session: '1a2b3c4d-0000', agent: 'claude-code', domain: 'glim', key: `glim/r-${n}` });
+  });
+  v.write('raw/queue/2026-11-01-1a2b3c4d.jsonl', `${rows.join('\n')}\n`);
+  const times = [];
+  for (let i = 0; i < 3; i++) {
+    const start = performance.now();
+    const out = v.startSession(sessionId());
+    times.push(performance.now() - start);
+    assert.match(out.systemMessage, / · queue 2000 \(500 unattended\)$/);
+  }
+  times.sort((a, b) => a - b);
+  t.diagnostic(`session start, 2,000 queue entries: fastest ${Math.round(times[0])} ms, median ${Math.round(times[1])} ms of 3`);
+  assert.ok(times[0] < 500, `${Math.round(times[0])} ms`);
 });
