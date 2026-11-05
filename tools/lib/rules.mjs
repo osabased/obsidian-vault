@@ -515,6 +515,12 @@ export function noteFit(n, versions) {
   return n.checked_with ? checkedFit(n.package, n.checked_with, n.domain, versions()) : null;
 }
 
+export const namesPackage = n => n.kind === 'knowledge' && Boolean(packageId(n.package));
+
+// The rules /lint offers to retire once a project moves past the version they were checked with. A requires the user
+// wrote wins over checked_with, as at delivery.
+export const checkedWithOnly = n => namesPackage(n) && Boolean(n.checked_with) && !hasRequires(n);
+
 // Within a rank, a note its project's version settles comes before one it can't.
 export const byFit = (a, b) => Number(a?.fit === 'unknown') - Number(b?.fit === 'unknown');
 

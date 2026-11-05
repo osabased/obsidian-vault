@@ -6,7 +6,7 @@ import {
 import {
   clip, normTopic, topicNotes, loadNotes, liveRules, evidenceSessions, validDay, byKey, cmp, sharedFiles, resolver, linkedKeys, evidenceSources, isSourcePage, joinList,
   rankPair, sourceItem, fitIn, readDerived, isDocSet, folderNames, unverifiedNow, packageId, comparedKeys, isTopicPage, linksUnder, byTopic, noteKeys,
-  hasRequires, filled,
+  namesPackage, checkedWithOnly, filled,
 } from './lib/rules.mjs';
 import { lint, tally } from './lib/lint.mjs';
 import { lintRan, lintDone, tidy, trackedSessions, sessionDomains, sessionName, sessionHits } from './lib/sessions.mjs';
@@ -224,7 +224,7 @@ function queueDrops() {
     .map(r => `- ${r.decides} · ${keyOf.get(r.decides) ?? 'no entry'} · dropped ${localDay(r.at)} in session ${sessionName(String(r.session), r.agent)}`);
 }
 
-const knowledgeWithPackage = () => liveNotes().filter(([, r]) => r.kind === 'knowledge' && packageId(r.package));
+const knowledgeWithPackage = () => liveNotes().filter(([, r]) => namesPackage(r));
 
 // /lint drafts a reword that fills each version in, once a reader can say what it is.
 function uncheckedVersions() {
@@ -232,10 +232,9 @@ function uncheckedVersions() {
   return knowledgeWithPackage().filter(([, r]) => !r.checked_with).map(([k, r]) => `- ${k}: ${packageId(r.package)}`);
 }
 
-// Every project a reader has read, not only this folder's, since /lint drafts a retirement for each rule listed. A
-// requires the user wrote wins over checked_with, as at delivery.
+// Every project a reader has read, not only this folder's, since /lint drafts a retirement for each rule listed.
 function pastVersion() {
-  const rules = knowledgeWithPackage().filter(([, r]) => r.checked_with && !hasRequires(r));
+  const rules = liveNotes().filter(([, r]) => checkedWithOnly(r));
   if (!rules.length) return [];
   const projects = liveRoots().map(root => ({ root, versions: projectVersions(domainsFor(root), root) }));
   return rules.flatMap(([k, r]) => {
