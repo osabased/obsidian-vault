@@ -323,9 +323,11 @@ function almanacAt(t, version, { marker = true, lock = `pkg ${version}\n` } = {}
   return dir;
 }
 const EVIDENCE = '- 2026-10-01 · source · session 1a2b3c4d · raw/refs/ledger-guide.md · dated 2026-10-01 · "openLedger takes a path and returns the ledger" (a-00000002)';
+const REQUIRES = "requires: [{ package: { ecosystem: fixture, name: pkg }, ranges: [{ type: SEMVER, events: [{ introduced: '1.0.0' }] }] }]";
+// pkg null leaves the package line out.
 const checkedRule = (v, slug, { domain = 'almanac', checked, pkg = 'fixture, name: pkg', extra = [], doLine = 'Close the ledger zz.' } = {}) => v.write(`wiki/${domain}/rules/${slug}.md`, ruleNote({
   domain, topic: 'ledger', kind: 'knowledge', basis: 'source', applies_to: ['src/**'], doLine, notLine: 'Leave the ledger open.',
-  extra: ['as_of: 2026-10-01', `package: { ecosystem: ${pkg} }`, ...(checked ? [`checked_with: '${checked}'`] : []), ...extra],
+  extra: ['as_of: 2026-10-01', ...(pkg ? [`package: { ecosystem: ${pkg} }`] : []), ...(checked ? [`checked_with: '${checked}'`] : []), ...extra],
   evidence: [EVIDENCE],
 }));
 const deliveredAt = (v, dir) => {
@@ -351,7 +353,7 @@ test('a rule checked with 1.4.0 is delivered at 1.9.0 and not at 2.0.0, a 0.x ru
 test("a rule no reader reads the package of is delivered labelled version unknown, and a hand-written requires wins over checked_with", t => {
   const v = makeVault(t, { presets: ['almanac'] });
   checkedRule(v, 'ledger-other', { checked: '1.4.0', pkg: 'elsewhere, name: pkg', doLine: 'Close the other ledger zz.' });
-  checkedRule(v, 'ledger-pinned', { checked: '1.4.0', doLine: 'Pin the ledger zz.', extra: ["requires: [{ package: { ecosystem: fixture, name: pkg }, ranges: [{ type: SEMVER, events: [{ introduced: '1.0.0' }] }] }]"] });
+  checkedRule(v, 'ledger-pinned', { checked: '1.4.0', doLine: 'Pin the ledger zz.', extra: [REQUIRES] });
   const refusal = deliveredAt(v, almanacAt(t, '2.4.0'));
   assert.match(lineOf(refusal, 'almanac/ledger-other'), / · version unknown$/);
   assert.match(lineOf(refusal, 'almanac/ledger-pinned'), /Pin the ledger zz./, 'requires matches 2.4.0, so checked_with 1.4.0 is not read');
@@ -406,6 +408,8 @@ test('review status says no readers are set, then lists a rule with no checked_w
   const v = makeVault(t, { presets: ['almanac'] });
   checkedRule(v, 'ledger-close', { checked: '1.4.0' });
   checkedRule(v, 'ledger-open', { doLine: 'Open the ledger zz.' });
+  // A requires the user wrote wins over checked_with, so filling one in would change nothing.
+  checkedRule(v, 'ledger-pinned', { doLine: 'Pin the ledger zz.', extra: [REQUIRES] });
   deliveredAt(v, almanacAt(t, '1.9.0'));
   deliveredAt(v, almanacAt(t, '2.0.0'));
   const out = v.run('review.mjs', ['status']).stdout;
@@ -413,6 +417,70 @@ test('review status says no readers are set, then lists a rule with no checked_w
   const past = sectionOf(out, 'Rules past their version in a project');
   assert.equal(past.length, 1, out);
   assert.match(past[0], /^- almanac\/ledger-close: checked with 1\.4\.0 · fixture\/pkg 2\.0\.0 in \S+$/);
+});
+
+test("the status line counts the rules past their version in the session's projects, and says when no version readers are set", t => {
+  const v = makeVault(t, { presets: ['almanac'] });
+  checkedRule(v, 'ledger-close', { checked: '1.4.0' });
+  const status = dir => v.startSession(sessionId(), { cwd: dir }).systemMessage;
+  assert.doesNotMatch(status(almanacAt(t, '1.9.0')), /version/);
+  assert.match(status(almanacAt(t, '2.0.0')), / · 1 rule past its version here$/);
+  checkedRule(v, 'ledger-flush', { checked: '1.2.0', doLine: 'Flush the ledger zz.' });
+  // A requires the user wrote wins over checked_with, as at delivery, and 2.0.0 is in its range.
+  checkedRule(v, 'ledger-pinned', { checked: '1.4.0', doLine: 'Pin the ledger zz.', extra: [REQUIRES] });
+  checkedRule(v, 'ledger-taken', { checked: '1.4.0', doLine: 'Take the ledger zz.', extra: ['retired: 2026-11-01', 'retired_because: Replaced.'] });
+  assert.match(status(almanacAt(t, '2.0.0')), / · 2 rules past their version here$/);
+  const sid = sessionId();
+  v.startSession(sid, { cwd: almanacAt(t, '2.0.0') });
+  assert.match(v.run('status.mjs', [sid]).stdout, / · 2 rules past their version here$/m, '/vault status counts them too');
+  assert.doesNotMatch(status(almanacAt(t, null, { lock: 'other 1.0.0\n' })), /past/, "a project without the package isn't past a version of it");
+  assert.doesNotMatch(status(v.root), /past|readers/, 'the vault folder reaches no project');
+
+  const bare = makeVault(t);
+  assert.doesNotMatch(bare.startSession(sessionId()).systemMessage, /readers/, 'no rule names a package');
+  checkedRule(bare, 'ledger-open', { domain: 'global' });
+  assert.match(bare.startSession(sessionId()).systemMessage, / · proposals: corrections · no version readers set$/);
+});
+
+test("'no version readers set' counts a rule that names its package only in requires, and no rule that doesn't reach the session", t => {
+  const v = makeVault(t);
+  // A session in the vault folder reads every domain's notes, so the glim rule is read there, though it doesn't reach it.
+  checkedRule(v, 'ledger-glim', { domain: 'glim' });
+  assert.doesNotMatch(v.startSession(sessionId(), { cwd: v.root }).systemMessage, /readers/, "a glim rule doesn't reach the vault folder");
+  checkedRule(v, 'ledger-ranged', { domain: 'global', pkg: null, doLine: 'Range the ledger zz.', extra: [REQUIRES] });
+  assert.match(v.startSession(sessionId(), { cwd: v.root }).systemMessage, / · no version readers set$/);
+});
+
+test('a rule whose retirement is open or dropped in the review queue leaves the past count and review status', t => {
+  const v = makeVault(t, { presets: ['almanac'] });
+  checkedRule(v, 'ledger-close', { checked: '1.4.0' });
+  checkedRule(v, 'ledger-flush', { checked: '1.2.0', doLine: 'Flush the ledger zz.' });
+  const dir = almanacAt(t, '2.0.0');
+  const status = () => v.startSession(sessionId(), { cwd: dir }).systemMessage;
+  const listed = () => sectionOf(v.run('review.mjs', ['status']).stdout, 'Rules past their version in a project').map(l => l.split(': ')[0]);
+  const entry = { id: 'u-0000000a', at: '2026-11-01T10:00:00.000Z', kind: 'retire', why: 'drafted', unattended: null, from: null, session: '1a2b3c4d-0000', agent: 'claude-code', domain: 'almanac', key: 'almanac/ledger-close' };
+  const decision = d => ({ id: 'd-0000000a', at: '2026-11-01T11:00:00.000Z', decides: 'u-0000000a', decision: d, offer: null, session: '1a2b3c4d-0000' });
+  const queue = rows => v.write('raw/queue/2026-11-01-1a2b3c4d.jsonl', rows.map(r => `${JSON.stringify(r)}\n`).join(''));
+  assert.match(status(), / · 2 rules past their version here$/);
+  queue([entry]);
+  assert.match(status(), / · queue 1 · 1 rule past its version here$/, 'the queue count shows the open retirement');
+  assert.deepEqual(listed(), ['- almanac/ledger-flush']);
+  queue([entry, decision('later')]);
+  assert.match(status(), / · queue 1 · 1 rule past its version here$/, 'a later decision leaves it open');
+  queue([entry, decision('dropped')]);
+  assert.match(status(), / · proposals: \w+ · 1 rule past its version here$/, 'a dropped retirement keeps the rule');
+  assert.deepEqual(listed(), ['- almanac/ledger-flush']);
+});
+
+test('review status names the project a version was read in, not a project below it', t => {
+  const outer = folder(t, { 'almanac.lock': 'pkg 2.0.0\n', 'app/almanac.project': '', 'app/almanac.lock': 'pkg 1.2.0\n' });
+  const v = makeVault(t, { presets: ['almanac'], domains: { beta: { title: 'Beta', topics: ['ledger'], readers: ['fixture'] } }, local: { beta: { paths: [outer.replace(/\\/g, '/')] } } });
+  checkedRule(v, 'ledger-close', { domain: 'beta', checked: '1.4.0' });
+  deliveredAt(v, path.join(outer, 'app'));
+  const past = sectionOf(v.run('review.mjs', ['status']).stdout, 'Rules past their version in a project');
+  assert.equal(past.length, 1, past.join('\n'));
+  assert.match(past[0], /^- beta\/ledger-close: checked with 1\.4\.0 · fixture\/pkg 2\.0\.0 in \S+$/);
+  assert.doesNotMatch(past[0], /\/app$/, 'app holds 1.2.0');
 });
 
 test('/lint drafts the checked_with a rule lacks as a reword with no basis, and keeping it writes the version and no Evidence line', t => {

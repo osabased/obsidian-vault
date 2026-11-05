@@ -1,6 +1,6 @@
 # Code and data split: design draft
 
-Status: draft, 2026-11-03. The user picked A on 2026-11-03, with the answers in §9. Nothing is built.
+Status: dropped, 2026-11-05. The user picked A on 2026-11-03, with the answers in §9, then decided the split isn't worth it, since the vault is personal (`design-self-maintaining.md` §11.27). Nothing is built.
 
 Scope: where the vault's upstream code and the user's own data live, and how a vault updates. Mechanism only: this design adds no domain knowledge. It builds on G1 to G3 of branch `beginner-setup`, which the main session is building: the launcher checks the folder before it gives advice (G1), the plugin id is `obsidian-vault@obsidian-vault` (G2), and the launchers build `.live/tools` from HEAD themselves through `hooks/live.mjs` (G3). Nothing here assumes `core.hooksPath` is on.
 

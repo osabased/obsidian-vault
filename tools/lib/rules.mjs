@@ -5,7 +5,7 @@ import { parse, yamlQuote } from './frontmatter.mjs';
 import { validGlob, overlapping, entryParts, globListProblems } from './glob.mjs';
 import { config, vaultPath, shortHash, toPosix, today, inside, plural, isVaultOnly, memo, readJson, statePath, logError } from './vault.mjs';
 import { cachedNotes, cleanFromGit, noteStats } from './cache.mjs';
-import { SEMVER, SCHEMES, fitOf, checkedFit, projectVersions, rootOutside, osvPackage, compareFor, comparable, compareSemver } from './versions.mjs';
+import { SEMVER, SCHEMES, fitOf, checkedFit, movedOnFrom, projectVersions, rootOutside, osvPackage, compareFor, comparable, compareSemver } from './versions.mjs';
 import { checkDeadline } from './deadline.mjs';
 
 export const LIST_FIELDS = ['applies_to', 'triggers', 'keywords', 'tools'];
@@ -509,11 +509,20 @@ export function deliverable(items, ctx) {
 // An empty requires list requires nothing.
 export const hasRequires = n => Array.isArray(n.requires) && n.requires.length > 0;
 
-// A requires the user wrote wins over the checked_with propose filled. Null for a note neither gives.
+export const namesPackage = n => n.kind === 'knowledge' && Boolean(packageId(n.package));
+
+// The rules whose version checked_with gives: a requires the user wrote wins over the checked_with propose filled. /lint
+// offers to retire one once a project moves past it.
+export const checkedWithOnly = n => namesPackage(n) && Boolean(n.checked_with) && !hasRequires(n);
+
+// Null for a note neither gives.
 export function noteFit(n, versions) {
   if (hasRequires(n)) return fitOf(n.requires, n.domain, versions());
-  return n.checked_with ? checkedFit(n.package, n.checked_with, n.domain, versions()) : null;
+  return checkedWithOnly(n) ? checkedFit(n.package, n.checked_with, n.domain, versions()) : null;
 }
+
+// The versions in the projects given that have moved past the one a rule was checked with.
+export const pastVersions = (n, versions) => (checkedWithOnly(n) ? movedOnFrom(n.package, n.checked_with, n.domain, versions) : []);
 
 // Within a rank, a note its project's version settles comes before one it can't.
 export const byFit = (a, b) => Number(a?.fit === 'unknown') - Number(b?.fit === 'unknown');
