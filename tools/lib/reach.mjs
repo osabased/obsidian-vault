@@ -47,10 +47,12 @@ export async function sessionView(sid, cwd, agent) {
 
 const reaching = (notes, reaches) => Object.fromEntries(Object.entries(notes).filter(([, n]) => reaches(n)));
 
+// reached holds the rules that reach the session before its projects' versions rule some out.
 export function viewOf(reach, notes, ctx) {
+  const reached = reaching(liveRules(notes), reach.rule);
   return {
-    reach, notes, ctx,
-    rules: deliverable(reaching(liveRules(notes), reach.rule), ctx),
+    reach, notes, ctx, reached,
+    rules: deliverable(reached, ctx),
     pages: deliverable(reaching(livePages(notes), reach.page), ctx),
   };
 }
