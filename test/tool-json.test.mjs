@@ -150,3 +150,10 @@ test('status: [sid] with {} on stdin prints what the argv form prints, and field
   assert.deepEqual(v.run('status.mjs', [sid], { input: '' }), a);
   assert.equal(v.run('status.mjs', ['no-such-session'], { input: {} }).code, 1);
 });
+
+test("propose's schema gives the rule text's caps as the vault's config sets them", t => {
+  const v = makeVault(t, { config: { delivery: { maxRuleChars: 250 } } });
+  const { description } = schemaOf(v, 'propose.mjs').inputSchema.properties.do;
+  assert.match(description, /at most 250 characters/);
+  assert.match(description, /knowledge rule's, with its as_of date, at most 600/);
+});

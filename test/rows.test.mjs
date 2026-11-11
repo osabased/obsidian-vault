@@ -3,7 +3,7 @@ import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { makeVault, ruleNote, sessionId, userTurn } from './fixture.mjs';
+import { makeVault, ruleNote, sessionId, userTurn, sectionOf } from './fixture.mjs';
 
 const ALPHA = { title: 'Alpha', markers: ['alpha.project'], topics: ['code', 'naming'] };
 const BETA = { title: 'Beta', markers: ['beta.project'], topics: ['code'] };
@@ -330,4 +330,31 @@ test('--help says which sheets pick takes and how a file without an image type g
   const r = v.run('pick.mjs', ['--help']);
   assert.equal(r.code, 0);
   assert.match(r.stdout, /an image \(\.png, \.jpg, \.jpeg or \.webp\), or a file whose text node tools\/extract\.mjs has extracted, which\s+needs a copy in raw\/refs\//);
+});
+
+test("review status leaves a reword's Evidence line out of the rules corrected again", t => {
+  const v = makeVault(t);
+  v.write('wiki/glim/rules/roomy-cards.md', ruleNote({ applies_to: ['src/**'], evidence: [
+    '- 2026-10-01 · stated · session 1a2b3c4d · "do the thing" (a-00000001)',
+    "- 2026-10-02 · agent's reading · session 2b3c4d5e · Its keywords missed the request (a-00000002)",
+    '- 2026-10-03 · correction · session 3c4d5e6f · "do the thing again" (a-00000003)',
+  ] }));
+  const row = (id, extra = {}) => JSON.stringify({ id, at: `2026-10-0${id.at(-1)}T10:00:00.000Z`, source: 'agent', note: 'glim/roomy-cards', ...extra });
+  v.write('raw/inbox/2026-10-01.jsonl', `${row('a-00000001')}\n${row('a-00000002', { change: 'reword' })}\n${row('a-00000003')}\n`);
+  assert.deepEqual(sectionOf(v.run('review.mjs', ['status']).stdout, 'Rules corrected again in later sessions'), ['- glim/roomy-cards: session 3c4d5e6f unknown']);
+});
+
+test('review status counts a rule as not shown only to the sessions seen after it was written', t => {
+  const v = makeVault(t);
+  // An Evidence line names its session by the id's first part, so the three differ there.
+  const [early, writer, late] = ['e', 'f', 'd'].map(c => sessionId().replace(/^./, c));
+  v.startSession(early);
+  v.startSession(writer);
+  const r = v.propose(writer, { domain: 'glim', slug: 'roomy-cards', topic: 'code', basis: 'reading', reading: 'The cards looked cramped', do: 'Zebra quartz cards.', not: 'Plover lantern cards.', applies_to: ['src/**'] });
+  assert.equal(r.code, 0, r.stderr);
+  const settled = new Date(Date.now() - 3600e3);
+  fs.utimesSync(v.at('wiki', 'glim', 'rules', 'roomy-cards.md'), settled, settled);
+  v.startSession(late);
+  const [line] = sectionOf(v.run('review.mjs', ['status']).stdout, 'Rules no session was shown') ?? [];
+  assert.match(line ?? '', /^- glim\/roomy-cards: 1 session since /);
 });

@@ -50,7 +50,7 @@ test('each failed URL check records its reason, keeps checked and writes nothing
   const before = filesUnder(v, 'raw');
   const r = await refresh(v);
   const reasons = {
-    closed: 'fetch failed: ECONNREFUSED', hang: 'no answer in 1 s', missing: 'HTTP 404', moved: 'redirected to /elsewhere',
+    closed: 'fetch failed: ECONNREFUSED', hang: 'no answer in 1 s', missing: 'HTTP 404', moved: `redirected to ${server.url('/elsewhere')}. If that is the same page, save it again from there as a new file in raw/refs/`,
     big: 'body over 64 bytes', latin: "body isn't UTF-8 text",
   };
   for (const [name, why] of Object.entries(reasons)) {

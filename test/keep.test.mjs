@@ -584,7 +584,17 @@ test('a reword that gives an always rule its first keywords names the empty scop
   v.write(OLD_RULE, ruleNote({ always: true }));
   const sid = started(v);
   const o = offered(v.propose(sid, reword({ do: undefined, keywords: ['thing'] })));
-  assert.equal(o.text.split('\n').slice(3, 5).join('\n'), 'Was: no keywords or applies_to\nNow: Keywords: thing');
+  assert.equal(o.text.split('\n').slice(0, 3).join('\n'), '**Change this rule?** glim/the-thing: Do: Do the thing. Not: Skip the thing.\nWas: no keywords or applies_to\nNow: Keywords: thing', 'the unchanged text is given once');
+});
+
+test('a reword offer ends a reading that is a sentence already with its own period', t => {
+  const v = makeVault(t, { config: { proposals: 'ask' } });
+  v.write(OLD_RULE, ruleNote({ keywords: ['thing'] }));
+  const sid = started(v);
+  const o = offered(v.propose(sid, reword({ basis: 'reading', quote: undefined, reading: 'The request missed its keywords.' })));
+  assert.equal(o.text.split('\n').at(-1), 'Its note would get this Evidence: The request missed its keywords.');
+  const k = keepAllowed(v, sid, o.id, o.text);
+  assert.equal(k.code, 0, k.stderr);
 });
 
 test('change without key, key without change, and a change other than reword are refused', t => {

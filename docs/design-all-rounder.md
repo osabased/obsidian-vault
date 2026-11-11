@@ -726,7 +726,7 @@ The phases build mechanism only. Adding real knowledge and taste is the user's c
        - no network or no such host: `fetch failed: <err.cause.code>`, such as `ENOTFOUND`;
        - timeout: `no answer in 20 s`;
        - a status other than 2xx and 304: `HTTP 404`;
-       - a 3xx: `redirected to <Location>`. Refresh doesn't follow it, so the user saves the source again under its new URL;
+       - a 3xx: `redirected to <Location as a full URL>`, and to save the page again from there if it is the same page. Refresh doesn't follow it, so the user saves the source again under its new URL;
        - a body over the cap, fetched or at a commit: `body over 5000000 bytes`;
        - a body that isn't UTF-8: `body isn't UTF-8 text`;
        - git missing: `git not found`. A clone or fetch that exits non-zero gives its exit code and the first line of git's stderr;
@@ -1416,7 +1416,7 @@ The phases build mechanism only. Adding real knowledge and taste is the user's c
    - **Rules that change.**
      - `.claude/skills/ingest/SKILL.md`: step 4 (line 24) and batch step 4 (line 49) offer a new domain for a source that fits none, as 6.3e says. `node tools/lint.mjs --fix` updates the copy.
      - `pre-tool.mjs:17`: the message says that `domain.mjs` adds a folder once the user agrees, and that otherwise the file is the user's.
-     - The README's Hooks section says an agent can start a domain once the user agrees, and that the lines it writes are the user's to edit or delete.
+     - The README's Daily use section says an agent can start a domain once the user agrees, and that the lines it writes are the user's to edit or delete.
      - AGENTS.md changes as §10 says.
    - **Open questions.** The recommended choice comes first, and is what this design says.
      - Consent comes from the prompt on the offer's `keep`, or from the one typed message after the offer that holds its code, never from an earlier "yes" to something else.

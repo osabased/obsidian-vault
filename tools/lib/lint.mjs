@@ -627,7 +627,7 @@ function lintEvidence(n, ctx, add) {
   const { textsOf, pageTextsOf, rowOf, unchecked } = ctx;
   for (const { line, session, note, source, pick, quote, id } of evidenceQuotes(n)) {
     if (line) {
-      add('warn', n.rel, `an Evidence line isn't in the form propose.mjs writes, so lint can't check it: ${clip(line, 100)}`);
+      add('warn', n.rel, `an Evidence line isn't in a form reference/notes.md's Rule notes section gives, so lint can't check it: ${clip(line, 100)}`);
     } else if (note) {
       const texts = pageTextsOf(note);
       if (!vaultFile(note)) add('warn', n.rel, `an Evidence line cites ${note}, which isn't a file in the vault`);

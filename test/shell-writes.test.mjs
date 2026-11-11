@@ -155,3 +155,18 @@ test("the vault's own files a shell command writes get no rule at Stop, vault.lo
   assert.match(ctx, /^other\.json:/m, 'a file of the vault folder that is not its own still gets the rule');
   assert.doesNotMatch(ctx, /vault\.local\.json/);
 });
+
+test("log.md, which the vault's tools append to, gets no rule at Stop", t => {
+  const v = makeVault(t);
+  const env = cleanEnv({ GIT_CONFIG_NOSYSTEM: '1', GIT_CONFIG_GLOBAL: '/dev/null' });
+  execFileSync('git', ['init', '-q'], { cwd: v.root, env, stdio: 'pipe' });
+  v.write('wiki/global/rules/md-rule.md', ruleNote({ domain: 'global', applies_to: ['**/*.md'], doLine: 'Wrap at 100.' }));
+  const sid = sessionId();
+  v.startSession(sid, { cwd: v.root });
+  prompt(v, sid, 'log the run with a script', { cwd: v.root });
+  v.write('log.md', '- 2026-11-10 lint\n', { settled: false });
+  v.write('other.md', 'text\n', { settled: false });
+  const ctx = v.hook('stop', { session_id: sid, cwd: v.root, hook_event_name: 'Stop', stop_hook_active: false })?.hookSpecificOutput?.additionalContext ?? '';
+  assert.match(ctx, /^other\.md:/m, 'a file of the vault folder that is not its own still gets the rule');
+  assert.doesNotMatch(ctx, /^log\.md/m);
+});

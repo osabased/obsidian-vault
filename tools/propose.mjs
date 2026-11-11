@@ -1,4 +1,4 @@
-import { domainTopics } from './lib/rules.mjs';
+import { domainTopics, maxChars } from './lib/rules.mjs';
 import { proposeRule } from './lib/propose-rule.mjs';
 import { UsageError, readInput, failure, renderHelp, schemaOf, schemaArg } from './lib/input.mjs';
 import { currentSession } from './lib/agents.mjs';
@@ -17,7 +17,7 @@ const fields = () => [
   { name: 'domain', type: S, help: ["this session's domain (in the vault folder, any domain that isn't vaultOnly), or global for every project;", 'a session in a folder no domain reaches proposes to global only'] },
   { name: 'slug', type: S, help: ['lowercase-kebab-case'] },
   { name: 'kind', type: S, enum: ['taste', 'knowledge'], help: ['"taste" (the default), or "knowledge" for a fact about an API, version or tool', "that your training gets wrong or doesn't know"] },
-  { name: 'do', type: S, label: 'do, not', help: ['one line each'] },
+  { name: 'do', type: S, label: 'do, not', help: [`one line each. Do, Not and Because, with their labels, come to at most ${maxChars('taste')} characters;`, `a knowledge rule's, with its as_of date, at most ${maxChars('knowledge')}`] },
   { name: 'not', type: S },
   { name: 'because', type: S, help: ["the user's reason, or for knowledge the cause; empty rather than invented"] },
   { name: 'topic', type: S, help: ["a short topic; reuse one the domain's rules or pages have, or one of its listed topics:", ...topicLines()] },

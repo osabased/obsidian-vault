@@ -50,7 +50,7 @@ updated: 2026-10-19
 - `retired` and `retired_because`: the day the rule was retired, as YYYY-MM-DD, and why, in one line. The `propose` tool writes them, with `superseded_by` when another rule replaces it, through `change: 'retire'` once the user keeps the offer. A retired note stays in the vault and its links keep working; `index.md` lists it as retired, and the hooks stop delivering it. A `retired` that is no such day doesn't retire the note: lint reports it as an error. Deleting the note is the user's to do in Obsidian.
 - `moved_from`: the key the rule had before the `propose` tool moved it to another domain through `change: 'move'`. Evidence lines, inbox rows, shown-markers, links and `repeats` that still name the old key resolve to the moved note through it, and a page can't take the old key. A second move replaces it.
 - Single-quote globs and regexes so Obsidian reads them as text and keeps a namespace's backslash escapes.
-- Single-quote any list item that holds `: ` or would read as a number or `true`. YAML reads the first as a key and value and the second as no text, and lint reports either as the note's error, so the note isn't delivered.
+- Single-quote any list item that holds `: ` or would read as a number, a date, `true`, `false` or `null`, so it stays text. Lint reports an item that holds `: ` or reads as `true` or `false` as the note's error, so the note isn't delivered; an unquoted `null` leaves the list without a report.
 - The `propose` tool refuses a field it doesn't take, such as `tools` or `requires`; add those to the note it writes.
 - `**Do:**` and `**Not:**` are required, one line each. Pair every "never X" with an "instead Y". `**Because:**` gives the user's reason; leave it empty rather than invent one. Keep the three lines together under 300 characters for a taste rule and 600 for a knowledge rule, counting the "As of" date a knowledge rule is delivered with (`delivery.maxRuleChars` and `delivery.maxKnowledgeRuleChars`). The hooks cut a rule at its cap.
 - `## Evidence` has one line per source: date, kind (`stated` or `correction`; `choice` for a pick), the session's short name, the user's exact words, and the proposal id. A `choice` line also names the options the user passed over and the question, and ends with the pick's id and the proposal id. A `failure` line gives the file, the error as a tool printed it and `fixed by:` the fix; a `source` line gives the URL or `raw/refs/` file, `dated` its date, and its exact words. An `agent's reading` line gives your reading in your own words, unquoted. A `stated` line quoting a page with `author: user` gives the page's path where the session goes: `- 2026-10-19 · stated · wiki/example-ui/concepts/grid.md · "the grid is 8px" (a-1a2b3c4d)`.
@@ -60,10 +60,10 @@ updated: 2026-10-19
 
 Pages hold knowledge in the agent's words, or with `author: user` the user's own; What belongs here in `AGENTS.md` says what counts. Sessions find them through `index.md`, and the hooks point a session to one whose `keywords` or `applies_to` match its work. Each page has one `kind`:
 
-- **topic**: sums up what the vault knows on one topic: how its rules and pages fit together, the sources behind them, and what's still open. It links each other page on its topic, source pages included. Each topic in a domain has at most one; `/ingest`, `/lint` and a filed-back answer update it, and start it when the topic has none. Name it after its topic.
-- **concept**: one idea, technique or API, explained.
-- **entity**: one named thing, such as a library, tool, service or game.
-- **synthesis**: an answer or comparison a session worked out from the vault and filed back, so a later session can reuse it.
+- **topic** (`topics/`): sums up what the vault knows on one topic: how its rules and pages fit together, the sources behind them, and what's still open. It links each other page on its topic, source pages included. Each topic in a domain has at most one; `/ingest`, `/lint` and a filed-back answer update it, and start it when the topic has none. Name it after its topic.
+- **concept** (`concepts/`): one idea, technique or API, explained.
+- **entity** (`entities/`): one named thing, such as a library, tool, service or game.
+- **synthesis** (`syntheses/`): an answer or comparison a session worked out from the vault and filed back, so a later session can reuse it.
 - **source** (`sources/source-<slug>.md`): one source, what it says, and the user's words about it. `/ingest` writes it.
 
 Check `index.md` that no note has the slug before you start a page.

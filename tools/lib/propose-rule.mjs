@@ -3,7 +3,7 @@ import {
   shortHash, isVaultOnly, sessionReach, cwdOf, proposalMode, inVaultFolder, newId, readPlain, restore, queueRows, config, rewriteText, moveFile,
 } from './vault.mjs';
 import {
-  KEY_RE, BASES, PAGE_WHERE, wrongBasis, parseNote, noteErrors, ruleText, ruleTextParts, loadNotes, readNote, liveRules, isLive, mentions, isUrl, validDay, byKey, normTopic, vaultFile, joinList,
+  KEY_RE, BASES, PAGE_WHERE, wrongBasis, parseNote, noteErrors, ruleText, ruleTextParts, sentence, loadNotes, readNote, liveRules, isLive, mentions, isUrl, validDay, byKey, normTopic, vaultFile, joinList,
   sharedFiles, rankPair, maxChars, fitIn, hasChannel, rulePath, leadPattern, isRetired, packageId, knownDomain, resolver, relink, toKey, authoredByUser, noteLinks,
 } from './rules.mjs';
 import { projectVersions, versionIn, compareFor } from './versions.mjs';
@@ -368,7 +368,7 @@ function addEvidence(f, e, scope, rules, same, row, notes) {
   if (bump && cantOffer(f, rule.domain)) bump = f.checked_with = null;
   const offer = consent(f, rule.domain, 'evidence', target, [
     `**Back this rule again?** ${target}: ${rule.text}`,
-    `Its note would get this Evidence: ${e.cite}.`,
+    `Its note would get this Evidence: ${sentence(e.cite)}`,
     ...(bump ? [`Its checked_with would move from ${rule.checked_with} to ${bump}, the version of ${packageId(rule.package)} here.`] : []),
   ], { offerOnly: Boolean(bump) });
   if (offer) return { offer };
@@ -620,7 +620,6 @@ function changeNote(sid, session, p, opts, { kind, check, lines, write }) {
 
 const RETIRE_FIELDS = new Set(['change', 'key', 'because', 'superseded_by', 'hold', 'asked']);
 const MOVE_FIELDS = new Set(['change', 'key', 'domain', 'hold', 'asked']);
-const sentence = s => (/[.!?]$/.test(s) ? s : `${s}.`);
 
 // A retired rule keeps its note and its links; the hooks skip it as they skip a superseded one.
 function retire(sid, session, p, opts) {
@@ -772,9 +771,8 @@ function reword(sid, session, p, opts) {
     if (e) checkPick(e, e.pick ? proposalRows() : []);
     const scope = where(was) === where(f) ? [] : [`Was: ${where(was)}`, `Now: ${where(f)}`];
     const version = f.checked_with === was.checked_with ? [] : [`Was: ${versionLine(was)}`, `Now: ${versionLine(n)}`];
-    const offer = consent(f, f.domain, 'reword', key, versionOnly
-      ? [`**Change this rule?** ${key}: ${ruleText(n)}`, ...version]
-      : [`**Change this rule?** ${key}`, `Was: ${ruleText(was)}`, `Now: ${ruleText(n)}`, ...scope, ...version, `Its note would get this Evidence: ${e.cite}.`],
+    const head = versionOnly || ruleText(was) === ruleText(n) ? [`**Change this rule?** ${key}: ${ruleText(n)}`] : [`**Change this rule?** ${key}`, `Was: ${ruleText(was)}`, `Now: ${ruleText(n)}`];
+    const offer = consent(f, f.domain, 'reword', key, versionOnly ? [...head, ...version] : [...head, ...scope, ...version, `Its note would get this Evidence: ${sentence(e.cite)}`],
     // checked_with decides which projects the rule reaches, and the user confirms the version, as for evidence that moves it.
     { offerOnly: version.length > 0 });
     if (offer) return { offer };

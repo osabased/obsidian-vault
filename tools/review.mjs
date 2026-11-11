@@ -1,7 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import {
-  config, plural, toPosix, pathKey, guarded, hookErrors, errorsLog, localDay, appendLog, isVaultOnly, sessionReach, cwdOf, queueRows, isMarkerName, domainsFor, isFileAt,
+  config, plural, toPosix, pathKey, guarded, hookErrors, errorsLog, localDay, appendLog, proposalRows, isVaultOnly, sessionReach, cwdOf, queueRows, isMarkerName, domainsFor, isFileAt,
 } from './lib/vault.mjs';
 import {
   clip, normTopic, topicNotes, loadNotes, liveRules, evidenceSessions, validDay, byKey, cmp, sharedFiles, resolver, linkedKeys, evidenceSources, isSourcePage, joinList,
@@ -67,21 +67,30 @@ const liveNotes = once(() => {
 const tracked = once(trackedSessions);
 // A session shown a rule before its move recorded the key it had then.
 const shownTo = (t, n) => noteKeys(n).some(k => t.keys.has(k));
+const rewords = once(() => new Set(proposalRows().filter(r => r.change === 'reword').map(r => r.id)));
+// When each rule was first proposed, by the key it had then.
+const firstRows = once(() => {
+  const at = new Map();
+  for (const r of proposalRows()) if (typeof r.note === 'string' && typeof r.at === 'string' && !at.has(r.note)) at.set(r.note, r.at);
+  return at;
+});
 
 // Sessions are known only by the prefix an Evidence line gives; one whose markers were pruned, or that ran before
-// the hooks recorded deliveries, is unknown.
+// the hooks recorded deliveries, is unknown. A reword's Evidence line is the remedy rather than a correction, so its
+// session isn't one.
 function correctedAgain() {
   const seen = (s, n) => {
     const t = tracked().find(x => x.id.startsWith(s));
     return !t ? 'unknown' : shownTo(t, n) ? 'shown' : 'not shown';
   };
   return liveNotes().flatMap(([k, , n]) => {
-    const later = evidenceSessions(n).slice(1);
+    const later = evidenceSessions(n, rewords()).slice(1);
     return later.length ? [`- ${k}: ${later.map(s => `session ${s} ${seen(s, n)}`).join(', ')}`] : [];
   });
 }
 
-// Counts the registered sessions in the rule's domain, active since it was written, that aren't in its Evidence.
+// Counts the registered sessions in the rule's domain, active since it was written, that aren't in its Evidence. A
+// rule with an inbox row was written at that row's time; one written by hand is dated only by its created day.
 function neverShown() {
   const registered = tracked().filter(t => t.cwd !== null);
   const domains = new Map(registered.map(t => [t.id, sessionDomains(t.id, t.cwd)]));
@@ -89,8 +98,9 @@ function neverShown() {
     if (tracked().some(t => shownTo(t, n))) return [];
     const created = validDay(n.data.created) ? n.data.created : '';
     const behind = new Set(evidenceSessions(n));
+    const written = noteKeys(n).flatMap(key => firstRows().get(key) ?? []).sort()[0];
     const missed = registered.filter(t => (r.domain === 'global' || domains.get(t.id).includes(r.domain))
-      && localDay(t.last) >= created && !behind.has(t.name)).length;
+      && (written && t.last ? t.last >= written : localDay(t.last) >= created) && !behind.has(t.name)).length;
     return missed ? [{ k, missed, line: `- ${k}: ${plural(missed, 'session')}${created ? ` since ${created}` : ''}` }] : [];
   }).sort((a, b) => b.missed - a.missed || cmp(a.k, b.k)).map(x => x.line);
 }

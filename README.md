@@ -38,7 +38,7 @@ The next session makes `.live/tools/` again from what you pulled.
 1. **Work as usual.** Each new or resumed session starts with one line, such as `vault: roblox · 12 rules (2 always) · 3 pages · proposals: ask`: the domains the folder is in, the rules and pages that can reach the session, and when agents propose rules. Then it names what waits for you, such as `queue 3 (1 unattended)` for review-queue entries that `/lint` walks you through, `2 rules past their version here` for rules whose library this project has moved past, or `no version readers set` when rules name a library but no domain says how to read its version. `vault: no domain here` means only `global` reaches it.
 2. **Correct the agent.** When you say how you want things, the agent keeps it as a rule, in the way `proposals` sets: `ask` offers each rule and keeps it once you agree. In Claude Code you agree at its permission prompt for the vault's `keep` tool, which shows the rule and where it applies: Allow once keeps it, Deny drops the offer. In Codex the offer ends with a short code, and you agree by typing it in your next message. The rule reaches later sessions from then on.
 3. **Check what reached a session.** `/obsidian-vault:vault status` prints the start line again, then the rules and pages the vault has shown the session since it started or was last compacted.
-4. **Read and edit in Obsidian.** Open this folder, not the one above it, as the Obsidian vault, so its ignore filters apply. Edit or delete any note; a saved note applies after a minute without another save.
+4. **Read and edit in Obsidian.** Open this folder, not the one above it, as the Obsidian vault, so its ignore filters apply. Edit or delete any note; a saved note applies after a minute without another save. Nothing commits your notes: the vault reads them from this folder whether you commit them or not.
 5. **Go through sources and tidy up here.** Open Claude Code in this folder for `/obsidian-vault:ingest` and `/obsidian-vault:lint`; the session start reminds you when lint is due.
 
 A project whose kind no domain covers gets an offer to start one. For folders where that offer is noise, such as an app's scratch folders, list globs over their absolute paths under `quiet` in `vault.local.json`: sessions there can still keep a rule in `global`, and hear no domain offer.
@@ -47,9 +47,11 @@ A project whose kind no domain covers gets an offer to start one. For folders wh
 { "domains": {}, "quiet": ["C:/Users/me/AppData/Local/SomeApp/**/scratch/**"] }
 ```
 
+A domain reaches projects by the `markers` in `vault.config.json`, or by this machine's folders, which go in the untracked `vault.local.json` as `{ "domains": { "<domain>": { "paths": ["<absolute folder>"] } } }`. A session in a project no domain reaches can keep a preference in `global`, or suggest a domain to you; once you agree, as to a rule, the `domain` tool adds it to `vault.config.json`, and for a folder alone to `vault.local.json` too. Both files stay yours to edit.
+
 ## Plugin
 
-The repo is also a Claude Code plugin with three skills, the hooks and the vault's tools:
+The repo is also a Claude Code plugin with three skills, the hooks and the vault's tools. In a session opened in this folder the same skills also answer to `/ingest`, `/lint` and `/vault`, the names the session-start reminder uses:
 
 - `/obsidian-vault:ingest` goes through a source with you, a file or a URL whose text it saves, and turns it and what you say about it into pages and rules. `/obsidian-vault:ingest batch` takes in every file in `raw/refs/` no source page names yet, and asks before adding any rule.
 - `/obsidian-vault:lint` checks the whole wiki and proposes fixes.
@@ -69,7 +71,7 @@ Sessions run the hooks from `.live/tools/`, a copy of `tools/` as of the last co
 git config core.hooksPath .githooks
 ```
 
-`pre-commit` runs the tests, rebuilds the generated files and lints. `post-commit` refreshes `.live/tools/` after each commit, and the other hooks run it after a checkout, merge or rebase. A domain reaches projects by the `markers` in `vault.config.json`, or by this machine's folders, which go in the untracked `vault.local.json` as `{ "domains": { "<domain>": { "paths": ["<absolute folder>"] } } }`. A session in a project no domain reaches can keep a preference in `global`, or suggest a domain to you; once you agree, as to a rule, the `domain` tool adds it to `vault.config.json`, and for a folder alone to `vault.local.json` too. Both files stay yours to edit.
+`pre-commit` runs the tests, rebuilds the generated files and lints. It commits the generated files only when the notes they are built from are all in the commit, so a commit never names a rule you kept out of git. `post-commit` refreshes `.live/tools/` after each commit, and the other hooks run it after a checkout, merge or rebase.
 
 ## Limits of consent
 
@@ -98,7 +100,7 @@ What Codex doesn't give the vault, and the vault doesn't work around:
 - **Consent.** Codex's own approval prompt for an MCP tool plays no part in whether a rule is kept. An offer ends with a four-character code, and the rule is kept only when your next message, and no other since the offer, holds the code, after a reply of the agent's that showed the offer. Codex fixes its tool list when it connects, so restart it after the vault's tools change.
 - **Context size.** `additionalContextLimit` counts tokens by Codex's own estimate, and Codex saves longer context to a file with a preview.
 - **Untrusted hooks** don't run, and the vault can't tell.
-- **The status line** isn't shown, since the vault doesn't know whether Codex shows a hook's `systemMessage`. `node tools/status.mjs` prints it.
+- **The status line** isn't shown, since the vault doesn't know whether Codex shows a hook's `systemMessage`. Ask the agent for the vault's `status` tool, which prints it.
 
 ### Projects without the hooks
 

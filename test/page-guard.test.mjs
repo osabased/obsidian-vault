@@ -191,7 +191,7 @@ test('from a vault-folder session, an existing wiki note that cannot be read is 
 test('from a vault-folder session, queue.md is refused as a generated file, as active.md is', t => {
   const v = vault(t, { 'queue.md': 'generated\n', 'active.md': 'generated\n' });
   const write = rel => editVault(v, SID, rel, 'Write', { content: 'by hand\n' });
-  assert.match(denied(write('active.md')) ?? '', /is generated from the notes/);
+  assert.equal(denied(write('active.md')), 'active.md is generated from the notes. Edit the notes instead, then run `node tools/build.mjs`.');
   assert.equal(denied(write('queue.md')), 'queue.md is generated from the entries in raw/queue/. Use tools/queue.mjs instead.');
 });
 

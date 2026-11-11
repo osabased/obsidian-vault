@@ -191,7 +191,7 @@ test('lint warns on an Evidence line it can\'t read, and on one whose source is 
   ] }));
   const found = await lintFound(v, /Evidence line/);
   assert.deepEqual(found.map(f => [f.level, f.msg]), [
-    ...lines.map(l => ['warn', `an Evidence line isn't in the form propose.mjs writes, so lint can't check it: ${l}`]),
+    ...lines.map(l => ['warn', `an Evidence line isn't in a form reference/notes.md's Rule notes section gives, so lint can't check it: ${l}`]),
     ['warn', 'an Evidence line cites raw/refs/notse.md. Cite a URL or a file under raw/ that exists'],
   ]);
 });

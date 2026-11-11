@@ -170,8 +170,8 @@ test('keep and proposals print their fields as pinned, and no script asks for ap
     '  domain     optional, a domain to give a mode of its own; without it, or with global, the mode for global and',
     '             every domain without one of its own',
     '',
-    'A session in the vault folder proposes as in corrections whatever the mode, since /ingest goes through each rule with',
-    'the user.',
+    'A session in the vault folder offers as in ask whatever the mode, and without the off gate, since /ingest and /lint go',
+    'through each change with the user.',
     '',
   ].join('\n'));
   assert.match(help('propose.mjs'), /\n {2}asked {8}the user's words asking you to keep the rule, as they typed them in their latest message\. Needed outside\n {15}the vault folder when proposals is off for the domain\.\n/);
