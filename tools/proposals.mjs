@@ -12,8 +12,8 @@ const FIELDS = [
 
 const help = () => renderHelp([RUN, '', 'Sets when agents propose rules, in vault.config.json. mode.json is an object with these fields:'], FIELDS, [
   '',
-  'A session in the vault folder proposes as in corrections whatever the mode, since /ingest goes through each rule with',
-  'the user.',
+  'A session in the vault folder offers as in ask whatever the mode, and without the off gate, since /ingest and /lint go',
+  'through each change with the user.',
 ], 11);
 
 const SUMMARY = {

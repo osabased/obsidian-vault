@@ -1,6 +1,12 @@
-/* Excluded files leave search and the graph, but Obsidian still lists them in the file explorer. */
+/* Excluded files leave search and the graph, but Obsidian still lists them in the file explorer. The folders after
+   test are not excluded: they hold no file Obsidian reads, so it lists each as an empty folder. */
 .nav-folder:has(> .nav-folder-title[data-path="tools"]),
 .nav-folder:has(> .nav-folder-title[data-path="test"]),
+.nav-folder:has(> .nav-folder-title[data-path="hooks"]),
+.nav-folder:has(> .nav-folder-title[data-path="mcp"]),
+.nav-folder:has(> .nav-folder-title[data-path="raw/inbox"]),
+.nav-folder:has(> .nav-folder-title[data-path="raw/queue"]),
+.nav-folder:has(> .nav-folder-title[data-path="raw/picks"]),
 .nav-file:has(> .nav-file-title[data-path="CLAUDE.md"]) {
   display: none;
 }

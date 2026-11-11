@@ -100,7 +100,7 @@ export const fromRoot = ref => (path.isAbsolute(ref) && vaultRel(ref)) || ref;
 
 // The vault's notes and sources are the user's taste, and the rest are written by the tools or kept for this machine,
 // so no rule covers them, and the edit guard decides what may change.
-const VAULT_OWN = /^(?:wiki|raw|derived|\.state|\.live|\.sources)(?:\/|$)|^(?:active\.md|index\.md|decisions\.md|queue\.md|vault\.local\.json)$/i;
+const VAULT_OWN = /^(?:wiki|raw|derived|\.state|\.live|\.sources)(?:\/|$)|^(?:active\.md|index\.md|decisions\.md|queue\.md|log\.md|vault\.local\.json)$/i;
 export const vaultOwn = rel => typeof rel === 'string' && VAULT_OWN.test(rel);
 
 const caseFolds = process.platform === 'win32' || process.platform === 'darwin';

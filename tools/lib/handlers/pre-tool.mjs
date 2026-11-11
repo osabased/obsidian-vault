@@ -11,10 +11,12 @@ import { extension } from '../ext.mjs';
 import { rootOutside } from '../versions.mjs';
 import { mark, marked, markMany, markShown, markPages, duePages, agentKey, keyHash, sessionHits, turnStart, registry } from '../sessions.mjs';
 
-function vaultGuard(rel, file, cwd) {
+function vaultGuard(rel, file, cwd, inVault) {
   if (!vaultOwn(rel)) return null;
   const low = rel.toLowerCase();
-  if (low === 'active.md' || low === 'index.md') return `${rel} is generated from the notes. Edit the notes instead, then run \`node tools/build.mjs\`.`;
+  if (low === 'active.md' || low === 'index.md') {
+    return `${rel} is generated from the notes. ${inVault ? 'Edit the notes instead, then run `node tools/build.mjs`.' : "Outside the vault folder, rules and pages change only through the vault's `propose` tool."}`;
+  }
   if (low === 'vault.local.json') return `${rel} lists this machine's project folders for each domain. \`node tools/domain.mjs\` adds a session's folder once the user agrees to a new domain; otherwise leave it to the user.`;
   if (low === 'decisions.md') return `${rel} is generated from the picks in raw/picks/. Record picks with tools/pick.mjs instead.`;
   if (low === 'queue.md') return `${rel} is generated from the entries in raw/queue/. Use tools/queue.mjs instead.`;
@@ -236,7 +238,7 @@ export async function preTool(event) {
   const cwd = cwdOf(event);
   if (t?.namespace === 'file') {
     const rel = vaultRel(t.path, cwd);
-    const why = vaultGuard(rel, t.path, cwd) ?? (wikiNote(rel) ? wikiNoteGuards(event, rel, t.path, cwd) : null);
+    const why = vaultGuard(rel, t.path, cwd, vaultSession(event, cwd)) ?? (wikiNote(rel) ? wikiNoteGuards(event, rel, t.path, cwd) : null);
     if (why) return { deny: why };
     if (vaultOwn(rel)) return null;
   }

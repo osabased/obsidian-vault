@@ -74,7 +74,7 @@ test('the vault guard refuses edits to generated files, .state and existing raw 
   v.write('raw/inbox/2026-10-01.jsonl', '{}\n');
   v.write('.state/sessions.json', '{}');
   const guard = rel => denied(edit(v, sid, '', { abs: v.at(...rel.split('/')) }));
-  assert.match(guard('index.md'), /^index\.md is generated from the notes\. Edit the notes instead, then run `node tools\/build\.mjs`\.$/);
+  assert.equal(guard('index.md'), "index.md is generated from the notes. Outside the vault folder, rules and pages change only through the vault's `propose` tool.");
   assert.match(guard('active.md'), /^active\.md is generated/);
   assert.match(guard('decisions.md'), /^decisions\.md is generated from the picks/);
   assert.equal(guard('.state/sessions.json'), ".state/ is the hooks' own bookkeeping. Leave it to them.");

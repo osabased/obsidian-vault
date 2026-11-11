@@ -53,7 +53,10 @@ async function fetchText(url, { etag, lastModified }) {
     }
     if (res.status >= 300 && res.status < 400) {
       await res.body?.cancel().catch(() => {});
-      throw new Failed(`redirected to ${res.headers.get('location') ?? '(no Location)'}`);
+      const location = res.headers.get('location');
+      throw new Failed(location
+        ? `redirected to ${URL.parse(location, url)?.href ?? location}. If that is the same page, save it again from there as a new file in raw/refs/`
+        : 'redirected to (no Location)');
     }
     if (res.status < 200 || res.status >= 300) {
       await res.body?.cancel().catch(() => {});

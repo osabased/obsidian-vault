@@ -154,7 +154,7 @@ function noteFrom({ data, body, ok, errors }, rel) {
   return note;
 }
 
-const sentence = s => (/[.!?…]$/.test(s) ? s : `${s}.`);
+export const sentence = s => (/[.!?…]$/.test(s) ? s : `${s}.`);
 
 export const ruleText = n => [
   `Do: ${sentence(n.do)}`, `Not: ${sentence(n.not)}`,
@@ -769,11 +769,12 @@ export function userWords(text) {
 
 // An Evidence line is <day> · <kind> · session <id> · <what backs it>, the last part as propose.mjs's evidenceLine
 // writes it for the kind. A stated line quoting a page of the user's has that page's path where the session goes.
-// A line in another form comes back without a kind.
+// A line in another form comes back without a kind. id is the proposal's, the last in the brackets that end the line.
 const EVIDENCE_KINDS = ['stated', 'correction', 'source', 'failure', 'choice', "agent's reading"];
 const evidenceLines = n => [...sectionNamed(n, 'evidence').matchAll(/^- .*$/gm)].map(([line]) => {
   const m = line.match(/^- [^·]*· ([^·]*)· (?:session ([^\s·]+)|(wiki\/.+?\.md)(?= · |\s*$))(?: · (.*))?/);
-  return { line: line.trim(), day: line.match(/^- (\d{4}-\d\d-\d\d)\b/)?.[1], kind: m?.[1].trim(), session: m?.[2], note: m?.[3], cite: m?.[4] ?? '' };
+  const cite = m?.[4] ?? '';
+  return { line: line.trim(), day: line.match(/^- (\d{4}-\d\d-\d\d)\b/)?.[1], kind: m?.[1].trim(), session: m?.[2], note: m?.[3], cite, id: cite.match(/\((?:[^()]*; proposed as )?([^();\s]+)\)[ \t]*$/)?.[1] };
 });
 
 // The fit of each note for the projects given, for rankPair, or undefined when they hold no project root, so as_of
@@ -785,8 +786,8 @@ export function fitIn(hits, cwd) {
   return n => noteFit(n, () => (versions ??= projectVersions(hits, cwd, fallback)));
 }
 
-// The session prefixes the Evidence lines give, first seen first.
-export const evidenceSessions = n => [...new Set(evidenceLines(n).flatMap(e => e.session ?? []))];
+// The session prefixes the Evidence lines give, first seen first, leaving out the lines of the proposals in skip.
+export const evidenceSessions = (n, skip) => [...new Set(evidenceLines(n).flatMap(e => (skip?.has(e.id) ? [] : e.session ?? [])))];
 export const evidenceSources = n => evidenceLines(n).filter(e => e.kind === 'source').flatMap(e => e.cite.match(/^(.+?) · dated /)?.[1] ?? []);
 
 const TASTE_RANK = ['stated', 'pick', 'inferred', 'reading'];
