@@ -52,3 +52,43 @@ test('post-commit keeps .live/tools at the last commit', t => {
   assert.equal(live(), 'half-written\n');
   assert.deepEqual(fs.readdirSync(path.join(repo, '.live')), ['tools']);
 });
+
+test('pre-commit keeps the generated files out of a commit that lacks a note they are built from', t => {
+  const v = makeVault(t);
+  const env = cleanEnv({ GIT_CONFIG_NOSYSTEM: '1', GIT_CONFIG_GLOBAL: '/dev/null' });
+  const git = (...args) => {
+    const r = spawnSync('git', ['-c', 'user.name=t', '-c', 'user.email=t@example.com', '-c', 'commit.gpgsign=false', ...args], { cwd: v.root, env, encoding: 'utf8' });
+    assert.equal(r.status, 0, r.stderr);
+    return r;
+  };
+  const committed = () => git('show', 'HEAD:index.md').stdout;
+  git('init', '-q');
+  git('add', '-A');
+  // The first commit holds tools/ and test/, which would start this test run again from inside the hook.
+  git('commit', '-q', '--no-verify', '-m', 'base');
+  fs.mkdirSync(v.at('.git', 'hooks'), { recursive: true });
+  fs.copyFileSync(path.join(HOOKS, 'pre-commit'), v.at('.git', 'hooks', 'pre-commit'));
+
+  v.write('wiki/glim/rules/zebra-rule.md', ruleNote({ always: true, doLine: 'Zebra quartz mango.' }));
+  git('add', 'wiki');
+  git('commit', '-q', '-m', 'a note');
+  assert.ok(committed().includes('zebra-rule'), 'a commit that holds every note carries the index built from them');
+
+  v.write('wiki/glim/rules/plover-rule.md', ruleNote({ always: true, doLine: 'Plover lantern fig.' }));
+  v.write('memo.txt', 'one\n');
+  git('add', 'memo.txt');
+  const r = git('commit', '-m', 'a file, the new note left out');
+  assert.ok(v.read('index.md').includes('plover-rule'), 'the folder keeps the index built from every note');
+  assert.ok(!committed().includes('plover-rule'), 'the commit names no note it lacks');
+  assert.ok(r.stderr.includes('stay out of this commit'), r.stderr);
+  v.write('memo.txt', 'two\n');
+  git('commit', '-q', '-am', 'every tracked change');
+  assert.ok(!committed().includes('plover-rule'), 'commit -a stages the rebuilt index, and the hook takes it out again');
+  v.write('memo.txt', 'three\n');
+  git('commit', '-q', '-m', 'one path', '--', 'memo.txt');
+  assert.ok(!committed().includes('plover-rule'));
+
+  git('add', 'wiki');
+  git('commit', '-q', '-m', 'the note');
+  assert.ok(committed().includes('plover-rule'));
+});
