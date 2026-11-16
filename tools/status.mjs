@@ -31,7 +31,7 @@ function shown(sid) {
 async function status(sid) {
   if (!sid) refuse("there's no session id. The vault's tools pass it themselves. From a shell, pass it as the first argument, or run this from the agent's own shell, which sets its session variable.");
   const entry = readJsonSafe(registry(safeId(sid)));
-  if (!entry) refuse(`the taste vault has no session ${sid}.`);
+  if (!entry) refuse(`the vault has no session ${sid}.`);
   const cwd = entry.last_cwd ?? entry.reach?.cwd ?? entry.cwd;
   const adapter = agent(hasAgent(entry.agent) ? entry.agent : FIRST_AGENT);
   return [statusLine(await sessionView(sid, cwd, adapter), entry), shown(sid)].join('\n');

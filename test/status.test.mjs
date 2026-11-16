@@ -145,7 +145,7 @@ test('a quiet folder keeps the offer to propose to global and drops the domain p
   const quiet = folder(t, 'vault-quiet-');
   const loud = folder(t, 'vault-loud-');
   const hushed = context(v.startSession(sessionId(), { cwd: quiet }));
-  assert.match(hushed, /Taste vault: this project is in no domain\./);
+  assert.match(hushed, /Vault: this project is in no domain\./);
   assert.match(hushed, /`global`/);
   assert.doesNotMatch(hushed, /suggest a domain|domain\.mjs/);
   assert.match(context(v.startSession(sessionId(), { cwd: loud })), /suggest a domain to the user/);

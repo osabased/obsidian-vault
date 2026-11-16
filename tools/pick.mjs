@@ -61,7 +61,7 @@ const help = () => renderHelp([
 function sessionOf(sid) {
   const entryRow = callerEntry(sid, { noId: `there's no session id to record for. ${PASS}`, optional: true });
   const hits = [...sessionRoots(entryRow)].sort((a, b) => cmp(a.domain, b.domain) || cmp(a.root, b.root));
-  if (!hits.length) refuse(`the taste vault has no session ${sid} from a domain's project folder. The vault's tools pass the session id themselves; from a shell, pass this session's own id.`);
+  if (!hits.length) refuse(`the vault has no session ${sid} from a domain's project folder. The vault's tools pass the session id themselves; from a shell, pass this session's own id.`);
   return { ...entryRow, hits };
 }
 
@@ -100,7 +100,7 @@ const NOT_TYPED = {
 };
 function checkSaid(s, text, what) {
   const typed = typedFor(s);
-  if (!typed) refuse("the taste vault has no transcript for this session, so it can't check these are the user's words.");
+  if (!typed) refuse("the vault has no transcript for this session, so it can't check these are the user's words.");
   if (!saidIn(text, typed)) refuse(NOT_TYPED[what]);
 }
 

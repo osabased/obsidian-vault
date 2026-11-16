@@ -8,7 +8,7 @@ import { makeVault, ruleNote, sessionId, denied, editFile as edit, prompt, userT
 
 // Design 6.3e and §8 item 7: a session in a project no domain reaches registers, hears one line, proposes to global, and
 // starts a domain through tools/domain.mjs, which offers it, and keep.mjs, which writes it once the user allows it.
-const LINE = /Taste vault: this project is in no domain\./;
+const LINE = /Vault: this project is in no domain\./;
 const QUILL = { name: 'quill', title: 'Quill', topics: ['code'], marker: 'quill.project' };
 
 function folder(t, files = []) {
@@ -130,7 +130,7 @@ test('domain.mjs refuses each bad field with one line and writes nothing', t => 
     [{ name: 'global' }, /global/],
     [{ name: 'glim' }, /vault\.config\.json already has a domain glim/],
     [{ name: 'propose' }, /^(?=.*key "propose")(?=.*tools\/\S+:\d+)/],
-    [{ title: 'Taste vault' }, /^(?=.*title "Taste vault")(?=.*tools\/\S+:\d+)/],
+    [{ title: 'Taste rules' }, /^(?=.*title "Taste rules")(?=.*tools\/\S+:\d+)/],
     [{ title: undefined }, /title/],
     [{ title: 'Two\nlines' }, /title/],
     [{ topics: 'code' }, /topics must be a list/],
@@ -355,7 +355,7 @@ test('a path that holds the vault folder is refused', t => {
   delete input.marker;
   const r = addDomain(v, sid, input);
   assert.equal(r.code, 1, r.stdout);
-  assert.match(r.stderr, /^Not added: \S+ holds the taste vault/);
+  assert.match(r.stderr, /^Not added: \S+ holds the vault/);
 });
 
 test('a domain the user denied at the prompt is refused when offered again in that session, and not after an allowed keep', t => {

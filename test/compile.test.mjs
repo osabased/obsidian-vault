@@ -6,14 +6,14 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { makeVault, ruleNote } from './fixture.mjs';
 
-const END = '<!-- taste-vault: end -->';
-const beginLine = hash => `<!-- taste-vault: begin ${hash} · written by node tools/compile.mjs, which refuses to rewrite it once it is edited by hand -->`;
-const HASH = '2fdaa50d75083113';
+const END = '<!-- vault: end -->';
+const beginLine = hash => `<!-- vault: begin ${hash} · written by node tools/compile.mjs, which refuses to rewrite it once it is edited by hand -->`;
+const HASH = 'e295eca484d225a1';
 
 const BODY = [
   '## Taste rules',
   '',
-  "From the user's taste vault. Follow them in this project.",
+  "From the user's vault. Follow them in this project.",
   '',
   '- glim/always-rule: Do: Open each glim file with a purpose line. Not: Start a file straight with code. Because: The user reads the first line first.',
   '',
@@ -64,7 +64,7 @@ test('compile writes the project\'s AGENTS.md section byte for byte: always rule
   assert.equal(r.stdout, `wrote ${posix(agentsOf(v))}: 3 rules\n`);
   const got = fs.readFileSync(agentsOf(v), 'utf8');
   assert.equal(got, SECTION);
-  assert.match(got, /^<!-- taste-vault: begin [0-9a-f]{16} · /);
+  assert.match(got, /^<!-- vault: begin [0-9a-f]{16} · /);
 });
 
 test('a project\'s own CRLF AGENTS.md keeps every other byte and its line endings, and the section follows a blank line', t => {
@@ -74,7 +74,7 @@ test('a project\'s own CRLF AGENTS.md keeps every other byte and its line ending
   const r = compile(v);
   assert.equal(r.code, 0, r.stderr);
   const got = fs.readFileSync(agentsOf(v), 'utf8');
-  assert.ok(got.startsWith(`${mine}\r\n\r\n<!-- taste-vault: begin `), JSON.stringify(got.slice(0, 60)));
+  assert.ok(got.startsWith(`${mine}\r\n\r\n<!-- vault: begin `), JSON.stringify(got.slice(0, 60)));
   assert.ok(!/(?<!\r)\n/.test(got), 'every line ending stays CRLF');
   assert.equal(got.slice(`${mine}\r\n\r\n`.length), crlf(sectionOf(BODY)));
 });
@@ -99,6 +99,16 @@ test('an existing section is rewritten in place when a rule changes, with the te
   assert.equal(fs.readFileSync(agentsOf(v), 'utf8'), `﻿before\r\n${crlf(sectionOf(body))}after\r\n`);
 });
 
+test('a section compiled with the old taste-vault markers is rewritten in place with the new ones', t => {
+  const v = glimVault(t);
+  const oldBody = BODY.map(l => l.replace("the user's vault", "the user's taste vault"));
+  const old = sectionOf(oldBody).replace('<!-- vault: begin', '<!-- taste-vault: begin').replace(END, '<!-- taste-vault: end -->');
+  fs.writeFileSync(agentsOf(v), `# Mine\n\n${old}`);
+  const r = compile(v);
+  assert.equal(r.code, 0, r.stderr);
+  assert.equal(fs.readFileSync(agentsOf(v), 'utf8'), `# Mine\n\n${SECTION}`);
+});
+
 test('a second run prints unchanged and writes nothing; a hand edit inside the section is refused with exit 1 and nothing written', t => {
   const v = glimVault(t);
   assert.equal(compile(v).code, 0);
@@ -114,7 +124,7 @@ test('a second run prints unchanged and writes nothing; a hand edit inside the s
   const before = bytes(file);
   const r = compile(v);
   assert.equal(r.code, 1);
-  assert.equal(r.stdout, `refused ${posix(file)}: the taste-vault section was edited by hand since it was compiled. Move those edits out of the section, or delete it, then compile again.\n`);
+  assert.equal(r.stdout, `refused ${posix(file)}: the vault section was edited by hand since it was compiled. Move those edits out of the section, or delete it, then compile again.\n`);
   assert.deepEqual(bytes(file), before);
 });
 
@@ -310,14 +320,14 @@ test('compile.maxBytes caps the section as written, markers and CRLF endings inc
   fs.writeFileSync(agentsOf(v), 'x\r\n');
   assert.equal(compile(v).code, 0);
   const got = fs.readFileSync(agentsOf(v), 'utf8');
-  const section = got.slice(got.indexOf('<!-- taste-vault: begin'));
+  const section = got.slice(got.indexOf('<!-- vault: begin'));
   assert.ok(Buffer.byteLength(section) <= 700, `${Buffer.byteLength(section)} bytes`);
-  assert.match(section, /\r\n\(Left out to stay within 700 bytes: \d+ rules\.\)\r\n<!-- taste-vault: end -->\r\n$/);
+  assert.match(section, /\r\n\(Left out to stay within 700 bytes: \d+ rules\.\)\r\n<!-- vault: end -->\r\n$/);
 
   const tiny = glimVault(t, { config: { compile: { maxBytes: 40 } } });
   assert.equal(compile(tiny).code, 0);
   const lines = fs.readFileSync(agentsOf(tiny), 'utf8').split('\n');
-  assert.deepEqual(lines.slice(1, -2), ['## Taste rules', '', "From the user's taste vault. Follow them in this project.", '', '(Left out to stay within 40 bytes: 3 rules.)']);
+  assert.deepEqual(lines.slice(1, -2), ['## Taste rules', '', "From the user's vault. Follow them in this project.", '', '(Left out to stay within 40 bytes: 3 rules.)']);
 });
 
 test('an existing section keeps its own line endings and the spaces after its markers, so it stays current', async t => {

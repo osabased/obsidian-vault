@@ -99,7 +99,7 @@ function checkQuote(session, e, queued) {
   // The entry kept the words that passed the check when it was made, as an inbox row does once its transcript is gone.
   if (!typed && queued && saidIn(e.said, [queued.quote ?? ''])) return;
   if (!typed) {
-    refuse("the taste vault has no transcript for this session, so it can't check the quote is the user's words. Give your own reading with basis reading instead.");
+    refuse("the vault has no transcript for this session, so it can't check the quote is the user's words. Give your own reading with basis reading instead.");
   }
   if (!saidIn(e.said, typed)) {
     refuse("the quote isn't in anything the user typed in this session. Quote their words exactly, leaving words out with … if you need to, or give your own reading with basis reading.");
@@ -343,7 +343,7 @@ function consent(f, domain, kind, key, offer, { offerOnly = false } = {}) {
   if (writes && !f.hold && !f.queueAs && !f.queued) return null;
   // Checked before the offer, which no answer could approve without a transcript.
   if ((!writes || f.queued) && !f.queueAs && ((mode === 'off' && !vault) || consentOf(f.session) === 'code') && !typedFor(f.session)) {
-    refuse("the taste vault has no transcript for this session, so it can't check the user agreed. Ask the user to write the rule in Obsidian.");
+    refuse("the vault has no transcript for this session, so it can't check the user agreed. Ask the user to write the rule in Obsidian.");
   }
   // A filter with no power to write: an offer the user didn't ask for raises no prompt.
   if (!vault && mode === 'off') {

@@ -343,7 +343,7 @@ test('sessions hear how many cited sources are past checkAfterDays until a refre
   const v = makeVault(t, { presets: ['almanac'], sources: { url: server.url('/ledger'), repo: repo.dir, commit: repo.commit } });
   const cwd = v.projects.almanac;
   const context = source => v.startSession(sessionId(), { cwd, source })?.hookSpecificOutput.additionalContext ?? '';
-  const line = `Taste vault: 2 sources the almanac notes cite haven't been checked in 14 days. Remind the user to run /lint in \`${v.root.replace(/\\/g, '/')}\`, which refreshes them.`;
+  const line = `Vault: 2 sources the almanac notes cite haven't been checked in 14 days. Remind the user to run /lint in \`${v.root.replace(/\\/g, '/')}\`, which refreshes them.`;
   assert.ok(context('startup').split('\n').includes(line), context('startup'));
   assert.doesNotMatch(context('compact'), /haven't been checked/);
   await refresh(v);
@@ -353,7 +353,7 @@ test('sessions hear how many cited sources are past checkAfterDays until a refre
 test('a session in the vault folder, which hears every domain, hears of their stale sources too', t => {
   const v = makeVault(t, { presets: ['almanac'] });
   const context = v.startSession(sessionId(), { cwd: v.root })?.hookSpecificOutput.additionalContext ?? '';
-  assert.match(context, /^Taste vault: 2 sources the almanac notes cite haven't been checked in 14 days\./m);
+  assert.match(context, /^Vault: 2 sources the almanac notes cite haven't been checked in 14 days\./m);
 });
 
 test("a domain's knowledge settings override the vault's, and a check that goes through keeps a rule from going stale", async t => {

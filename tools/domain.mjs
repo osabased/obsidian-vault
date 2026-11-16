@@ -21,8 +21,8 @@ const help = () => renderHelp([RUN, '', 'domain.json is an object with these fie
 ], 13);
 
 const SUMMARY = {
-  prompt: 'Starts a taste-vault domain for projects of one kind, once the user agrees to it. It returns an offer to pass to `keep`; nothing is written until the user allows it.',
-  code: "Starts a taste-vault domain for projects of one kind, once the user agrees to it. It returns an offer to end your reply with, which `keep` writes once the user's next message has its code.",
+  prompt: 'Starts a vault domain for projects of one kind, once the user agrees to it. It returns an offer to pass to `keep`; nothing is written until the user allows it.',
+  code: "Starts a vault domain for projects of one kind, once the user agrees to it. It returns an offer to end your reply with, which `keep` writes once the user's next message has its code.",
 };
 
 const args = process.argv.slice(2);

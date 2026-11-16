@@ -30,7 +30,7 @@ const REACH = ['marker', 'path', 'vaultOnly'];
 function sessionOf(sid) {
   const entry = callerEntry(sid, { noId: `there's no session id to add a domain for. ${PASS}` });
   const folder = entry.reach?.cwd ?? entry.cwd;
-  if (!folder) refuse(`the taste vault has no folder for session ${sid}.`);
+  if (!folder) refuse(`the vault has no folder for session ${sid}.`);
   return { entry, folder: toPosix(folder) };
 }
 
@@ -84,7 +84,7 @@ function fields(p, { folder, vaultFolder, mainWorktree }) {
     f.path = toPosix(mainWorktree(folder) ?? folder);
     // A path reaches every folder under it, so one holding the vault, the home folder or a drive takes in nearly every project.
     if (inside(f.path, vaultPath()) !== null || inside(f.path, os.homedir()) !== null || path.dirname(f.path) === f.path) {
-      refuse(`${f.path} holds the taste vault, the home folder or a whole drive, so a domain by this path would reach nearly every project. Start the session in the project's own folder, or give marker.`);
+      refuse(`${f.path} holds the vault, the home folder or a whole drive, so a domain by this path would reach nearly every project. Start the session in the project's own folder, or give marker.`);
     }
     f.root = f.path;
   } else {
@@ -191,7 +191,7 @@ export function addDomain(sid, p, { kept = null, mainWorktree, queued = null, qu
     return queueAs.reply(id);
   }
   if (!kept) {
-    if (consentOf(session) === 'code' && !typedFor(session)) refuse("the taste vault has no transcript for this session, so it can't check the user agreed. Ask the user to add the domain to vault.config.json.");
+    if (consentOf(session) === 'code' && !typedFor(session)) refuse("the vault has no transcript for this session, so it can't check the user agreed. Ask the user to add the domain to vault.config.json.");
     if (consentOf(session) === 'prompt' && declined(sid, offerText(offer, null))) refuse("the user denied starting this domain at the prompt in this session. Don't offer it again unless they ask.");
     return makeOffer({ kind: 'domain', sid, entry: session, key: f.name, fields: queued ? { queued: queued.id } : p, lines: offer }).reply;
   }

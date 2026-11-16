@@ -385,7 +385,7 @@ Phase-3 notes then need no migration, even where the tooling lands later.
 - *Design.*
   - **Registration.** Every session with an id registers, at start and on each prompt, whatever its folder. A session no domain reaches then gets what a domain session gets for `global`: its always rules marked as shown, and those that come due later delivered on a prompt (`prompt.mjs:56`). `.state/` is untracked, so the folders the registry records stay on this machine, and `tidy` drops an entry unseen for 30 days.
   - **The line.** A session start in a folder no domain reaches, outside the vault folder, sends one line, ranked after the errors. Compaction and `/clear` send it again, as they do the note on proposing. The draft, whose copy is an open question (§8 item 7):
-    > Taste vault: no domain covers this project. When the user states a preference that should hold in later sessions, propose it to `global` if it holds in every project, through the vault's `propose` tool. If it holds only for projects like this one, suggest a domain to the user in your reply: a name, a title, and a file here that marks the project's kind. Once they agree, call the vault's `domain` tool.
+    > Vault: no domain covers this project. When the user states a preference that should hold in later sessions, propose it to `global` if it holds in every project, through the vault's `propose` tool. If it holds only for projects like this one, suggest a domain to the user in your reply: a name, a title, and a file here that marks the project's kind. Once they agree, call the vault's `domain` tool.
   - **`propose.mjs`.** A registered session no domain reaches may propose to `global`. Any other domain is refused, and the refusal names `tools/domain.mjs`, as does the refusal of a domain outside a domain session's own. An unregistered session is refused as today.
   - **`domain`**, a top-level tool whose script `node tools/domain.mjs` reads JSON on stdin and finds its session as `propose.mjs` does. It works from any registered session, so a domain session can start a second domain for a kind of project its own don't fit. The fields:
     - `name`: the domain's key, in kebab-case. Refused: `global`, a key `vault.config.json` already has, and a key, or a title of two or more words, that the neutral-core test (§3) would find in `tools/`, `.claude/skills/`, `test/` or AGENTS.md. The refusal names the first lines found. A commit that changes only config runs no tests (`.githooks/pre-commit:12-15`), so without this check a clashing name would fail the next commit to `tools/`. The scan moves into one `tools/lib/` function that the test and the tool both call.
@@ -794,7 +794,7 @@ The phases build mechanism only. Adding real knowledge and taste is the user's c
    - **Settings.**
      - `DEFAULTS` (`vault.mjs:20-28`) gains `knowledge.checkAfterDays: 14`, to match `lint.remindAfterDays`, beside `staleAfterDays: 180`. It also gains `refresh: { timeoutSeconds: 20, maxBytes: 5000000 }` and `docSets: { manifests: ['llms.txt'] }`. `domains.<d>.knowledge` overrides either day count for its domain.
      - Lint's age warning (`lint.mjs:97-100`) counts from the later of `as_of` and the last day every source the note cites was `checked`. A source re-checked unchanged keeps its notes fresh. A check that found the source changed freshens a note only once the note cites the latest copy.
-     - **Start line.** A new or resumed session hears one line, after the lint reminder in rank order and skipped on compaction and `/clear` like it: "Taste vault: 3 sources the almanac notes cite haven't been checked in 14 days. Remind the user to run /lint in `<vault>`, which refreshes them." It counts the ids in `domains` for the session's domains whose `checked` is older than the domain's `checkAfterDays`. A failed check doesn't move `checked`, so a source that only fails stays counted. Several domains are named together.
+     - **Start line.** A new or resumed session hears one line, after the lint reminder in rank order and skipped on compaction and `/clear` like it: "Vault: 3 sources the almanac notes cite haven't been checked in 14 days. Remind the user to run /lint in `<vault>`, which refreshes them." It counts the ids in `domains` for the session's domains whose `checked` is older than the domain's `checkAfterDays`. A failed check doesn't move `checked`, so a source that only fails stays counted. Several domains are named together.
      - **`/lint`.** `.claude/skills/lint/SKILL.md` gains a first step, `node tools/refresh.mjs`, before `review.mjs status`. Offline, every source is a failed check: the step reports how many and `/lint` goes on. Refresh never runs on its own, and no hook runs it.
      - **`review.mjs status`** gains two sections from `derived.json`: "Notes a changed source has left unverified", with each note's key, `since`, source and newer copy, and "Source checks that failed", with each id, day and reason.
    - **Rules that change.**
@@ -916,7 +916,7 @@ The phases build mechanism only. Adding real knowledge and taste is the user's c
      - **A URL, or a session whose transcript is gone with no row to fall back on.** These are common and the user can't fix them, so lint gives one tally warning, `warn wiki: 14 quotes can't be checked: 11 cite a URL, 3 a session whose transcript is gone. node tools/review.mjs status lists them.`, and `review.mjs status` gains a section, "Quotes lint can't check", listing each note, what it cites and the quote clipped to 80 characters (open question). `## You said` lines on a gone session count in the tally too.
      - **`pick.mjs`.** It checks `notes` (on a pick and a confirmation) and a comment's `text` with `saidIn` (`quotes.mjs:42`) against `typedMessages(session.transcript)`, as `checkQuote` does (`propose.mjs:146-152`):
        - not typed: "notes aren't in anything the user typed in this session. Put their exact words in notes, with … where you leave some out, or your own in reason." For a comment: "the comment isn't in anything the user typed in this session. Record their exact words, with … where you leave some out.";
-       - no transcript: "the taste vault has no transcript for this session, so it can't check these are the user's words." A pick may still be recorded without `notes`.
+       - no transcript: "the vault has no transcript for this session, so it can't check these are the user's words." A pick may still be recorded without `notes`.
      - No delivery label marks a rule whose quote can't be checked (open question): a hook can't afford to read transcripts, and lint and `review.mjs status` are where the user looks.
    - **Bundles (6.4b).** `node tools/bundle.mjs raw/refs/<folder> [--url <u> | --repo <r>] [--commit <c>]` writes the folder's `source.md` (open question).
      - With `--url` or `--repo`, `--commit` is required, and `source.md` holds those fields. Otherwise it holds the `sha256` list: one `'<hash>  <path>'` line per file, as `manifestLine` reads them (`sources.mjs:110`), paths from the folder with `/`, sorted.
@@ -1133,7 +1133,7 @@ The phases build mechanism only. Adding real knowledge and taste is the user's c
      - `shortName(sid, agentName)` gives the adapter's short name, the first agent's when the agent isn't known. Everything that names or matches a session by short name goes through it: the Evidence and `## You said` citations, the `raw/inbox/` and `raw/picks/` file names, the `log.md` lines, `transcriptFor`, lint's row fallback and `review.mjs`'s count of sessions a rule missed. `sessionName(sid, agentName)` in `sessions.mjs` takes the agent from the registry entry when the caller has none. Inbox and pick rows record `agent`, so a row names its session the same way after the registry drops it. Matching compares short names for equality, or the full id; never a prefix.
      - `typedFor(entry)` calls that adapter's `typedMessages(entry.transcript)`. It replaces the call at `propose.mjs:146`. `transcriptFor` (`sessions.mjs:196-200`) returns the entry, so lint's `typedIn` (`lint.mjs:48-51`) calls `typedFor` too.
      - `ownEntry` compares with `sessionIds(env)`, the ids set in the `sessionVar` of every adapter in `tools/adapters/`, whatever `agents` lists. It refuses an id that none of them is, and accepts any id when none is set. `lint.mjs:24` and `log.mjs:55` take the id from `currentSession()`.
-     - `propose.mjs` and `pick.mjs` make the session id argument optional. With none, they use `currentSession()`, and with neither they refuse. They check the session before they read stdin, so a missing or unknown session is refused whatever the input. `pick.mjs show` still takes the session id. The refusal at `propose.mjs:85` becomes: "Pass the session id from the taste vault's note at session start, or run this from the agent's own shell, which sets its session id." (open question).
+     - `propose.mjs` and `pick.mjs` make the session id argument optional. With none, they use `currentSession()`, and with neither they refuse. They check the session before they read stdin, so a missing or unknown session is refused whatever the input. `pick.mjs show` still takes the session id. The refusal at `propose.mjs:85` becomes: "Pass the session id from the vault's note at session start, or run this from the agent's own shell, which sets its session id." (open question).
    - **The Claude Code adapter.** Code moves here, and none of it is rewritten.
      - `events`:
        - `session_id`, `agent_id`, `cwd` and `transcript_path` become `session`, `agent`, `cwd` and `transcript`. Events carry the raw `cwd`; handlers apply `cwdOf` as before;
@@ -1231,10 +1231,10 @@ The phases build mechanism only. Adding real knowledge and taste is the user's c
      - **The Codex format** is a marked section of `<root>/AGENTS.md`:
 
        ```md
-       <!-- taste-vault: begin 3f9c01ab77e0d2c1 · written by node tools/compile.mjs, which refuses to rewrite it once it is edited by hand -->
+       <!-- vault: begin 3f9c01ab77e0d2c1 · written by node tools/compile.mjs, which refuses to rewrite it once it is edited by hand -->
        ## Taste rules
 
-       From the user's taste vault. Follow them in this project.
+       From the user's vault. Follow them in this project.
 
        - glim/panel-gap: Do: … Not: …
 
@@ -1245,7 +1245,7 @@ The phases build mechanism only. Adding real knowledge and taste is the user's c
        ### When the request mentions panel or grid
 
        - glim/grid-words: Do: … Not: …
-       <!-- taste-vault: end -->
+       <!-- vault: end -->
        ```
 
        - The hash is `shortHash` of the text between the two markers.
@@ -1260,7 +1260,7 @@ The phases build mechanism only. Adding real knowledge and taste is the user's c
        ```
        wrote <root>/AGENTS.md: 12 rules
        unchanged <root>/AGENTS.md
-       refused <root>/AGENTS.md: the taste-vault section was edited by hand since it was compiled. Move those edits out of the section, or delete it, then compile again.
+       refused <root>/AGENTS.md: the vault section was edited by hand since it was compiled. Move those edits out of the section, or delete it, then compile again.
        refused <root>/AGENTS.md: the file can't be written (EPERM). Make it writable, then compile again.
        refused <root>/sub: the glim rules' globs start at <root>, which holds this folder. Run node tools/compile.mjs <root> instead.
        ```
@@ -1525,7 +1525,7 @@ The design changes these parts of AGENTS.md. Each change lands with the phase th
   - Line 44: "since Claude Code turns a longer one into a file path" becomes "since the agent turns a longer one into a file path".
   - The domain keys (after `vaultOnly`): a `compile` bullet. It is a list of adapter names, unset by default; the user runs `node tools/compile.mjs <project>` to write the domain's live `always`, file-glob and keyword rules, and global's, into a marked section of the project's `AGENTS.md`, for an agent with no hooks to deliver them. `compile.maxBytes` caps the section, and lint errors on a name with no `tools/adapters/<name>/compile.mjs`.
   - Line 91 (`tools`): names are each agent's own, and lint checks them against every adapter that `agents` in `vault.config.json` lists.
-  - Line 195 (rules): "the project's CLAUDE.md or `.claude/rules/`" becomes "the project's own agent instructions, such as CLAUDE.md, AGENTS.md or `.claude/rules/`". A compiled taste-vault section doesn't count as the project's own.
+  - Line 195 (rules): "the project's CLAUDE.md or `.claude/rules/`" becomes "the project's own agent instructions, such as CLAUDE.md, AGENTS.md or `.claude/rules/`". A compiled vault section doesn't count as the project's own.
   - Line 207 (Lint): lint also warns on a compiled section that is missing, stale or edited by hand, and names the `node tools/compile.mjs` command to run.
   - Line 220 ("Write outside the vault", listed above as line 186): the exception names `node tools/compile.mjs`, run by the user, in projects whose domain lists an agent under `compile`. `node tools/agents.mjs` prints hooks for the user to merge and writes nothing.
 - **Phase 5.** The line numbers are AGENTS.md's at the end of phase 3; phase 4's changes shift them.
