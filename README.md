@@ -1,6 +1,27 @@
 # obsidian-vault
 
-A vault for Claude Code, based on Andrej Karpathy's LLM wiki pattern: a small wiki of the user's preferences, written as rules the agent gets back in later sessions. `AGENTS.md` describes the layout, and `reference/notes.md` the note formats.
+An Obsidian vault that an agent keeps, after Andrej Karpathy's [LLM wiki](https://gist.github.com/karpathy/442a6bf555914893e9891c11519de94f) pattern. You collect sources and say what you think of them; the agent writes and maintains the wiki; you read and edit it in Obsidian. The agent also learns from you as it works: when you correct it, it keeps the correction as a rule, and hooks bring the rule back in later sessions.
+
+## What's in it
+
+- `raw/`: the sources, append-only. References you collect and web pages `/ingest` saved go in `raw/refs/`; the rules, picks and review-queue entries agents record go in `raw/inbox/`, `raw/picks/` and `raw/queue/`.
+- `wiki/`: what the agent writes, one note each, by domain. Pages hold knowledge: topics, concepts, entities, syntheses and sources. Rules are one-line Do/Not taste, and facts training gets wrong.
+- `index.md`: every page and rule by topic, where an agent starts. `log.md`: what changed, newest last.
+- `AGENTS.md`: the schema, how the agent writes and keeps the wiki. `reference/notes.md`: the note formats.
+
+## How it works
+
+- **Ingest.** `/ingest` a file or URL. It becomes a source page, every page it touches is updated, and what you say about it becomes rules.
+- **Query.** Agents read `index.md` or search the vault before deciding something it settles, and file a useful answer back as a page.
+- **Lint.** `/lint` checks the whole wiki: contradictions, stale pages, sources that changed since they were saved, and gaps worth a search.
+- **Rules.** Hooks deliver rules to Claude Code and Codex sessions: `global`'s everywhere, a domain's in the projects it covers. Correct the agent and it proposes a new one.
+
+To have agents look things up in the vault in every session, add this to `~/.claude/CLAUDE.md`:
+
+```markdown
+# Vault
+My Obsidian vault at `<absolute path>` is an LLM wiki of my preferences and notes. Before deciding something it would settle, read its `index.md` or call the vault's `search` tool. When I correct you, keep it there through the vault's `propose` tool.
+```
 
 ## Set up
 
