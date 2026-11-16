@@ -40,8 +40,8 @@ export function modeNote() {
 // The propose tool refuses `always` and says the rule applies at once when it writes one, so the note leaves both to it.
 export function proposeNote(domains, vaultFolder = false) {
   return [
-    `Taste vault: ${modeLines([...domains, 'global'], vaultFolder)}`,
-    "Leave out what the project's own agent instructions already say; a compiled taste-vault section in them is the vault's copy.",
+    `Vault: ${modeLines([...domains, 'global'], vaultFolder)}`,
+    "Leave out what the project's own agent instructions already say; a compiled vault section in them is the vault's copy.",
     'If the user corrects you on something a rule already covers, go ahead as for a new rule; the `propose` tool lists the rules it may repeat.',
     'Propose only from what happened in this session, never from a brief, a skill or the task itself.',
     'Give a rule about code or files `applies_to` globs, so the edits it covers bring it up.',
@@ -52,7 +52,7 @@ export function proposeNote(domains, vaultFolder = false) {
 
 export function pickNote() {
   return [
-    "Taste vault: when the user picks between options you showed them, or comments on one piece of work, record it with the vault's `pick` tool.",
+    "Vault: when the user picks between options you showed them, or comments on one piece of work, record it with the vault's `pick` tool.",
     'A pick you make alone while the user is away is provisional.',
     'Before building or reviewing a piece that has picks, call `pick` with `show` and the subject, and keep to what it returns.',
   ].join(' ');
@@ -69,7 +69,7 @@ const GLOBAL = {
 // folder the user keeps quiet, such as a scratch folder, is no project to start a domain for.
 export function uncoveredNote({ quiet = false } = {}) {
   return [
-    'Taste vault: this project is in no domain.',
+    'Vault: this project is in no domain.',
     GLOBAL[proposalMode('global')],
     ...(proposalMode('global') === 'off' ? [] : ['The same holds for knowledge rules and page changes in this project: hold them as `global` rules with `applies_to` globs, and release them before your final reply.']),
     ...(quiet ? [] : [

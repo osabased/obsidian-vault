@@ -1,6 +1,6 @@
 ---
 name: lint
-description: "Check the whole agent-taste wiki: lint findings, hook errors, missed rules, contradictions, repeats, empty topics, stale pages, concepts with no page, claims a newer source overrides and gaps worth a web search, and the fixes for them."
+description: "Check the whole vault wiki: lint findings, hook errors, missed rules, contradictions, repeats, empty topics, stale pages, concepts with no page, claims a newer source overrides and gaps worth a web search, and the fixes for them."
 disable-model-invocation: true
 ---
 

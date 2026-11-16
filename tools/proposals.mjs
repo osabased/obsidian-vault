@@ -17,8 +17,8 @@ const help = () => renderHelp([RUN, '', 'Sets when agents propose rules, in vaul
 ], 11);
 
 const SUMMARY = {
-  prompt: 'Sets when agents propose rules to the taste vault: corrections, ask or off, for every project or one domain. Call it only when the user asks; they allow or deny the change at the prompt.',
-  code: "Sets when agents propose rules to the taste vault: corrections, ask or off, for every project or one domain. Call it only when the user asks. It returns an offer to end your reply with, which `keep` writes once the user's next message has its code.",
+  prompt: 'Sets when agents propose rules to the vault: corrections, ask or off, for every project or one domain. Call it only when the user asks; they allow or deny the change at the prompt.',
+  code: "Sets when agents propose rules to the vault: corrections, ask or off, for every project or one domain. Call it only when the user asks. It returns an offer to end your reply with, which `keep` writes once the user's next message has its code.",
 };
 
 const args = process.argv.slice(2);

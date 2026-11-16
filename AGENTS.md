@@ -1,4 +1,4 @@
-# Agent taste vault
+# Vault
 
 The user's taste and knowledge, kept as a small wiki so an agent can apply and look them up. The agent writes rules in session when the user corrects it or a failure or dated source shows what works, and the hooks in `tools/adapters/<agent>/hooks/` deliver them back to the agent from then on. Pages hold knowledge in the agent's words, or in the user's on pages they write (`author: user`), and sessions read them through `index.md` or when a hook points to one. The user reads, edits and deletes the notes in Obsidian.
 
@@ -21,7 +21,7 @@ The user's taste and knowledge, kept as a small wiki so an agent can apply and l
 
 ## What belongs here
 
-- **Rules** are one-line Do/Not taste, and facts training gets wrong, that the hooks deliver. Propose a rule only for what the project's own agent instructions, such as CLAUDE.md, AGENTS.md or `.claude/rules/`, don't already say. A compiled taste-vault section in them is the vault's copy, not the project's own.
+- **Rules** are one-line Do/Not taste, and facts training gets wrong, that the hooks deliver. Propose a rule only for what the project's own agent instructions, such as CLAUDE.md, AGENTS.md or `.claude/rules/`, don't already say. A compiled vault section in them is the vault's copy, not the project's own.
 - **Pages** are knowledge: concepts, APIs, comparisons, what sources say, and research on any topic, including the background a rule's one line leaves out.
 - **Procedures and how-tos**, steps an agent follows, belong in skills; a page may link one. **Project facts**, such as how one project is built or where its files live, belong in that project's CLAUDE.md, docs or auto memory.
 

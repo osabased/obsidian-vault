@@ -1,6 +1,6 @@
 ---
 name: vault
-description: "Set when agents propose rules to the taste vault: corrections, ask or off, for every project or one domain, and show what the vault does in this session. Use when the user runs /vault, asks you to stop, start or ask before keeping rules, or asks what the vault has shown this session."
+description: "Set when agents propose rules to the vault: corrections, ask or off, for every project or one domain, and show what the vault does in this session. Use when the user runs /vault, asks you to stop, start or ask before keeping rules, or asks what the vault has shown this session."
 argument-hint: "[status|corrections|ask|off] [domain]"
 ---
 

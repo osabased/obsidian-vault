@@ -1,5 +1,5 @@
 {
-  "description": "Delivers the taste vault's rules and pages to sessions, from the vault set in the plugin's vault option.",
+  "description": "Delivers the vault's rules and pages to sessions, from the vault set in the plugin's vault option.",
   "hooks": {
     "SessionStart": [
       { "hooks": [{ "type": "command", "command": "node", "args": ["${CLAUDE_PLUGIN_ROOT}/hooks/launch.mjs", "session-start", "10"], "timeout": 10 }] }

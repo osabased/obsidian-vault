@@ -1,6 +1,6 @@
 # obsidian-vault
 
-A taste vault for Claude Code, based on Andrej Karpathy's LLM wiki pattern: a small wiki of the user's preferences, written as rules the agent gets back in later sessions. `AGENTS.md` describes the layout, and `reference/notes.md` the note formats.
+A vault for Claude Code, based on Andrej Karpathy's LLM wiki pattern: a small wiki of the user's preferences, written as rules the agent gets back in later sessions. `AGENTS.md` describes the layout, and `reference/notes.md` the note formats.
 
 ## Set up
 

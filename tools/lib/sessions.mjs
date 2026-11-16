@@ -30,7 +30,7 @@ export function callerEntry(sid, { noId, pass = PASS, optional = false }) {
   if (!sid) refuse(noId);
   const { entry, notOwn } = ownEntry(sid);
   if (notOwn) refuse(notOwn);
-  if (!entry && !optional) refuse(`the taste vault has no session ${sid}.${pass ? ` ${pass}` : ''}`);
+  if (!entry && !optional) refuse(`the vault has no session ${sid}.${pass ? ` ${pass}` : ''}`);
   return entry;
 }
 

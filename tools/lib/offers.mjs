@@ -136,7 +136,7 @@ export function codeConsent(entry, offer) {
   const name = hasAgent(entry?.agent) ? entry.agent : FIRST_AGENT;
   const typed = typedFor(entry);
   const said = entry?.transcript ? agent(name).conversation?.(entry.transcript) : null;
-  if (!typed || !said || offer.typed === null) return "the taste vault can't read this session's transcript, so it can't check the user agreed. Ask the user to make the change by hand.";
+  if (!typed || !said || offer.typed === null) return "the vault can't read this session's transcript, so it can't check the user agreed. Ask the user to make the change by hand.";
   if (typed.length <= offer.typed) return "the user hasn't replied since the offer. End your reply with it and wait.";
   if (typed.length > offer.typed + 1) return "the user has sent more than one message since the offer, so their reply to it isn't their latest. Propose it again.";
   const code = new RegExp(`(?<![\\p{L}\\p{N}])${offer.code}(?![\\p{L}\\p{N}])`, 'iu');

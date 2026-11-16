@@ -94,7 +94,7 @@ test('the launcher runs the hook from the vault, with the timeout it was given',
   v.write('wiki/glim/rules/gate.md', '---\ntype: rule\ndomain: glim\nkind: taste\nbasis: stated\ntopic: code\nalways: false\napplies_to:\n  - "src/**"\ntriggers: []\nkeywords: []\ncreated: 2026-01-01\nupdated: 2026-01-01\n---\n\n**Do:** Do it.\n**Not:** Not it.\n**Because:**\n');
   const started = launch('session-start', { vault: v.root, input: JSON.stringify({ session_id: sessionId(), cwd: v.project, hook_event_name: 'SessionStart', source: 'startup' }) });
   assert.equal(started.code, 0, started.stderr);
-  assert.match(JSON.parse(started.stdout).hookSpecificOutput.additionalContext, /^Taste vault/);
+  assert.match(JSON.parse(started.stdout).hookSpecificOutput.additionalContext, /^Vault/);
   assert.ok(v.exists('.state/sessions'), 'the hook wrote to the vault it was pointed at');
   const edit = { session_id: sessionId(), cwd: v.project, hook_event_name: 'PreToolUse', tool_name: 'Edit', tool_input: { file_path: path.join(v.project, 'src', 'a.txt'), old_string: 'a', new_string: 'b' } };
   const late = launch('edit', { vault: v.root, timeout: '0.001', input: JSON.stringify(edit) });
@@ -153,7 +153,7 @@ test("the launcher makes .live/tools from the vault's last commit, without what 
   v.write('tools/half-made.mjs', 'throw new Error("half made");\n');
   const r = launch('session-start', { vault: v.root, input: startInput(v) });
   assert.equal(r.code, 0, r.stderr);
-  assert.match(JSON.parse(r.stdout).hookSpecificOutput.additionalContext, /^Taste vault/);
+  assert.match(JSON.parse(r.stdout).hookSpecificOutput.additionalContext, /^Vault/);
   assert.ok(v.exists('.live/tools/adapters/claude-code/hooks/session-start.mjs'));
   assert.ok(!v.exists('.live/tools/half-made.mjs'));
   assert.deepEqual(fs.readdirSync(v.at('.live')), ['tools'], 'nothing left over beside the copy');

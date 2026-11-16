@@ -53,8 +53,8 @@ const help = () => renderHelp([RUN, '', 'rule.json is an object with these field
 ], 13);
 
 const SUMMARY = {
-  prompt: "Proposes a taste or knowledge rule to the taste vault, or new evidence for a rule it has. Under corrections a project session's unheld rule is written at once; anything else returns an offer to pass to `keep`, and nothing is written until the user allows it. A subagent's proposals go to the review queue.",
-  code: "Proposes a taste or knowledge rule to the taste vault, or new evidence for a rule it has. Under corrections a project session's unheld rule is written at once; anything else returns an offer to end your reply with, which `keep` writes once the user's next message has its code. A subagent's proposals go to the review queue.",
+  prompt: "Proposes a taste or knowledge rule to the vault, or new evidence for a rule it has. Under corrections a project session's unheld rule is written at once; anything else returns an offer to pass to `keep`, and nothing is written until the user allows it. A subagent's proposals go to the review queue.",
+  code: "Proposes a taste or knowledge rule to the vault, or new evidence for a rule it has. Under corrections a project session's unheld rule is written at once; anything else returns an offer to end your reply with, which `keep` writes once the user's next message has its code. A subagent's proposals go to the review queue.",
 };
 
 const args = process.argv.slice(2);
