@@ -16,7 +16,7 @@ function errorsNote() {
   if (!errors.length) return '';
   const { at, message } = errors.at(-1);
   const logged = `${plural(errors.length, 'error')} ${errors.length === 1 ? 'was' : 'were'} logged`;
-  return `Taste vault: ${logged} in \`.state/errors.log\` since /lint last ran, the newest at ${clock(new Date(at))}: \`${clip(message, 200)}\`. Tell the user; /lint in \`${toPosix(vaultPath())}\` shows the count and the newest.`;
+  return `Vault: ${logged} in \`.state/errors.log\` since /lint last ran, the newest at ${clock(new Date(at))}: \`${clip(message, 200)}\`. Tell the user; /lint in \`${toPosix(vaultPath())}\` shows the count and the newest.`;
 }
 
 // Notes go live without a commit, so a note an error keeps from delivery would otherwise go unnoticed until /lint.
@@ -29,7 +29,7 @@ function undeliveredNote(scope, vaultFolder, notes) {
     });
   if (!broken.length) return '';
   const more = broken.length > 3 ? `, and ${broken.length - 3} more` : '';
-  return `Taste vault: ${plural(broken.length, 'note')} ${broken.length === 1 ? "has an error and isn't" : "have an error and aren't"} delivered: ${broken.slice(0, 3).join(', ')}${more}. Tell the user; /lint in \`${toPosix(vaultPath())}\` lists the fixes.`;
+  return `Vault: ${plural(broken.length, 'note')} ${broken.length === 1 ? "has an error and isn't" : "have an error and aren't"} delivered: ${broken.slice(0, 3).join(', ')}${more}. Tell the user; /lint in \`${toPosix(vaultPath())}\` lists the fixes.`;
 }
 
 // A vault nobody changes has nothing new to lint, however long it sits.
@@ -40,7 +40,7 @@ function lintNote(notes, walked) {
   if (!changed || (days !== null && days < remindAfterDays && changed < remindAfterNotes)) return '';
   const ran = days === null ? `hasn't run yet, and the vault has ${plural(changed, 'note')}`
     : `last ran ${days ? `${plural(days, 'day')} ago` : 'today'}, and ${plural(changed, 'note')} changed since`;
-  return `Taste vault: /lint ${ran}. Remind the user to run /lint in \`${toPosix(vaultPath())}\`.`;
+  return `Vault: /lint ${ran}. Remind the user to run /lint in \`${toPosix(vaultPath())}\`.`;
 }
 
 // A failed check doesn't move checked, so a source that only fails stays counted until a check goes through.
@@ -62,7 +62,7 @@ function sourcesNote(scope, derived) {
   }
   if (!stale.size) return '';
   const verb = stale.size === 1 ? "hasn't" : "haven't";
-  return `Taste vault: ${plural(stale.size, 'source')} the ${joinList(named, 'and')} notes cite ${verb} been checked in ${plural(Math.min(...limits), 'day')}. Remind the user to run /lint in \`${toPosix(vaultPath())}\`, which refreshes them.`;
+  return `Vault: ${plural(stale.size, 'source')} the ${joinList(named, 'and')} notes cite ${verb} been checked in ${plural(Math.min(...limits), 'day')}. Remind the user to run /lint in \`${toPosix(vaultPath())}\`, which refreshes them.`;
 }
 
 export async function start(event, agent) {

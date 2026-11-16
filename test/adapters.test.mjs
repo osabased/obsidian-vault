@@ -48,7 +48,7 @@ for (const d of [claudeCode, codex]) {
 
   test(`${d.name}: the session start's propose note names the project's own agent instructions, no one agent's files`, t => {
     const text = d.context(d.start(vault(t), sessionId())) ?? '';
-    assert.match(text, /Leave out what the project's own agent instructions already say; a compiled taste-vault section in them is the vault's copy\./);
+    assert.match(text, /Leave out what the project's own agent instructions already say; a compiled vault section in them is the vault's copy\./);
     assert.doesNotMatch(text, /CLAUDE\.md|\.claude\/rules/);
   });
 
@@ -56,7 +56,7 @@ for (const d of [claudeCode, codex]) {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'vault-uncovered-'));
     t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
     const text = d.context(d.start(vault(t), sessionId(), { cwd: dir })) ?? '';
-    assert.match(text, /Taste vault: this project is in no domain./);
+    assert.match(text, /Vault: this project is in no domain./);
     assert.match(text, /call the vault.s `domain` tool/);
   });
 

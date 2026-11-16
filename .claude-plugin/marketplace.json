@@ -1,6 +1,6 @@
 {
   "name": "obsidian-vault",
-  "description": "The taste vault's skills and hooks.",
+  "description": "The vault's skills and hooks.",
   "owner": {
     "name": "osabased"
   },
@@ -8,7 +8,7 @@
     {
       "name": "obsidian-vault",
       "source": "./",
-      "description": "ingest, lint and vault skills, and the hooks that deliver the rules and pages, for the obsidian-vault taste vault. They run the vault's own tools/, so set the vault option to a vault checkout."
+      "description": "ingest, lint and vault skills, and the hooks that deliver the rules and pages, for the obsidian-vault vault. They run the vault's own tools/, so set the vault option to a vault checkout."
     }
   ]
 }

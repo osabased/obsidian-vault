@@ -9,8 +9,8 @@ const note = (v, i, saved) => {
   const rel = `wiki/glim/rules/r${i}.md`;
   v.write(rel, ruleNote({ doLine: `Do thing ${i}.`, because: 'It reads better.' }), { saved });
 };
-const reminder = v => v.startSession(sessionId())?.hookSpecificOutput.additionalContext.split('\n\n').find(l => l.startsWith('Taste vault: /lint')) ?? null;
-const remind = (v, what) => `Taste vault: /lint ${what}. Remind the user to run /lint in \`${v.root.replace(/\\/g, '/')}\`.`;
+const reminder = v => v.startSession(sessionId())?.hookSpecificOutput.additionalContext.split('\n\n').find(l => l.startsWith('Vault: /lint')) ?? null;
+const remind = (v, what) => `Vault: /lint ${what}. Remind the user to run /lint in \`${v.root.replace(/\\/g, '/')}\`.`;
 
 test('session start reminds about /lint once notes change, not on a quiet vault', t => {
   const v = makeVault(t);

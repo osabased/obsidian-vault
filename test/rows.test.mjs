@@ -284,7 +284,7 @@ test('with no transcript a comment and notes are refused, and a pick without not
   const v = vault(t);
   const sid = sessionId();
   v.startSession(sid, { transcript: null });
-  const none = "the taste vault has no transcript for this session, so it can't check these are the user's words.";
+  const none = "the vault has no transcript for this session, so it can't check these are the user's words.";
   const said = pick(v, sid, comment());
   assert.equal(said.code, 1);
   assert.equal(said.stderr, `Not recorded: ${none}\n`);

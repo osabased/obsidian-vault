@@ -3,11 +3,13 @@ import { config, shortHash, DEFAULTS } from '../../lib/vault.mjs';
 import { fitContext, joinList } from '../../lib/rules.mjs';
 
 const FILE = 'AGENTS.md';
-const BEGIN = /^<!-- taste-vault: begin ([0-9a-f]{16}) [^\r\n]*-->$/;
-const END = '<!-- taste-vault: end -->';
-const beginLine = hash => `<!-- taste-vault: begin ${hash} · written by node tools/compile.mjs, which refuses to rewrite it once it is edited by hand -->`;
+// Sections compiled before the vault's rename carry `taste-vault:` markers; they are still read, and rewritten with the new ones.
+const BEGIN = /^<!-- (?:taste-)?vault: begin ([0-9a-f]{16}) [^\r\n]*-->$/;
+const END = '<!-- vault: end -->';
+const ENDS = new Set([END, '<!-- taste-vault: end -->']);
+const beginLine = hash => `<!-- vault: begin ${hash} · written by node tools/compile.mjs, which refuses to rewrite it once it is edited by hand -->`;
 const RULE = /^- (\S+?): /;
-const INTRO = "## Taste rules\n\nFrom the user's taste vault. Follow them in this project.";
+const INTRO = "## Taste rules\n\nFrom the user's vault. Follow them in this project.";
 const FENCE = /^ {0,3}(`{3,}|~{3,})(.*)$/;
 
 const editing = globs => {
@@ -87,7 +89,7 @@ function markers(text) {
     if (fenced.has(i)) return;
     const hash = BEGIN.exec(line)?.[1];
     if (hash) begins.push({ at, stop: at + line.length, next, hash });
-    else if (line === END) ends.push({ at, stop: at + END.length, next });
+    else if (ENDS.has(line)) ends.push({ at, stop: at + line.length, next });
   });
   return { begins, ends };
 }
@@ -104,7 +106,7 @@ export function compile(sections, root) {
   const [end] = ends;
   const paired = begins.length === 1 && ends.length === 1 && begin.at < end.at;
   if ((begins.length || ends.length) && !paired) {
-    return out({ refused: "the taste-vault markers don't pair: there must be one begin line and one end line after it. Fix or delete them, then compile again." });
+    return out({ refused: "the vault markers don't pair: there must be one begin line and one end line after it. Fix or delete them, then compile again." });
   }
   // A section keeps its marker lines' own line endings and trailing spaces, so a change elsewhere in the file leaves
   // it current. A new section takes the file's line endings.
@@ -121,7 +123,7 @@ export function compile(sections, root) {
     return done('missing', `${text}${gap}${block(body)}`);
   }
   const was = text.slice(begin.next, end.at).replace(/\r?\n$/, '').replace(/\r\n/g, '\n');
-  if (shortHash(was) !== begin.hash) return out({ refused: 'the taste-vault section was edited by hand since it was compiled. Move those edits out of the section, or delete it, then compile again.', state: 'edited' });
+  if (shortHash(was) !== begin.hash) return out({ refused: 'the vault section was edited by hand since it was compiled. Move those edits out of the section, or delete it, then compile again.', state: 'edited' });
 
   const next = `${text.slice(0, begin.at)}${block(body)}${text.slice(end.next)}`;
   if (next === text) return done('current', next);

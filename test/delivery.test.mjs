@@ -131,7 +131,7 @@ test('session-start delivers always rules and the next prompt does not repeat th
   assert.match(ctx, /^# Taste rules\n/);
   assert.match(ctx, /## glim\n- glim\/always-rule: Do: Be brief\. Not: Ramble\./);
   assert.ok(!ctx.includes('quiet-rule'));
-  assert.match(ctx, /Taste vault: propose a rule/);
+  assert.match(ctx, /Vault: propose a rule/);
   assert.equal(prompt(v, sid, 'hello'), null);
 });
 
@@ -174,7 +174,7 @@ test('session start names the notes in its domains that an error keeps from deli
   v.write('wiki/glim/rules/retired.md', ruleNote({ basis: 'bogus', extra: ['superseded_by: glim/bad'] }));
   v.write('wiki/glim/rules/typing.md', ruleNote({ basis: 'bogus' }), { settled: false });
   const context = (cwd, source) => v.startSession(sessionId(), { cwd, source })?.hookSpecificOutput.additionalContext ?? '';
-  const line = /^Taste vault: (.*)\. Tell the user; \/lint in `.*` lists the fixes\.$/m;
+  const line = /^Vault: (.*)\. Tell the user; \/lint in `.*` lists the fixes\.$/m;
   assert.equal(context(v.project).match(line)?.[1],
     "2 notes have an error and aren't delivered: glim/bad (basis must be stated, inferred, pick or reading), global/no-not (no **Not:** line)");
   assert.match(context(v.root).match(line)?.[1], /^3 notes have an error and aren't delivered: glim\/bad .*, global\/no-not .*, other\/elsewhere /);
@@ -223,7 +223,7 @@ test("6.3a: a subagent's first context holds the session's always rules and topi
     const out = v.hook('subagent-start', { ...start, agent_id }).hookSpecificOutput;
     assert.equal(out.hookEventName, 'SubagentStart');
     assert.match(out.additionalContext, /^# Taste rules\n[\s\S]*## glim\n- glim\/always-rule: Do: Open each glim file with a purpose line\. Not: Start a file straight with code\./, agent_id);
-    assert.match(out.additionalContext, /Taste vault: when the task touches .*, read `[^`]*index\.md`/, agent_id);
+    assert.match(out.additionalContext, /Vault: when the task touches .*, read `[^`]*index\.md`/, agent_id);
     assert.ok(!out.additionalContext.includes('propose a rule'), agent_id);
   }
   v.write('wiki/glim/late-rule.md', ruleNote({ always: true, doLine: 'Be late.', notLine: 'Be early.' }));
@@ -327,7 +327,7 @@ test('6.6e: session start in the vault folder with 10 domains stays under the ou
   const v = makeVault(t, { presets: Object.keys(PRESETS), domains });
   const ctx = v.startSession(sessionId(), { cwd: v.root }).hookSpecificOutput.additionalContext;
   assert.ok(ctx.length <= LIMIT, `${ctx.length} characters`);
-  assert.match(ctx, /^Taste vault: when the task touches layout, code, ledger, papers, days, words, topic-0-0-padding, /);
+  assert.match(ctx, /^Vault: when the task touches layout, code, ledger, papers, days, words, topic-0-0-padding, /);
   // The presets' notes bring the lint reminder and the stale-sources line, which rank below the topics.
   assert.match(ctx, /\(Left out to stay within 8000 characters: \d+ topics and 2 notes\. `[^`]*index\.md` lists the rest\.\)$/);
 });
@@ -343,7 +343,7 @@ test('the output budget is delivery.maxContextChars, and the topics are the firs
   const ctx = v.startSession(sessionId()).hookSpecificOutput.additionalContext;
   assert.ok(ctx.length <= 3000, `${ctx.length} characters`);
   assert.match(ctx, /glim\/brief: Do: Be brief\./, 'the always rule ranks above the topics');
-  assert.match(ctx, /Taste vault: propose a rule/, 'the instructions rank above the topics');
+  assert.match(ctx, /Vault: propose a rule/, 'the instructions rank above the topics');
   assert.match(ctx, /Left out to stay within 3000 characters: \d+ topics\b/);
 });
 

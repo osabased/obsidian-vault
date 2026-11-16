@@ -82,7 +82,7 @@ export function setMode(sid, p, { call = null, kept = null } = {}) {
   if (kept) {
     if (offerText(offer, kept.code) !== kept.text) refuse("the vault changed since the offer, so it isn't what the user agreed to. Propose it again.");
   } else if (!prompted) {
-    if (!typedFor(entry)) refuse("the taste vault has no transcript for this session, so it can't check the user agreed. Ask the user to set proposals in vault.config.json.");
+    if (!typedFor(entry)) refuse("the vault has no transcript for this session, so it can't check the user agreed. Ask the user to set proposals in vault.config.json.");
     return makeOffer({ kind: 'mode', sid, entry, key: `mode:${f.domain || 'global'}`, fields: p, lines: offer }).reply;
   }
   withLock(statePath('config.lock'), () => {
