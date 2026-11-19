@@ -1,6 +1,6 @@
 # All-rounder vault: design draft
 
-Status: draft, 2026-11-01. Phases 0 to 6 are built and merged into main: phase 0 (checks), phase 1 (format), phase 2 (delivery), phase 3 (neutral fixtures), phase 4 (knowledge mechanisms) with its perf pass, phase 5 (media and tool triggers) and phase 6 (second adapter: the identifier test, the move behind the Claude Code adapter, the Codex adapter, compiled files and the provider tests). Phase 7 (agents start domains) is built and merged too. Phase 8 (the proposals setting) is built and merged too. Phases 3 to 7 were each reviewed and fixed before merging.
+Status: built; drafted 2026-11-01. Phases 0 to 6 are built and merged into main: phase 0 (checks), phase 1 (format), phase 2 (delivery), phase 3 (neutral fixtures), phase 4 (knowledge mechanisms) with its perf pass, phase 5 (media and tool triggers) and phase 6 (second adapter: the identifier test, the move behind the Claude Code adapter, the Codex adapter, compiled files and the provider tests). Phase 7 (agents start domains) is built and merged too. Phase 8 (the proposals setting) is built and merged too. Phases 3 to 7 were each reviewed and fixed before merging. §6.8 (vault tools over MCP) is built and merged too (`7b5b2ed`, merged as `9818ddb` on 2026-11-03).
 
 Scope: structure, design and architecture only. This design adds no knowledge to the vault. It names no domain, platform, package ecosystem or site as built in. Where it needs an example, it uses a placeholder.
 

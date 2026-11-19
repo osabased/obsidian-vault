@@ -25,7 +25,7 @@ My Obsidian vault at `<absolute path>` is an LLM wiki of my preferences and note
 
 ## Set up
 
-You need git, Node.js 22 or later and Claude Code 2.1.295 or later. Obsidian is optional, for reading and editing the notes.
+You need git, Node.js 22.12 or later and Claude Code 2.1.295 or later. Obsidian is optional, for reading and editing the notes.
 
 1. **Get the vault.** Clone it to a folder of your own. Your rules are written as notes in this folder.
 

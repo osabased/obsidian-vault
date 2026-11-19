@@ -60,7 +60,7 @@ updated: 2026-10-19
 
 Pages hold knowledge in the agent's words, or with `author: user` the user's own; What belongs here in `AGENTS.md` says what counts. Sessions find them through `index.md`, and the hooks point a session to one whose `keywords` or `applies_to` match its work. Each page has one `kind`:
 
-- **topic** (`topics/`): sums up what the vault knows on one topic: how its rules and pages fit together, the sources behind them, and what's still open. It links each other page on its topic, source pages included. Each topic in a domain has at most one; `/ingest`, `/lint` and a filed-back answer update it, and start it when the topic has none. Name it after its topic.
+- **topic** (`topics/`): sums up what the vault knows on one topic: how its rules and pages fit together, the sources behind them, and what's still open. It links each other page on its topic, source pages included. Each topic in a domain has at most one; `/ingest`, `/lint` and a filed-back answer update it, and start it when the topic has none. Once a topic in a domain has `pages.rollupAfterRules` live rules (3 by default, in `vault.config.json`), `node tools/review.mjs status` lists it while it has no topic page or its topic page doesn't link each of them under `## Rules`, and `/lint` drafts the page or the links. Name it after its topic.
 - **concept** (`concepts/`): one idea, technique or API, explained.
 - **entity** (`entities/`): one named thing, such as a library, tool, service or game.
 - **synthesis** (`syntheses/`): an answer or comparison a session worked out from the vault and filed back, so a later session can reuse it.
