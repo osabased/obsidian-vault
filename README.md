@@ -5,7 +5,7 @@ An Obsidian vault that an agent keeps, after Andrej Karpathy's [LLM wiki](https:
 ## What's in it
 
 - `raw/`: the sources, append-only. References you collect and web pages `/ingest` saved go in `raw/refs/`; the rules, picks and review-queue entries agents record go in `raw/inbox/`, `raw/picks/` and `raw/queue/`.
-- `wiki/`: what the agent writes, one note each, by domain. Pages hold knowledge: topics, concepts, entities, syntheses and sources. Rules are one-line Do/Not taste, and facts training gets wrong.
+- `wiki/`: what the agent writes, one note each, by domain. Pages hold knowledge: topics, concepts, entities, syntheses and sources. Rules are one-line Do/Not taste and practice, and facts training gets wrong.
 - `index.md`: every page and rule by topic, where an agent starts. `log.md`: what changed, newest last.
 - `AGENTS.md`: the schema, how the agent writes and keeps the wiki. `reference/notes.md`: the note formats.
 

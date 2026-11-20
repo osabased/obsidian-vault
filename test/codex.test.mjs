@@ -11,7 +11,7 @@ const SCHEMAS = path.join(import.meta.dirname, 'fixtures', 'codex', 'schema');
 const EVENTS = { SessionStart: 'session-start', UserPromptSubmit: 'user-prompt-submit', PreToolUse: 'pre-tool-use', SubagentStart: 'subagent-start', Stop: 'stop' };
 const schema = (event, side) => JSON.parse(fs.readFileSync(path.join(SCHEMAS, `${EVENTS[event]}.command.${side}.schema.json`), 'utf8'));
 const ZQ_LINE = '- glim/zq-trigger: Do: Set values through a named step. Not: Set a value inline. Because: The user traces values by step name.';
-const LEAD = 'Taste rules apply to a file this turn wrote. Re-read the change against them before you stop.';
+const LEAD = 'Rules apply to a file this turn wrote. Re-read the change against them before you stop.';
 
 // The JSON Schema keys the copied schemas use: type, const, enum, required, properties, additionalProperties, $ref into
 // definitions, and allOf. Returns the paths that don't fit.
@@ -118,8 +118,8 @@ test('a patch over two covered files gives one deny naming both, and the same pa
   hook(v, 'session-start', codexInput('SessionStart', { session_id: sid, cwd: v.project }));
   const ops = ['src/a.zq', 'src/b.zq'].map(rel => ({ update: rel, chunks: [{ lines: ['-a', '+set x to 1'] }] }));
   const why = denied(hook(v, 'edit', patchCall(sid, v.project, ops))) ?? '';
-  assert.match(why, /^Taste rules apply to src\/a\.zq:/);
-  assert.match(why, /\n\nTaste rules apply to src\/b\.zq:/);
+  assert.match(why, /^Rules apply to src\/a\.zq:/);
+  assert.match(why, /\n\nRules apply to src\/b\.zq:/);
   assert.equal(hook(v, 'edit', patchCall(sid, v.project, ops)), null);
 });
 
@@ -127,7 +127,7 @@ test('a move is gated on both paths, and a malformed patch fails loudly', t => {
   const v = codexVault(t);
   const sid = sessionId();
   const why = denied(hook(v, 'edit', patchCall(sid, v.project, [{ update: 'docs/a.txt', moveTo: 'src/a.zq', chunks: [{ lines: ['-a', '+set x to 1'] }] }]))) ?? '';
-  assert.match(why, /^Taste rules apply to src\/a\.zq:/);
+  assert.match(why, /^Rules apply to src\/a\.zq:/);
   const r = run(v, 'edit', patchCall(sid, v.project, '*** Begin Patch\n*** Update File: src/a.zq\n*** End Patch'));
   assert.equal(r.code, 1);
   assert.equal(r.stdout, '');
@@ -226,13 +226,13 @@ test("the provider keeps user.text, drops injected kinds and the question reply,
     'and the tabs roomy',
     { kinds: ['user.text', 'user.image'], content: [{ type: 'input_text', text: 'match this shade' }, { type: 'input_image', image_url: 'data:image/png;base64,AA==' }] },
     { kinds: ['user.text', 'user.text'], content: [{ type: 'input_text', text: '<skill>' }, { type: 'input_text', text: 'two typed items' }] },
-    hookPrompt('Taste rules apply', 'a second fragment with <tags> & "quotes"'),
+    hookPrompt('Rules apply', 'a second fragment with <tags> & "quotes"'),
   ]);
   assert.deepEqual(typedMessages(file), ['Keep the grid gap at eight.', 'and the tabs roomy', 'match this shade']);
   const { transcriptCheck } = await v.import('adapters/codex/adapter.mjs');
   assert.deepEqual(transcriptCheck(file).missing, [], "the live check doesn't count a hook prompt as a missing field");
   assert.equal(typedMessages(codexRollout(v, sid, ['typed', { kinds: null, text: 'a user message with no kinds' }])), null);
-  const { content } = hookPrompt('Taste rules apply');
+  const { content } = hookPrompt('Rules apply');
   assert.equal(typedMessages(codexRollout(v, sid, ['typed', { kinds: null, content: [...content, { type: 'input_text', text: 'not a hook prompt' }] }])), null,
     'a kind-less message is skipped only when every item is a hook prompt');
   assert.equal(typedMessages(v.at('.transcripts', 'missing.jsonl')), null);

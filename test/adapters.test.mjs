@@ -12,7 +12,7 @@ import * as codex from './drivers/codex.mjs';
 const ALWAYS = /glim\/always-rule: Do: Open each glim file with a purpose line\./;
 const ZQ = /glim\/zq-trigger: Do: Set values through a named step\./;
 const KEYWORD = /glim\/keyword-rule: Do: Fade a shimmer in over two frames\./;
-const LEAD = 'Taste rules apply to a file this turn wrote. Re-read the change against them before you stop.';
+const LEAD = 'Rules apply to a file this turn wrote. Re-read the change against them before you stop.';
 
 function gitProject(v) {
   const env = cleanEnv({ GIT_CONFIG_NOSYSTEM: '1', GIT_CONFIG_GLOBAL: '/dev/null' });
@@ -129,7 +129,7 @@ for (const d of [claudeCode, codex]) {
     const { v, sid } = started(t);
     v.write('wiki/glim/rules/tree-rule.md', ruleNote({ applies_to: ['glim-tree:A.**'], doLine: 'Name nodes plainly.' }));
     const call = () => d.toolCall(v, sid, 'mcp__fixture__set_property', { path: 'A.B.C', value: 'x' });
-    assert.match(d.deny(call()) ?? '', /^Taste rules apply to glim-tree:A\.B\.C:\n- glim\/tree-rule: Do: Name nodes plainly\./);
+    assert.match(d.deny(call()) ?? '', /^Rules apply to glim-tree:A\.B\.C:\n- glim\/tree-rule: Do: Name nodes plainly\./);
     assert.equal(call(), null);
   });
 
@@ -144,7 +144,7 @@ for (const d of [claudeCode, codex]) {
     const { v, sid } = started(t);
     const { sessionVar } = await v.import(`adapters/${d.name}/adapter.mjs`);
     const rule = {
-      domain: 'glim', slug: 'own-session', topic: 'naming', basis: 'reading', reading: 'The user rewrote the screen twice.',
+      domain: 'glim', slug: 'own-session', kind: 'taste', topic: 'naming', basis: 'reading', reading: 'The user rewrote the screen twice.',
       do: 'Zebra quartz mango.', not: 'Plover lantern ember.', applies_to: ['src/new/**'],
     };
     const r = v.run('propose.mjs', [], { input: rule, env: { [sessionVar]: sid } });

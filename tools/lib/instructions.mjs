@@ -5,7 +5,7 @@ import { joinList } from './rules.mjs';
 // The tools take their session from the call, so the notes name tools and no path, session id or shell. The callers still
 // pass the id and the agent first.
 
-const WHEN = 'when the user corrects you or says how they want things, in a way that should hold in later sessions too (a taste rule)';
+const WHEN = 'when the user corrects you or says how they want things, in a way that should hold in later sessions too (a taste or practice rule)';
 
 // Gotchas and page changes are held until the task is done, so the user answers them together at the end. Under off the
 // agent proposes only what the user asks to keep, so it holds nothing. The vault folder writes pages directly, so its
@@ -16,7 +16,7 @@ const RELEASE = 'When the task is done, call `propose` with `release: true` and 
 const HOLD = [HOLD_RULE, HOLD_PAGE, RELEASE].join(' ');
 const VAULT_HOLD = [HOLD_RULE, RELEASE].join(' ');
 
-// What the agent does under each mode of the proposals setting, for taste rules.
+// What the agent does under each mode of the proposals setting, for taste and practice rules.
 const WHAT = {
   corrections: `propose a rule ${WHEN}.`,
   ask: `${WHEN}, offer a rule through the vault's \`propose\` tool and do what it returns; nothing is written until the user agrees.`,

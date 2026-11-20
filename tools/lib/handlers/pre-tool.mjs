@@ -214,7 +214,7 @@ function refusal(event, hits, pages, written) {
   const sid = event.session;
   const first = hits[0] ?? pages[0];
   const noun = first.place.startsWith('tool:') ? 'call' : 'edit';
-  const head = `Taste rules apply to ${first.rel}:`;
+  const head = `Rules apply to ${first.rel}:`;
   const foot = `Revise this ${noun} to follow ${!pages.length ? 'them' : hits.length ? 'them and the pages' : 'the pages'}, then retry. The retry is allowed.`;
   const full = [];
   for (const hit of hits.slice(0, maxRulesPerEdit)) {

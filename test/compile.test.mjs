@@ -8,10 +8,10 @@ import { makeVault, ruleNote } from './fixture.mjs';
 
 const END = '<!-- vault: end -->';
 const beginLine = hash => `<!-- vault: begin ${hash} · written by node tools/compile.mjs, which refuses to rewrite it once it is edited by hand -->`;
-const HASH = 'e295eca484d225a1';
+const HASH = '4944a878e8803a5e';
 
 const BODY = [
-  '## Taste rules',
+  '## Rules',
   '',
   "From the user's vault. Follow them in this project.",
   '',
@@ -295,7 +295,7 @@ test('a folder below a domain\'s project root is refused with the root to compil
 
 test('markers inside a code fence are the user\'s text: the section is appended once, then stays current, and a hand edit is still found', t => {
   const v = glimVault(t);
-  const sample = `# Mine\n\n\`\`\`md\n${beginLine('3f9c01ab77e0d2c1')}\n## Taste rules\n${END}\n\`\`\`\n\n~~~\n${END}\n~~~\n`;
+  const sample = `# Mine\n\n\`\`\`md\n${beginLine('3f9c01ab77e0d2c1')}\n## Rules\n${END}\n\`\`\`\n\n~~~\n${END}\n~~~\n`;
   fs.writeFileSync(agentsOf(v), sample);
   const r = compile(v);
   assert.equal(r.code, 0, r.stdout);
@@ -327,7 +327,7 @@ test('compile.maxBytes caps the section as written, markers and CRLF endings inc
   const tiny = glimVault(t, { config: { compile: { maxBytes: 40 } } });
   assert.equal(compile(tiny).code, 0);
   const lines = fs.readFileSync(agentsOf(tiny), 'utf8').split('\n');
-  assert.deepEqual(lines.slice(1, -2), ['## Taste rules', '', "From the user's vault. Follow them in this project.", '', '(Left out to stay within 40 bytes: 3 rules.)']);
+  assert.deepEqual(lines.slice(1, -2), ['## Rules', '', "From the user's vault. Follow them in this project.", '', '(Left out to stay within 40 bytes: 3 rules.)']);
 });
 
 test('an existing section keeps its own line endings and the spaces after its markers, so it stays current', async t => {

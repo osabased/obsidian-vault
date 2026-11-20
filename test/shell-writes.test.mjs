@@ -38,7 +38,7 @@ test('6.3d: a rule-covered file a shell command wrote this turn gets that rule o
   assert.equal(out.hookSpecificOutput.hookEventName, 'Stop');
   assert.equal(out.decision, undefined, 'the turn continues without a block');
   assert.equal(context(out), [
-    'Taste rules apply to a file this turn wrote. Re-read the change against them before you stop.',
+    'Rules apply to a file this turn wrote. Re-read the change against them before you stop.',
     'src/a.zq:',
     '- glim/zq-trigger: Do: Set values through a named step. Not: Set a value inline. Because: The user traces values by step name.',
   ].join('\n'));

@@ -12,7 +12,7 @@ import { makeVault, sessionId, userTurn, assistantTurn, ruleNote, zqEntityPage, 
 // whatever the session wrote meanwhile, the day it is kept on, or what the sweep made of an offer left waiting.
 const typed = said => said.flatMap(s => [userTurn(s), assistantTurn('Noted.')]);
 const rule = (o = {}) => ({
-  domain: 'glim', slug: 'tidy-names', topic: 'code', basis: 'stated', quote: 'call them by their screen',
+  domain: 'glim', slug: 'tidy-names', kind: 'taste', topic: 'code', basis: 'stated', quote: 'call them by their screen',
   do: 'Name widgets after their screen.', not: 'Leave widget names bare.', keywords: ['widgetz'], applies_to: ['src/**/*.zq'], ...o,
 });
 // On the same topic as rule(), sharing no glob, keyword or many words with it.

@@ -13,7 +13,9 @@ export const LIST_FIELDS = ['applies_to', 'triggers', 'keywords', 'tools'];
 // like), digits and combining marks, read in NFC, so a name never has an uppercase letter and two spellings of one name
 // compare equal.
 export const KEY_RE = /^[\p{Ll}\p{Lm}\p{Lo}\p{Nd}\p{M}-]+\/[\p{Ll}\p{Lm}\p{Lo}\p{Nd}\p{M}-]+$/u;
-export const BASES = { taste: ['stated', 'inferred', 'pick', 'reading'], knowledge: ['stated', 'failure', 'source'] };
+const PREFERENCE_BASES = ['stated', 'inferred', 'pick', 'reading'];
+export const BASES = { taste: PREFERENCE_BASES, practice: PREFERENCE_BASES, knowledge: ['stated', 'failure', 'source'] };
+export const RULE_KINDS = Object.keys(BASES);
 export const PAGE_WHERE = 'page must be a page under wiki/, like wiki/<domain>/<folder>/<slug>.md.';
 export const rulePath = key => `wiki/${key.replace('/', '/rules/')}.md`;
 export const PAGE_KINDS = ['topic', 'concept', 'entity', 'synthesis', 'source'];
@@ -29,8 +31,8 @@ export const validDay = s => typeof s === 'string' && /^\d{4}-\d\d-\d\d$/.test(s
 export const KEBAB = /^[\p{Ll}\p{Lm}\p{Lo}\p{Nd}\p{M}]+(?:-[\p{Ll}\p{Lm}\p{Lo}\p{Nd}\p{M}]+)*$/u;
 const nfc = s => String(s).normalize('NFC');
 const HEAD = [
-  '# Taste rules',
-  "Follow these unless the user's current request or the project's own instructions say otherwise. If an edit is refused with taste rules, apply them and retry the edit.",
+  '# Rules',
+  "Follow these unless the user's current request or the project's own instructions say otherwise. If an edit is refused with rules, apply them and retry the edit.",
 ];
 
 export const cmp = (a, b) => (a < b ? -1 : a > b ? 1 : 0);
@@ -277,16 +279,16 @@ function checkNote(n) {
   }
   if (n.type !== 'rule') return errs;
   if (isVaultOnly(n.domain)) errs.push(`${n.domain} is vault-only, so it holds pages only. Put the rule in a domain that reaches projects, or in global`);
-  if (!BASES[n.kind]) errs.push('kind must be taste or knowledge');
+  if (!BASES[n.kind]) errs.push(`kind must be ${joinList(RULE_KINDS, 'or')}`);
   else if (!BASES[n.kind].includes(n.data.basis)) errs.push(wrongBasis(n.kind, n.data.basis));
   if (n.kind === 'knowledge') {
     if (!validDay(n.as_of)) errs.push('a knowledge rule needs as_of, the day it was last checked, as YYYY-MM-DD');
     else if (n.as_of > today()) errs.push(`as_of ${n.as_of} is in the future`);
     errs.push(...requiresErrors(n.requires), ...packageErrors(n));
-  } else if (n.kind === 'taste') {
-    if (n.as_of !== null) errs.push('as_of is only for knowledge rules; taste rules never expire');
-    if (n.requires !== null) errs.push('requires is for knowledge rules and pages; a taste rule holds whatever the version');
-    if (n.package !== null || n.checked_with !== null) errs.push('package and checked_with are for knowledge rules; a taste rule holds whatever the version');
+  } else if (BASES[n.kind]) {
+    if (n.as_of !== null) errs.push(`as_of is only for knowledge rules; ${n.kind} rules never expire`);
+    if (n.requires !== null) errs.push(`requires is for knowledge rules and pages; a ${n.kind} rule holds whatever the version`);
+    if (n.package !== null || n.checked_with !== null) errs.push(`package and checked_with are for knowledge rules; a ${n.kind} rule holds whatever the version`);
   }
   if (n.retired !== null && !validDay(n.retired)) errs.push('retired must be the day the rule was retired, as YYYY-MM-DD');
   if (n.data.retired_because !== undefined && !filled(n.data.retired_because)) errs.push('retired_because must say in one line why the rule was retired');
@@ -790,14 +792,14 @@ export function fitIn(hits, cwd) {
 export const evidenceSessions = (n, skip) => [...new Set(evidenceLines(n).flatMap(e => (skip?.has(e.id) ? [] : e.session ?? [])))];
 export const evidenceSources = n => evidenceLines(n).filter(e => e.kind === 'source').flatMap(e => e.cite.match(/^(.+?) · dated /)?.[1] ?? []);
 
-const TASTE_RANK = ['stated', 'pick', 'inferred', 'reading'];
+const PREFERENCE_RANK = ['stated', 'pick', 'inferred', 'reading'];
 const newestEvidence = n => evidenceLines(n).flatMap(e => e.day ?? []).sort().at(-1) ?? '';
 // Each test, a note's value where higher wins and what to say when it decides, in the order AGENTS.md's Evidence
 // section gives.
 const RANKS = {
   taste: {
     tests: [
-      [n => -TASTE_RANK.indexOf(n.data.basis), (w, l) => `basis ${w.data.basis} over ${l.data.basis}`],
+      [n => -PREFERENCE_RANK.indexOf(n.data.basis), (w, l) => `basis ${w.data.basis} over ${l.data.basis}`],
       [n => evidenceLines(n).length, (w, l) => `${plural(evidenceLines(w).length, 'Evidence line')} to ${evidenceLines(l).length}`],
       [newestEvidence, (w, l) => `evidence from ${newestEvidence(w)} over ${newestEvidence(l) || 'no date'}`],
     ],
@@ -812,11 +814,14 @@ const fitName = f => f?.fit ?? 'none';
 const fitWins = f => ({ match: `version match (${f?.why})`, none: 'no version requirement', unknown: 'version unknown' })[fitName(f)];
 const fitLoses = f => ({ unknown: 'version unknown', mismatch: 'mismatch' })[fitName(f)];
 
-// Which of two rules that may contradict to recommend first, or null for a taste rule and a knowledge rule, which
+// Taste and practice rules are both the user's preferences, so they rank against each other.
+const rankGroup = kind => (kind === 'knowledge' ? kind : 'taste');
+
+// Which of two rules that may contradict to recommend first, or null for a preference and a knowledge rule, which
 // aren't ranked against each other. fit gives a note's fit for the project the ranking is for; without it, versions
 // tie and as_of decides.
 export function rankPair(a, b, { fit } = {}) {
-  const rank = a.kind === b.kind ? RANKS[a.kind] : null;
+  const rank = rankGroup(a.kind) === rankGroup(b.kind) ? RANKS[rankGroup(a.kind)] : null;
   if (!rank) return null;
   const tests = a.kind === 'knowledge' && fit ? [[n => FIT_RANK[fitName(fit(n))], (w, l) => `${fitWins(fit(w))} over ${fitLoses(fit(l))}`], ...rank.tests] : rank.tests;
   for (const [value, why] of tests) {

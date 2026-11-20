@@ -9,7 +9,7 @@ const END = '<!-- vault: end -->';
 const ENDS = new Set([END, '<!-- taste-vault: end -->']);
 const beginLine = hash => `<!-- vault: begin ${hash} · written by node tools/compile.mjs, which refuses to rewrite it once it is edited by hand -->`;
 const RULE = /^- (\S+?): /;
-const INTRO = "## Taste rules\n\nFrom the user's vault. Follow them in this project.";
+const INTRO = "## Rules\n\nFrom the user's vault. Follow them in this project.";
 const FENCE = /^ {0,3}(`{3,}|~{3,})(.*)$/;
 
 const editing = globs => {

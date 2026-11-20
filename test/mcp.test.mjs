@@ -326,7 +326,7 @@ test('a propose call through the server writes triggers with backslashes exactly
   const c = await open(t, v, CC);
   const triggers = ['\\bzebra\\b', 'quartz\\\\s'];
   const r = await call(c, 'propose', {
-    domain: 'glim', slug: 'new-rule', topic: 'code', basis: 'reading', reading: 'The user rewrote the screen twice.',
+    domain: 'glim', slug: 'new-rule', kind: 'taste', topic: 'code', basis: 'reading', reading: 'The user rewrote the screen twice.',
     do: 'Zebra quartz mango.', not: 'Plover lantern ember.', applies_to: ['src/new/**'], triggers,
   }, ccMeta('toolu_t1'));
   assert.equal(r.isError, undefined, textOf(r));
@@ -340,7 +340,7 @@ test("a subagent's propose through the server queues the rule for the user's rev
   await recorded(v, { call: 'toolu_q1', session: sid, subagent: 'agent-7', tool: 'propose' });
   const c = await open(t, v, CC);
   const r = await call(c, 'propose', {
-    domain: 'glim', slug: 'sub-rule', topic: 'code', basis: 'reading', reading: 'The build failed twice on quartz.',
+    domain: 'glim', slug: 'sub-rule', kind: 'taste', topic: 'code', basis: 'reading', reading: 'The build failed twice on quartz.',
     do: 'Zebra quartz mango.', not: 'Plover lantern ember.', applies_to: ['src/sub/**'],
   }, ccMeta('toolu_q1'));
   assert.equal(r.isError, undefined, textOf(r));

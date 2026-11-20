@@ -3,7 +3,7 @@ import {
   shortHash, isVaultOnly, sessionReach, cwdOf, proposalMode, inVaultFolder, newId, readPlain, restore, queueRows, config, rewriteText, moveFile,
 } from './vault.mjs';
 import {
-  KEY_RE, BASES, PAGE_WHERE, wrongBasis, parseNote, noteErrors, ruleText, ruleTextParts, sentence, loadNotes, readNote, liveRules, isLive, mentions, isUrl, validDay, byKey, normTopic, vaultFile, joinList,
+  KEY_RE, BASES, RULE_KINDS, PAGE_WHERE, wrongBasis, parseNote, noteErrors, ruleText, ruleTextParts, sentence, loadNotes, readNote, liveRules, isLive, mentions, isUrl, validDay, byKey, normTopic, vaultFile, joinList,
   sharedFiles, rankPair, maxChars, fitIn, hasChannel, rulePath, leadPattern, isRetired, packageId, knownDomain, resolver, relink, toKey, authoredByUser, noteLinks,
 } from './rules.mjs';
 import { projectVersions, versionIn, compareFor } from './versions.mjs';
@@ -26,7 +26,7 @@ const FIELDS = new Set([
   'domain', 'slug', 'kind', 'do', 'not', 'because', 'topic', ...EVIDENCE_FIELDS,
   'keywords', 'applies_to', 'triggers', 'always', 'repeats', 'asked', 'hold', 'release', 'queued', 'package',
 ]);
-const REWORD_FIELDS = new Set(['change', 'key', 'do', 'not', 'because', 'applies_to', 'keywords', 'checked_with', ...EVIDENCE_FIELDS, 'hold', 'asked']);
+const REWORD_FIELDS = new Set(['change', 'key', 'kind', 'do', 'not', 'because', 'applies_to', 'keywords', 'checked_with', ...EVIDENCE_FIELDS, 'hold', 'asked']);
 
 function sessionOf(sid) {
   const entry = callerEntry(sid, { noId: `there's no session id to propose for. ${PASS}` });
@@ -731,20 +731,24 @@ function move(sid, session, p, opts) {
 // A reword replaces what it gives of the rule's Do, Not, Because, applies_to and keywords, and backs the change with
 // evidence as a new rule is backed. The note keeps its other lines, its Evidence among them.
 function reword(sid, session, p, opts) {
-  const { key, rule: old } = changedRule(p, session, REWORD_FIELDS, 'the new do, not, because, applies_to, keywords or checked_with and the evidence for the change');
+  const { key, rule: old } = changedRule(p, session, REWORD_FIELDS, 'the new do, not, because, applies_to, keywords, kind or checked_with and the evidence for the change');
   const base = baseOf(sid, session, p, opts);
   const { kept, queued } = opts;
   const versionOnly = isVersionOnly(p);
   const basis = versionOnly ? null : line(p, 'basis');
-  if (!versionOnly && !BASES[old.kind].includes(basis)) refuse(`${wrongBasis(old.kind, basis)}.`);
+  const kind = Object.hasOwn(p, 'kind') ? line(p, 'kind') : old.kind;
+  if (!BASES[kind]) refuse(`kind must be ${joinList(RULE_KINDS, 'or')}.`);
+  // Leaving knowledge would drop as_of, requires, package and checked_with, which a retirement records and a reword doesn't.
+  if (old.kind === 'knowledge' && kind !== 'knowledge') refuse(`${key} is a knowledge rule. To make it a ${kind} rule, retire it and propose it again.`);
+  if (!versionOnly && !BASES[kind].includes(basis)) refuse(`${wrongBasis(kind, basis)}.`);
   const given = (name, read = line) => (Object.hasOwn(p, name) ? read(p, name) : old[name]);
   const f = {
-    ...base, domain: old.domain, slug: old.slug, kind: old.kind, topic: old.topic, basis,
+    ...base, domain: old.domain, slug: old.slug, kind, topic: old.topic, basis,
     do: given('do'), not: given('not'), because: given('because', (q, k) => line(q, k, false)),
     applies_to: given('applies_to', lines), keywords: given('keywords', lines), checked_with: given('checked_with'),
     tools: old.tools, always: old.always, day: kept?.day || today(), id: newId('a'),
   };
-  if (!differs(old, f) && f.checked_with === old.checked_with) refuse(`the reword leaves ${key} as it is. Give the new do, not, because, applies_to, keywords or checked_with.`);
+  if (!differs(old, f) && f.kind === old.kind && f.checked_with === old.checked_with) refuse(`the reword leaves ${key} as it is. Give the new do, not, because, applies_to, keywords, kind or checked_with.`);
   checkChannel(f);
   const e = versionOnly ? null : evidence(f, p);
   if (e && queued && !e.pick) Object.assign(e, { day: queued.checked, session: sessionName(queued.session, queued.agent) });
@@ -762,17 +766,20 @@ function reword(sid, session, p, opts) {
       // As for new evidence, as_of moves up to the day the change was checked.
       const checked = e.date ?? e.day ?? f.day;
       if (was.kind === 'knowledge' && validDay(was.as_of) && checked > was.as_of) after = setField(after, 'as_of', checked);
+      if (f.kind !== was.kind) after = setField(after, 'kind', f.kind);
+      if (f.kind === 'knowledge' && was.kind !== 'knowledge') after = putField(after, 'as_of', checked);
       return withEvidence(after, evidenceLine(f, e));
     }, n => {
-      const bad = differs(n, f) ?? (n.checked_with === f.checked_with ? null : 'checked_with');
+      const bad = differs(n, f) ?? (n.kind === f.kind ? null : 'kind') ?? (n.checked_with === f.checked_with ? null : 'checked_with');
       return bad ? `${bad} doesn't survive as the note's text. Rephrase it.` : null;
     });
     checkNote(n);
     if (e) checkPick(e, e.pick ? proposalRows() : []);
+    const kinds = was.kind === f.kind ? [] : [`Was: a ${was.kind} rule`, `Now: a ${f.kind} rule`];
     const scope = where(was) === where(f) ? [] : [`Was: ${where(was)}`, `Now: ${where(f)}`];
     const version = f.checked_with === was.checked_with ? [] : [`Was: ${versionLine(was)}`, `Now: ${versionLine(n)}`];
     const head = versionOnly || ruleText(was) === ruleText(n) ? [`**Change this rule?** ${key}: ${ruleText(n)}`] : [`**Change this rule?** ${key}`, `Was: ${ruleText(was)}`, `Now: ${ruleText(n)}`];
-    const offer = consent(f, f.domain, 'reword', key, versionOnly ? [...head, ...version] : [...head, ...scope, ...version, `Its note would get this Evidence: ${sentence(e.cite)}`],
+    const offer = consent(f, f.domain, 'reword', key, versionOnly ? [...head, ...version] : [...head, ...kinds, ...scope, ...version, `Its note would get this Evidence: ${sentence(e.cite)}`],
     // checked_with decides which projects the rule reaches, and the user confirms the version, as for evidence that moves it.
     { offerOnly: version.length > 0 });
     if (offer) return { offer };
@@ -791,7 +798,7 @@ function reword(sid, session, p, opts) {
 
 // The version a rule was checked with comes from a lockfile, not from anyone's words, so a reword that only fills it
 // cites no one, as a page change, a retirement and a move don't.
-const isVersionOnly = p => Object.hasOwn(p, 'checked_with') && !Object.hasOwn(p, 'basis') && ![...TEXT_FIELDS, ...SCOPE_FIELDS].some(k => Object.hasOwn(p, k));
+const isVersionOnly = p => Object.hasOwn(p, 'checked_with') && !Object.hasOwn(p, 'basis') && ![...TEXT_FIELDS, ...SCOPE_FIELDS, 'kind'].some(k => Object.hasOwn(p, k));
 export const citesNoOne = p => kindIs(changeKind(p), 'citesNoOne') || (changeKind(p) === 'reword' && isVersionOnly(p));
 
 const CHANGES = { reword, retire, move };
@@ -829,6 +836,8 @@ export function proposeRule(sid, p, { kept = null, queueAs = null, mainWorktree 
   }
   const opts = { kept, queueAs, queued };
   const kind = changeKind(p);
+  // Offers and queue entries made before propose asked for a kind were taste rules.
+  if ((kept || queued) && kind === 'rule' && !Object.hasOwn(p, 'kind')) p = { ...p, kind: 'taste' };
   if (kind === 'page') return proposePage(sid, session, p, opts);
   if (kind !== 'rule') return changeRule(sid, session, p, opts);
   // checked_with comes from the lockfile, so only a stored offer or queue entry gives it.
@@ -843,8 +852,8 @@ export function proposeRule(sid, p, { kept = null, queueAs = null, mainWorktree 
   }
   const key = `${f.domain}/${f.slug}`;
   if (!KEY_RE.test(key)) refuse('slug must be lowercase-kebab-case.');
-  f.kind = line(p, 'kind', false) || 'taste';
-  if (!BASES[f.kind]) refuse('kind must be taste or knowledge.');
+  f.kind = line(p, 'kind', false);
+  if (!BASES[f.kind]) refuse(`kind must be ${joinList(RULE_KINDS, 'or')}.`);
   f.topic = line(p, 'topic');
   f.basis = line(p, 'basis');
   if (!BASES[f.kind].includes(f.basis)) refuse(`${wrongBasis(f.kind, f.basis)}.`);

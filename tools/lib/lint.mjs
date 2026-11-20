@@ -116,9 +116,9 @@ export function lint(notes = loadNotes(), chains = sourceChains()) {
     if (n.do && n.not && ruleText(n).length > maxChars(n.kind)) {
       add('warn', n.rel, `${ruleTextParts(n)} come to ${ruleText(n).length} characters; the hooks cut them at ${maxChars(n.kind)}`);
     }
-    // Every session start pays for an always rule, so one keeps to the taste cap whatever its kind.
+    // Every session start pays for an always rule, so one keeps to the taste and practice cap whatever its kind.
     if (n.do && n.not && n.always && n.kind === 'knowledge' && ruleText(n).length > delivery.maxRuleChars) {
-      add('warn', n.rel, `always: true loads this rule at every session start, and its ${ruleTextParts(n)} come to ${ruleText(n).length} characters, over the ${delivery.maxRuleChars} a taste rule may have. Shorten it, or give it keywords instead`);
+      add('warn', n.rel, `always: true loads this rule at every session start, and its ${ruleTextParts(n)} come to ${ruleText(n).length} characters, over the ${delivery.maxRuleChars} a taste or practice rule may have. Shorten it, or give it keywords instead`);
     }
     if (n.kind === 'knowledge' && !isRetired(n) && validDay(n.as_of)) {
       const checked = lastChecked(n);

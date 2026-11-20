@@ -41,7 +41,7 @@ const FIELDS = [
   row('subject', ['as above']),
   { name: 'comment', type: 'string', help: ["the user's words, verbatim, one line"] },
   // No help, so --help stays as the argv form's; the schema is where the JSON form of show is described.
-  { name: 'show', type: 'string', describe: 'Instead of recording: the subject (lowercase-kebab-case) to show the picks of, newest first, then the taste and knowledge rules of the project. Run it before building or reviewing the piece and keep to what it returns. Takes only domain and project, with the same meaning.' },
+  { name: 'show', type: 'string', describe: 'Instead of recording: the subject (lowercase-kebab-case) to show the picks of, newest first, then the rules of the project. Run it before building or reviewing the piece and keep to what it returns. Takes only domain and project, with the same meaning.' },
 ];
 
 const SUMMARY = "Records the user's pick between options you showed them, your provisional pick, a confirmation of one, or their comment on one piece of work. With show and a subject it returns that subject's picks and the rules instead. domain and project are needed only when the session has several.";
@@ -53,7 +53,7 @@ const help = () => renderHelp([
   'pick.json is one of three objects. Each records a row in raw/picks/ for a project this session is in, and takes:',
 ], FIELDS, [
   '',
-  "show prints the subject's live picks, newest first, then the taste and knowledge rules of the domain and of the other",
+  "show prints the subject's live picks, newest first, then the rules of the domain and of the other",
   "domains whose projects hold its project. Run it before building or reviewing the piece, and paste what it prints into the",
   "reviewer's prompt. Give the domain when the session is in more than one, and the project when the domain has more than one.",
 ], 13);

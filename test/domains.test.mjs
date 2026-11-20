@@ -130,7 +130,7 @@ test('domain.mjs refuses each bad field with one line and writes nothing', t => 
     [{ name: 'global' }, /global/],
     [{ name: 'glim' }, /vault\.config\.json already has a domain glim/],
     [{ name: 'propose' }, /^(?=.*key "propose")(?=.*tools\/\S+:\d+)/],
-    [{ title: 'Taste rules' }, /^(?=.*title "Taste rules")(?=.*tools\/\S+:\d+)/],
+    [{ title: 'Change this rule' }, /^(?=.*title "Change this rule")(?=.*tools\/\S+:\d+)/],
     [{ title: undefined }, /title/],
     [{ title: 'Two\nlines' }, /title/],
     [{ topics: 'code' }, /topics must be a list/],

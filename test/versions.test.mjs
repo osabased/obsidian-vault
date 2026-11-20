@@ -270,7 +270,7 @@ test('propose writes a taste rule and builds though a reader is gone, since only
   fs.rmSync(v.at('tools', 'ext', 'readers', 'fixture.mjs'));
   const propose = () => v.run('propose.mjs', [sid], {
     cwd,
-    input: JSON.stringify({ domain: 'almanac', slug: 'zz-new', topic: 'ledger', basis: 'reading', reading: 'The user rewrote it.', do: 'Zebra quartz mango.', not: 'Plover lantern ember.', applies_to: ['src/**'] }),
+    input: JSON.stringify({ domain: 'almanac', slug: 'zz-new', kind: 'taste', topic: 'ledger', basis: 'reading', reading: 'The user rewrote it.', do: 'Zebra quartz mango.', not: 'Plover lantern ember.', applies_to: ['src/**'] }),
   });
   // The first call lists the ledger rules it may repeat and refuses once; the second writes the note.
   const first = propose();

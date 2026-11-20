@@ -10,7 +10,7 @@ import { markDenied } from '../offers.mjs';
 function late(sid, reach, rules) {
   const due = dueAlways(sid, alwaysIn(rules, reach.always));
   return {
-    noun: 'rule', head: 'Taste rules that apply for the rest of this session:', items: due.map(([k, r]) => ruleLine(k, r)), keys: due.map(([k]) => k),
+    noun: 'rule', head: 'Rules that apply for the rest of this session:', items: due.map(([k, r]) => ruleLine(k, r)), keys: due.map(([k]) => k),
     mark: n => markAlways(sid, due.slice(0, n)),
   };
 }
@@ -24,7 +24,7 @@ function excerpts(sid, reach, rules, said) {
   const ranked = mentioned(Object.entries(rules).filter(([, r]) => reach.keyword(r)), said);
   const hits = dueExcerpts(sid, ranked, config().delivery.maxPromptExcerpts);
   return {
-    noun: 'rule', head: 'Taste rules that may apply to this request:', items: hits.map(h => ruleLine(h.key, h.note)), keys: hits.map(h => h.key),
+    noun: 'rule', head: 'Rules that may apply to this request:', items: hits.map(h => ruleLine(h.key, h.note)), keys: hits.map(h => h.key),
     mark: n => markExcerpts(sid, hits.slice(0, n)),
   };
 }

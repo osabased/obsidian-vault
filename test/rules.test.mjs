@@ -81,7 +81,7 @@ test('as_of on a taste rule is an error', async t => {
 
 test('bad kind, glob and trigger regex are errors', async t => {
   const { rules } = await vault(t);
-  assert.deepEqual(check(rules, ruleNote({ kind: 'weird', keywords: ['x'] })), ['kind must be taste or knowledge']);
+  assert.deepEqual(check(rules, ruleNote({ kind: 'weird', keywords: ['x'] })), ['kind must be taste, practice or knowledge']);
   assert.deepEqual(check(rules, ruleNote({ applies_to: ['a/{b'] })), ['bad glob in applies_to: a/{b']);
   assert.deepEqual(check(rules, ruleNote({ keywords: ['x'] }).replace('triggers: []', "triggers:\n  - '('")), ['bad regex in triggers: (']);
 });

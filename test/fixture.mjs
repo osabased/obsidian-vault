@@ -92,7 +92,7 @@ export function makeVault(t, { config = {}, domain = 'glim', topics = ['layout',
     startSession(sid, { cwd = project, transcript = null, source = 'startup' } = {}) {
       return v.hook('session-start', { session_id: sid, transcript_path: transcript, cwd, hook_event_name: 'SessionStart', source });
     },
-    propose: (sid, input) => v.run('propose.mjs', [sid], { input }),
+    propose: (sid, input, { raw = false } = {}) => v.run('propose.mjs', [sid], { input: raw ? input : withKind(input) }),
     edit: (sid, tool, toolInput, { cwd = project, agent, timeout } = {}) => v.hook('edit', {
       session_id: sid, cwd, hook_event_name: 'PreToolUse', tool_name: tool, tool_input: toolInput, ...(agent ? { agent_id: agent } : {}),
     }, { timeout }),
@@ -229,6 +229,9 @@ export const unrelatedRules = (domain, tag) => [
   { topic: 'docs', reading: 'The user put a purpose line atop each file.', do: 'Open each file with a one-line purpose comment.', not: 'Start a file straight with its imports.' },
 ].map((r, i) => ({ domain, slug: `${tag}-${i}`, basis: 'reading', applies_to: [`src/${tag}-${i}/**/*.txt`], ...r }));
 
+// propose.mjs needs a new rule's kind; most tests are about something else, so their rules are taste rules unless they say.
+export const withKind = input => (input && typeof input === 'object' && !Array.isArray(input) && Object.hasOwn(input, 'slug') && !Object.hasOwn(input, 'kind') && !Object.hasOwn(input, 'queued') ? { ...input, kind: 'taste' } : input);
+
 // Every session starts before the first propose, so the proposes overlap.
 export function proposeAtOnce(v, rules, { timeout } = {}) {
   const sids = rules.map(() => {
@@ -236,7 +239,7 @@ export function proposeAtOnce(v, rules, { timeout } = {}) {
     v.startSession(sid);
     return sid;
   });
-  return Promise.all(rules.map((rule, i) => v.runAsync('propose.mjs', [sids[i]], { input: rule, timeout })));
+  return Promise.all(rules.map((rule, i) => v.runAsync('propose.mjs', [sids[i]], { input: withKind(rule), timeout })));
 }
 
 // A vault tool call as the PreToolUse hook records it, and allowed as the server marks it once the user allows the call

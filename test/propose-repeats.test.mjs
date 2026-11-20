@@ -16,7 +16,7 @@ function setup(t, { quote } = {}) {
 }
 
 const proposal = (o = {}) => ({
-  domain: 'glim', slug: 'new-rule', topic: 'code', basis: 'reading', reading: 'The user rewrote the screen twice.',
+  domain: 'glim', slug: 'new-rule', kind: 'taste', topic: 'code', basis: 'reading', reading: 'The user rewrote the screen twice.',
   do: 'Zebra quartz mango.', not: 'Plover lantern ember.', applies_to: ['src/new/**'], ...o,
 });
 const inbox = v => fs.readdirSync(v.at('raw', 'inbox')).flatMap(f => v.read(`raw/inbox/${f}`).trim().split('\n').map(l => JSON.parse(l)));

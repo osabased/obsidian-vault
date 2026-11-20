@@ -4,7 +4,7 @@ import { reachOf, compileFor } from './lib/compile.mjs';
 import { UsageError, failure } from './lib/input.mjs';
 
 const USAGE = `usage: node tools/compile.mjs <project>...
-Writes the project's taste rules into a marked section of the instruction file of each agent its domain lists under "compile" in vault.config.json.`;
+Writes the project's rules into a marked section of the instruction file of each agent its domain lists under "compile" in vault.config.json.`;
 
 // Every project is checked before any file is written, so a mistyped path in the list leaves the others as they were.
 function plan(args) {

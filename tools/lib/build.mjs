@@ -25,6 +25,43 @@ function stale(files, write) {
   return out;
 }
 
+// Obsidian's graph view colors a note by the first color group whose search matches it. The groups match on frontmatter
+// rather than folders or topics, so new domains, topics and notes take a color with no edit here. graph.json is
+// gitignored because Obsidian rewrites it on every zoom or drag, so build keeps the groups in it instead of a committed
+// copy. The user's own groups go first and are kept, and a generated group the user recolored keeps its color.
+const GRAPH_GROUPS = [
+  ['[type:rule] [kind:taste]', 0x9ecbff],
+  ['[type:rule] [kind:practice]', 0x4f8fe6],
+  ['[type:rule] [kind:knowledge]', 0x1f4fa8],
+  ['[type:page] [kind:topic]', 0xe5534b],
+  ['[type:page] -[kind:topic]', 0x3fb950],
+  ['path:/^(active|index|decisions|queue|log)\\.md$/ OR path:/^raw\\/refs\\//', 0x8b949e],
+  ['path:/^(reference|docs)\\// OR path:/^(README|AGENTS)\\.md$/', 0xa371f7],
+];
+
+// A vault without .obsidian/ isn't opened in Obsidian, and a graph.json that doesn't parse is left for Obsidian to fix.
+function writeGraph() {
+  if (!fs.existsSync(vaultPath('.obsidian'))) return [];
+  const file = vaultPath('.obsidian', 'graph.json');
+  let text = '';
+  let graph = {};
+  try {
+    text = fs.readFileSync(file, 'utf8');
+    graph = JSON.parse(text);
+  } catch (e) {
+    if (e.code !== 'ENOENT') return [];
+  }
+  const had = Array.isArray(graph.colorGroups) ? graph.colorGroups : [];
+  const ours = new Set(GRAPH_GROUPS.map(([q]) => q));
+  const colorGroups = [
+    ...had.filter(c => !ours.has(c?.query)),
+    ...GRAPH_GROUPS.map(([query, rgb]) => ({ query, color: had.find(c => c?.query === query)?.color ?? { a: 1, rgb } })),
+  ];
+  if (JSON.stringify(colorGroups) === JSON.stringify(had)) return [];
+  writeJson(file, { ...graph, colorGroups });
+  return ['.obsidian/graph.json'];
+}
+
 // A corrupt derived.json is rewritten from raw/refs/ and the notes, which loses only the checks refresh recorded. Derive
 // reads every copy in raw/refs/, so it is skipped while neither they nor the notes changed since the last build; apply
 // writes copies first, so its chains are read afresh.
@@ -50,6 +87,7 @@ export function build({ check = false, notes, waitMs = 60_000, apply, refs, chai
     const before = apply ? null : (refs ?? refStats());
     writeDerived(all, { apply, refs: before, chains });
     markBuilt(all, before ?? refStats());
-    return out;
+    // Last, so a graph.json Obsidian holds open can't stop the notes' build.
+    return [...out, ...writeGraph()];
   }, { waitMs });
 }

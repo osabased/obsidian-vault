@@ -103,7 +103,7 @@ test('rule length caps follow the kind', async t => {
   v.write('wiki/glim/rules/always-fact.md', knowledge({ always: true, doLine: long }));
   const found = (await lintFound(v, /characters/)).map(f => [f.file, f.msg]);
   assert.deepEqual(found, [
-    ['wiki/glim/rules/always-fact.md', `always: true loads this rule at every session start, and its Do, Not, Because and the as_of date come to ${rules.ruleText(rules.parseNote(knowledge({ always: true, doLine: long }), 'x/y.md')).length} characters, over the 300 a taste rule may have. Shorten it, or give it keywords instead`],
+    ['wiki/glim/rules/always-fact.md', `always: true loads this rule at every session start, and its Do, Not, Because and the as_of date come to ${rules.ruleText(rules.parseNote(knowledge({ always: true, doLine: long }), 'x/y.md')).length} characters, over the 300 a taste or practice rule may have. Shorten it, or give it keywords instead`],
     ['wiki/glim/rules/fact.md', `Do, Not, Because and the as_of date come to ${rules.ruleText(rules.parseNote(knowledge({ keywords: ['w'], doLine: 'Word '.repeat(130) }), 'x/y.md')).length} characters; the hooks cut them at 600`],
   ]);
 });

@@ -5,7 +5,7 @@ import { parse } from './lib/frontmatter.mjs';
 import { sourceTexts } from './lib/quotes.mjs';
 import { UsageError, failure, readInput, schemaOf, schemaArg } from './lib/input.mjs';
 
-const KINDS = ['rule', 'taste', 'knowledge', 'page', ...PAGE_KINDS];
+const KINDS = ['rule', 'taste', 'practice', 'knowledge', 'page', ...PAGE_KINDS];
 const USAGE = `usage: node tools/search.mjs "<words>" [--domain <domain>] [--kind <kind>] [--topic <topic>] [--raw] [--limit <n>]
        node tools/search.mjs --help explains the ranking and the options`;
 const HELP = `${USAGE.split('\n')[0]}
@@ -16,7 +16,7 @@ the words a search for it would use that its text doesn't. Case, accents and plu
 words such as "the" and "with" match nothing.
 
   --domain <domain>  only notes in that domain
-  --kind <kind>      only rules (rule, or taste or knowledge for one kind) or pages (page, or topic, concept, entity,
+  --kind <kind>      only rules (rule, or taste, practice or knowledge for one kind) or pages (page, or topic, concept, entity,
                      synthesis or source for one kind)
   --topic <topic>    only notes on that topic
   --raw              the files under raw/refs/ too, which --domain, --kind and --topic leave out
@@ -27,7 +27,7 @@ Superseded rules are left out. A note the hooks don't deliver says why.`;
 const FIELDS = [
   { name: 'words', type: 'string', required: true, help: ['the words to look for'] },
   { name: 'domain', type: 'string', help: ['only notes in that domain'] },
-  { name: 'kind', type: 'string', enum: KINDS, help: ['only rules (rule, taste or knowledge) or pages (page, topic, concept, entity, synthesis or source)'] },
+  { name: 'kind', type: 'string', enum: KINDS, help: ['only rules (rule, taste, practice or knowledge) or pages (page, topic, concept, entity, synthesis or source)'] },
   { name: 'topic', type: 'string', help: ['only notes on that topic'] },
   { name: 'raw', type: 'boolean', help: ['true to search the files under raw/refs/ too, which domain, kind and topic leave out'] },
   { name: 'limit', type: 'number', help: ['at most this many results, 10 by default'] },

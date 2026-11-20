@@ -12,7 +12,7 @@ test('edit hook refuses the first matching edit and lets the retry through', t =
   const sid = sessionId();
   v.write('wiki/glim/ui-rule.md', ruleNote({ applies_to: ['src/**/*.zq'], doLine: 'Name each step.', notLine: 'Leave steps unnamed.' }));
   const first = denied(edit(v, sid, 'src/ui/main.zq'));
-  assert.match(first, /^Taste rules apply to src\/ui\/main\.zq:\n- glim\/ui-rule: Do: Name each step\. Not: Leave steps unnamed\.\nRevise this edit to follow them, then retry\. The retry is allowed\.$/);
+  assert.match(first, /^Rules apply to src\/ui\/main\.zq:\n- glim\/ui-rule: Do: Name each step\. Not: Leave steps unnamed\.\nRevise this edit to follow them, then retry\. The retry is allowed\.$/);
   assert.equal(edit(v, sid, 'src/ui/main.zq'), null);
 });
 
@@ -103,7 +103,7 @@ test('prompt hook shows a rule whose keyword is in the prompt once per session',
   assert.equal(prompt(v, s1, 'nothing relevant here'), null);
   const out = prompt(v, s1, 'please turn on Strict Mode in the shop');
   assert.equal(out.hookSpecificOutput.hookEventName, 'UserPromptSubmit');
-  assert.equal(out.hookSpecificOutput.additionalContext, 'Taste rules that may apply to this request:\n- glim/kw-rule: Do: Use strict. Not: Skip strict.');
+  assert.equal(out.hookSpecificOutput.additionalContext, 'Rules that may apply to this request:\n- glim/kw-rule: Do: Use strict. Not: Skip strict.');
   assert.equal(prompt(v, s1, 'strict mode again'), null);
   assert.ok(prompt(v, s2, 'strict mode'), 'another session sees it');
 });
@@ -128,7 +128,7 @@ test('session-start delivers always rules and the next prompt does not repeat th
   v.write('wiki/glim/always-rule.md', ruleNote({ always: true, doLine: 'Be brief.', notLine: 'Ramble.' }));
   v.write('wiki/glim/quiet-rule.md', ruleNote({ keywords: ['quiet'], doLine: 'Hush.', notLine: 'Shout.' }));
   const ctx = v.startSession(sid).hookSpecificOutput.additionalContext;
-  assert.match(ctx, /^# Taste rules\n/);
+  assert.match(ctx, /^# Rules\n/);
   assert.match(ctx, /## glim\n- glim\/always-rule: Do: Be brief\. Not: Ramble\./);
   assert.ok(!ctx.includes('quiet-rule'));
   assert.match(ctx, /Vault: propose a rule/);
@@ -141,7 +141,7 @@ test('an always rule written after session start reaches the next prompt', t => 
   v.startSession(sid);
   v.write('wiki/glim/late-rule.md', ruleNote({ always: true, doLine: 'Be late.', notLine: 'Be early.' }));
   const out = prompt(v, sid, 'hello');
-  assert.match(out.hookSpecificOutput.additionalContext, /^Taste rules that apply for the rest of this session:\n- glim\/late-rule:/);
+  assert.match(out.hookSpecificOutput.additionalContext, /^Rules that apply for the rest of this session:\n- glim\/late-rule:/);
   assert.equal(prompt(v, sid, 'hello'), null);
 });
 
@@ -222,7 +222,7 @@ test("6.3a: a subagent's first context holds the session's always rules and topi
   for (const agent_id of ['agent-1', 'agent-2']) {
     const out = v.hook('subagent-start', { ...start, agent_id }).hookSpecificOutput;
     assert.equal(out.hookEventName, 'SubagentStart');
-    assert.match(out.additionalContext, /^# Taste rules\n[\s\S]*## glim\n- glim\/always-rule: Do: Open each glim file with a purpose line\. Not: Start a file straight with code\./, agent_id);
+    assert.match(out.additionalContext, /^# Rules\n[\s\S]*## glim\n- glim\/always-rule: Do: Open each glim file with a purpose line\. Not: Start a file straight with code\./, agent_id);
     assert.match(out.additionalContext, /Vault: when the task touches .*, read `[^`]*index\.md`/, agent_id);
     assert.ok(!out.additionalContext.includes('propose a rule'), agent_id);
   }
@@ -356,7 +356,7 @@ test('the prompt hook fits the output budget, the always rules written since ses
   v.write('wiki/glim/concepts/strict-mode.md', pageNote({ kind: 'concept', keywords: ['strict'], summary: "'On strict mode.'" }));
   const ctx = prompt(v, sid, 'strict').hookSpecificOutput.additionalContext;
   assert.ok(ctx.length <= LIMIT, `${ctx.length} characters`);
-  assert.match(ctx, /^Taste rules that apply for the rest of this session:\n- glim\/late-0:/);
+  assert.match(ctx, /^Rules that apply for the rest of this session:\n- glim\/late-0:/);
   assert.match(ctx, /\(Left out to stay within 8000 characters: \d+ rules/);
   // What the budget cut arrives with the next prompt: the rest of the always rules, the keyword rule and the page.
   const named = text => new Set([...text.matchAll(/glim\/(late-\d+|kw|strict-mode)(?![\w-])/g)].map(m => m[1]));
@@ -424,7 +424,7 @@ test('6.3b: a mapped call on a name is refused once by a rule on its namespace, 
   const sid = sessionId();
   v.startSession(sid);
   v.write('wiki/glim/tree-rule.md', ruleNote({ applies_to: ['glim-tree:A.**'], doLine: 'Name nodes plainly.' }));
-  assert.match(denied(setProperty(v, sid, 'A.B.C')), /^Taste rules apply to glim-tree:A\.B\.C:\n- glim\/tree-rule: Do: Name nodes plainly\./);
+  assert.match(denied(setProperty(v, sid, 'A.B.C')), /^Rules apply to glim-tree:A\.B\.C:\n- glim\/tree-rule: Do: Name nodes plainly\./);
   assert.equal(setProperty(v, sid, 'A.B.C'), null, 'the retry goes through');
   assert.equal(setProperty(v, sid, 'B.A.C'), null, 'a name outside the glob is not gated');
   assert.equal(setProperty(v, sid, 'a.B.C'), null, 'names match with case');

@@ -63,8 +63,8 @@ export async function stop(event) {
   }
   if (!sections.length) return null;
   const lead = sections.length === 1
-    ? 'Taste rules apply to a file this turn wrote. Re-read the change against them before you stop.'
-    : 'Taste rules apply to files this turn wrote. Re-read the changes against them before you stop.';
+    ? 'Rules apply to a file this turn wrote. Re-read the change against them before you stop.'
+    : 'Rules apply to files this turn wrote. Re-read the changes against them before you stop.';
   const { text, kept } = fitContext([lead, ...sections], { gap: '\n' });
   markMany('gate', sid, sections.flatMap(s => s.hits.map(h => h.id)));
   markShown(sid, [...new Set(sections.flatMap((s, i) => s.hits.slice(0, kept[i + 1]).map(h => h.key)))]);

@@ -12,7 +12,7 @@ import { codexInput } from './codex.mjs';
 // session's start reads .state/offers/ and the session registry, never a transcript. A Deny is the user's no and isn't
 // queued.
 const rule = (o = {}) => ({
-  domain: 'glim', slug: 'tidy-names', topic: 'code', basis: 'stated', quote: 'call them by their screen',
+  domain: 'glim', slug: 'tidy-names', kind: 'taste', topic: 'code', basis: 'stated', quote: 'call them by their screen',
   do: 'Name widgets after their screen.', not: 'Leave widget names bare.', because: 'A screen says what a widget is for.', keywords: ['widgetz'], applies_to: ['src/**/*.zq'], ...o,
 });
 const typed = said => said.flatMap(s => [userTurn(s), assistantTurn('Noted.')]);

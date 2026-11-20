@@ -22,7 +22,7 @@ test('an everywhere domain\'s tools rule reaches a session outside its projects,
   const sid = sessionId();
   v.startSession(sid);
   const out = ask(v, sid);
-  assert.match(denied(out) ?? '', /^Taste rules apply to AskUserQuestion:\n/);
+  assert.match(denied(out) ?? '', /^Rules apply to AskUserQuestion:\n/);
   assert.match(denied(out), /\nRevise this call to follow them, then retry\. The retry is allowed\.$/);
   assert.deepEqual(named(out), ['glim/glim-ask', 'house/house-ask']);
   assert.equal(ask(v, sid), null, 'the retry goes through');
@@ -84,7 +84,7 @@ test('a mapped call refused by a tools rule reads as a call, with its pages on t
   const sid = sessionId();
   v.startSession(sid);
   const out = denied(v.edit(sid, 'mcp__fixture__set_property', { path: 'A.B.C', value: 'x' })) ?? '';
-  assert.match(out, /^Taste rules apply to mcp__fixture__set_property:\n/);
+  assert.match(out, /^Rules apply to mcp__fixture__set_property:\n/);
   assert.match(out, /\nVault pages on glim-tree:A\.B\.C\. Read the ones that bear on this work:\n/);
   assert.match(out, /\nRevise this call to follow them and the pages, then retry\. The retry is allowed\.$/);
 });

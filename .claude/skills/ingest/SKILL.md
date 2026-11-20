@@ -23,7 +23,7 @@ Work in the vault root. `reference/notes.md` has the page and rule formats. With
    - How-tos (steps, setup, API usage) belong in the project's skills, such as an `example-ui-*` skill for `example-ui`: tell the user so.
 4. **Write the source page** `wiki/<domain>/sources/source-<slug>.md`, `kind: source`, with `source` the file in `raw/refs/`, `source_date` the day it was published or last updated, the topic it's mostly about and a one-line summary. Put their words verbatim under `## You said`, and your reading under `## Agent's reading`, quoting each new fact in the source's words. `## You said` stays an empty heading if they said nothing about it, and `## Rules` until step 7. Its domain is the one whose topics the source fits, or `global` if it fits every project. For a source that fits neither, offer the user a new domain in your reply: a name, a title, its topics, and `vaultOnly: true` when it will hold pages only, or the file that marks its projects. Once they agree, call the vault's `domain` tool (its schema lists the fields) and do what it returns, then write the page in it; if they decline, use `global`.
 5. **Propose rules**, the clearest first, with the vault's `propose` tool (its schema lists the fields).
-   - Taste rules come from the user's words: basis `stated` or `inferred`, quoting what they typed, or `reading` for something you saw in the source that they asked you to make a rule of.
+   - Taste and practice rules come from the user's words: basis `stated` or `inferred`, quoting what they typed, or `reading` for something you saw in the source that they asked you to make a rule of.
    - Knowledge rules come from the new facts the user kept: `kind: knowledge`, basis `source`, with `source` and `source_date` as on the source page, and the source's words as the quote. A source with no date backs none.
    - Quote a binary source from its derived text, leaving out the `[p. 3]` and `[t=00:12:31]` anchor lines; a quote may run across one. What an image shows is your reading, so an image backs only basis `reading`.
    - Give a rule about code or files `applies_to` globs from the project root, fitting the files in the domain's projects. `always` is the user's to set.
@@ -38,7 +38,7 @@ Work in the vault root. `reference/notes.md` has the page and rule formats. With
    - Link the source page from the page of the topic it is mostly about, and the new rules under the topic page's `## Rules`. Set `updated` to today on every page you change.
 7. **Link and log.** Link each rule you proposed under the source page's `## Rules`, and the source page under the rule note's `## Examples`. Call the vault's `log` tool once with `ingest` the source and `pages` every page you wrote or changed, then run `node tools/lint.mjs --fix`, and fix any errors it leaves.
 
-Done when the source page holds their words, each preference they stated is a taste rule, each dated fact they kept is a knowledge rule, every page the source bears on reflects it with a footnote, and lint shows no errors.
+Done when the source page holds their words, each preference they stated is a taste or practice rule, each dated fact they kept is a knowledge rule, every page the source bears on reflects it with a footnote, and lint shows no errors.
 
 ## Batch
 
