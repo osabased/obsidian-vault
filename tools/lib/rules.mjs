@@ -667,7 +667,7 @@ export function scopeTopics(scope, notes) {
 export function indexNote(topics) {
   if (!topics.length) return '';
   return [
-    `Vault: when the task touches ${joinList(topics, 'or')}, read \`${toPosix(vaultPath('index.md'))}\` and the pages it lists under those topics, or call the vault's \`search\` tool to find notes by their words.`,
+    `Vault: \`${toPosix(vaultPath())}\` holds the user's preferences and notes, on ${joinList(topics, 'and')}. Before deciding something it would settle, read \`${toPosix(vaultPath('index.md'))}\` and the pages it lists, or call the vault's \`search\` tool.`,
     `File a useful answer that draws on the vault back as a page, as \`${toPosix(vaultPath('reference', 'notes.md'))}\` says under Pages.`,
   ].join(' ');
 }

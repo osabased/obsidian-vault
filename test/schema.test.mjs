@@ -113,8 +113,8 @@ test('propose refuses a rule in a vault-only domain', t => {
 test('a session in the vault folder hears every domain\'s topics, and a project session only its own', t => {
   const v = researchVault(t);
   const context = cwd => v.startSession(SID, { cwd })?.hookSpecificOutput.additionalContext ?? '';
-  assert.match(context(v.root), /touches layout, code or solvers,/);
-  assert.match(context(v.project), /touches layout or code,/);
+  assert.match(context(v.root), /notes, on layout, code and solvers\./);
+  assert.match(context(v.project), /notes, on layout and code\./);
 });
 
 test('review status does not list a vault-only domain\'s topics as missing rules', t => {
