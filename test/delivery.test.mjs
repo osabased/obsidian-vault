@@ -223,7 +223,7 @@ test("6.3a: a subagent's first context holds the session's always rules and topi
     const out = v.hook('subagent-start', { ...start, agent_id }).hookSpecificOutput;
     assert.equal(out.hookEventName, 'SubagentStart');
     assert.match(out.additionalContext, /^# Rules\n[\s\S]*## glim\n- glim\/always-rule: Do: Open each glim file with a purpose line\. Not: Start a file straight with code\./, agent_id);
-    assert.match(out.additionalContext, /Vault: when the task touches .*, read `[^`]*index\.md`/, agent_id);
+    assert.match(out.additionalContext, /Vault: `[^`]*` holds the user's preferences and notes, on .*\. Before deciding something it would settle, read `[^`]*index\.md`/, agent_id);
     assert.ok(!out.additionalContext.includes('propose a rule'), agent_id);
   }
   v.write('wiki/glim/late-rule.md', ruleNote({ always: true, doLine: 'Be late.', notLine: 'Be early.' }));
@@ -327,7 +327,7 @@ test('6.6e: session start in the vault folder with 10 domains stays under the ou
   const v = makeVault(t, { presets: Object.keys(PRESETS), domains });
   const ctx = v.startSession(sessionId(), { cwd: v.root }).hookSpecificOutput.additionalContext;
   assert.ok(ctx.length <= LIMIT, `${ctx.length} characters`);
-  assert.match(ctx, /^Vault: when the task touches layout, code, ledger, papers, days, words, topic-0-0-padding, /);
+  assert.match(ctx, /^Vault: `[^`]*` holds the user's preferences and notes, on layout, code, ledger, papers, days, words, topic-0-0-padding, /);
   // The presets' notes bring the lint reminder and the stale-sources line, which rank below the topics.
   assert.match(ctx, /\(Left out to stay within 8000 characters: \d+ topics and 2 notes\. `[^`]*index\.md` lists the rest\.\)$/);
 });
@@ -463,9 +463,9 @@ test('an unmapped MCP call with no rule on its name passes, and a mapped call wi
   assert.throws(() => v.edit(sid, 'mcp__fixture__set_property', { value: 'x' }), /editTools\.mcp__fixture__set_property\.path is tool_input\.path, which this call's input doesn't hold as text/);
 });
 
-test("the topics line points to the vault's search tool too, in sessions and their subagents, so no CLAUDE.md snippet is needed", t => {
+test("the topics line tells every session and subagent to check the vault before deciding, so no CLAUDE.md snippet is needed", t => {
   const v = makeVault(t, { presets: ['glim'] });
-  const SEARCH = /Vault: when the task touches [^\n]*index\.md` and the pages it lists under those topics, or call the vault's `search` tool to find notes by their words\./;
+  const SEARCH = /Vault: `[^`]*` holds the user's preferences and notes, on [^\n]*\. Before deciding something it would settle, read `[^`]*index\.md` and the pages it lists, or call the vault's `search` tool\./;
   const sid = sessionId();
   assert.match(v.startSession(sid).hookSpecificOutput.additionalContext, SEARCH);
   const sub = v.hook('subagent-start', { session_id: sid, cwd: v.project, hook_event_name: 'SubagentStart', agent_type: 'general-purpose', agent_id: 'agent-1' });
