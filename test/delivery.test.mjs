@@ -462,3 +462,12 @@ test('an unmapped MCP call with no rule on its name passes, and a mapped call wi
   assert.equal(v.edit(sid, 'mcp__other__set_property', { path: 'A.B', value: 'x' }), null);
   assert.throws(() => v.edit(sid, 'mcp__fixture__set_property', { value: 'x' }), /editTools\.mcp__fixture__set_property\.path is tool_input\.path, which this call's input doesn't hold as text/);
 });
+
+test("the topics line points to the vault's search tool too, in sessions and their subagents, so no CLAUDE.md snippet is needed", t => {
+  const v = makeVault(t, { presets: ['glim'] });
+  const SEARCH = /Vault: when the task touches [^\n]*index\.md` and the pages it lists under those topics, or call the vault's `search` tool to find notes by their words\./;
+  const sid = sessionId();
+  assert.match(v.startSession(sid).hookSpecificOutput.additionalContext, SEARCH);
+  const sub = v.hook('subagent-start', { session_id: sid, cwd: v.project, hook_event_name: 'SubagentStart', agent_type: 'general-purpose', agent_id: 'agent-1' });
+  assert.match(sub.hookSpecificOutput.additionalContext, SEARCH);
+});
