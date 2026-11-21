@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
 import { spawn } from 'node:child_process';
+import { pathToFileURL } from 'node:url';
 import { makeVault, cleanEnv, sessionId } from './fixture.mjs';
 import { parse } from '../tools/lib/frontmatter.mjs';
 
@@ -41,8 +42,8 @@ const stub = (name, { from = 'live', schema = 'ok' } = {}) => [
 
 function liveVault(t, { stubs = true, failing = [], agents } = {}) {
   const v = makeVault(t, agents ? { config: { agents } } : {});
-  fs.cpSync(v.at('tools'), v.at('.live', 'tools'), { recursive: true });
-  if (stubs) for (const name of ROWS) v.write(`.live/tools/${name}.mjs`, stub(name, { schema: failing.includes(name) ? 'fails' : 'ok' }));
+  v.makeLive();
+  if (stubs) for (const name of ROWS) v.write(v.live(`${name}.mjs`), stub(name, { schema: failing.includes(name) ? 'fails' : 'ok' }));
   return v;
 }
 
@@ -173,7 +174,7 @@ test('a script whose --schema fails is left out of tools/list and logged, and th
   assert.match(log, /log\.mjs --schema prompt failed/);
 });
 
-test('a bound call runs the script from .live/tools with the session from its record, its arguments on stdin and no session variable', async t => {
+test('a bound call runs the script from the current copy in .live with the session from its record, its arguments on stdin and no session variable', async t => {
   const v = liveVault(t);
   const sid = sessionId();
   await registered(v, sid);
@@ -204,7 +205,7 @@ test('a script that fails comes back as its stderr with isError', async t => {
   const v = liveVault(t);
   const sid = sessionId();
   await registered(v, sid);
-  v.write('.live/tools/status.mjs', "process.stderr.write('Refused: no status today.\\n\\n'); process.exit(1);\n");
+  v.write(v.live('status.mjs'), "process.stderr.write('Refused: no status today.\\n\\n'); process.exit(1);\n");
   await recorded(v, { call: 'toolu_x1', session: sid, tool: 'status' });
   const c = await open(t, v, CC);
   assert.deepEqual(await call(c, 'status', {}, ccMeta('toolu_x1')), { content: [{ type: 'text', text: 'Refused: no status today.' }], isError: true });
@@ -214,14 +215,14 @@ test('a script that exits without reading its input still answers by its exit co
   const v = liveVault(t);
   const sid = sessionId();
   await registered(v, sid);
-  v.write('.live/tools/status.mjs', "process.stdout.write('status, unread input\\n');\n");
+  v.write(v.live('status.mjs'), "process.stdout.write('status, unread input\\n');\n");
   await recorded(v, { call: 'toolu_e1', session: sid, tool: 'status' });
   const c = await open(t, v, CC);
   assert.deepEqual(await call(c, 'status', { big: 'x'.repeat(4 << 20) }, ccMeta('toolu_e1')), { content: [{ type: 'text', text: 'status, unread input' }] });
   assert.deepEqual((await c.request('ping')).result, {}, 'the server is still up');
 });
 
-test('a session in the vault folder runs the scripts in tools/, not .live/tools', async t => {
+test('a session in the vault folder runs the scripts in tools/, not .live', async t => {
   const v = liveVault(t);
   v.write('tools/status.mjs', stub('status', { from: 'tools' }));
   const sid = sessionId();
@@ -309,12 +310,11 @@ test('a request whose method is not a string gets Invalid Request with its id, a
   assert.ok(!c.messages.some(m => m.id === 97), 'a response from the client gets no answer');
 });
 
-test('the server tells the client when .live/tools is rebuilt', async t => {
+test('the server tells the client when .live/current names a new copy', async t => {
   const v = liveVault(t);
   const c = await open(t, v, CC);
   await list(c);
-  fs.renameSync(v.at('.live', 'tools'), v.at('.live', 'tools.old'));
-  fs.cpSync(v.at('.live', 'tools.old'), v.at('.live', 'tools'), { recursive: true });
+  v.makeLive({ tree: 'e'.repeat(40) });
   assert.ok(await c.waitFor(m => m.method === 'notifications/tools/list_changed', 9000), 'list_changed came within two re-stats');
 });
 
@@ -385,7 +385,7 @@ test('the launcher fails loudly: one stderr line, exit 1', async t => {
     [[], /^vault mcp failed: no vault folder given; pass the vault checkout's absolute path as the first argument\n$/],
     [['relative/vault'], /^vault mcp failed: the vault folder "relative\/vault" is not an absolute path\n$/],
     [[v.at('gone')], /^vault mcp failed: .*gone does not exist; pass the vault checkout's absolute path as the first argument\n$/],
-    [[v.root], /^vault mcp failed: .*vault-test-\w+ is not a git clone, so \.live\/tools can't be made from its last commit; clone the vault with git clone https:\/\/github\.com\/osabased\/obsidian-vault instead of downloading it, and pass the vault checkout's absolute path as the first argument\n$/],
+    [[v.root], /^vault mcp failed: .*vault-test-\w+ is not a git clone, so \.live can't be made from its last commit; clone the vault with git clone https:\/\/github\.com\/osabased\/obsidian-vault instead of downloading it, and pass the vault checkout's absolute path as the first argument\n$/],
   ];
   for (const [args, line] of cases) {
     const c = connect(t, args);
@@ -397,12 +397,14 @@ test('the launcher fails loudly: one stderr line, exit 1', async t => {
   }
 });
 
-test("the launcher makes .live/tools from the vault's last commit, then serves from it", async t => {
+test("the launcher makes .live's copy from the vault's last commit, then serves from it", async t => {
   const v = makeVault(t);
   v.checkout();
-  const tools = await list(await open(t, v));
+  const c = await open(t, v);
+  const tools = await list(c);
   assert.ok(tools.some(x => x.name === 'status'), 'status is listed');
-  assert.ok(v.exists('.live/tools/mcp/server.mjs'));
+  assert.ok(v.exists(v.live('mcp/server.mjs')));
+  assert.ok(v.exists(v.live(`.lease.${c.child.pid}`)), 'the server holds its copy, so a rebuild keeps it while the server runs');
 });
 
 test('the launcher reads a Git Bash drive path as the Windows one', { skip: process.platform !== 'win32' }, async t => {
@@ -423,4 +425,55 @@ test('the server exits when its input ends', async t => {
 test('plugin.json starts the vault server through the launcher with the vault option', () => {
   const manifest = JSON.parse(fs.readFileSync(path.join(ROOT, '.claude-plugin', 'plugin.json'), 'utf8'));
   assert.deepEqual(manifest.mcpServers, { vault: { command: 'node', args: ['${CLAUDE_PLUGIN_ROOT}/mcp/launch.mjs', '${user_config.vault}'] } });
+});
+
+// A commit mid-session rebuilds .live while the server's scripts run: a schema run for the list and a bound call, each held
+// until the rebuild is done and then loading the rest of its code.
+test('a rebuild of .live while a list and a call are running leaves both whole and logs nothing', async t => {
+  const v = makeVault(t);
+  const go = v.at('go');
+  const started = v.at('started');
+  t.after(() => { try { fs.writeFileSync(go, ''); } catch {} });
+  const held = name => {
+    const [head, ...rest] = stub(name).split('\n');
+    return [
+      head,
+      `fs.appendFileSync(${JSON.stringify(started)}, process.argv[2] + ' ');`,
+      `for (const end = Date.now() + 10000; !fs.existsSync(${JSON.stringify(go)}) && Date.now() < end;) await new Promise(r => setTimeout(r, 20));`,
+      "await import('./lib/late.mjs');",
+      ...rest,
+    ].join('\n');
+  };
+  v.write('tools/pick.mjs', held('pick'));
+  v.write('tools/search.mjs', held('search'));
+  v.write('tools/lib/late.mjs', 'export const late = true;\n');
+  v.checkout();
+  const sid = sessionId();
+  await registered(v, sid);
+  await recorded(v, { call: 'toolu_r1', session: sid, tool: 'search' });
+  const c = await open(t, v, CC);
+  const listed = list(c);
+  const called = call(c, 'search', { words: 'x' }, ccMeta('toolu_r1'));
+  const running = () => (fs.existsSync(started) ? fs.readFileSync(started, 'utf8') : '');
+  for (const end = Date.now() + 15000; !(running().includes('--schema') && running().includes('--json')) && Date.now() < end;) await new Promise(r => setTimeout(r, 20));
+  assert.ok(running().includes('--schema') && running().includes('--json'), `the schema run and the call started: ${JSON.stringify(c.messages)} ${c.stderr()} ${v.exists('.state/errors.log') ? v.read('.state/errors.log') : ''}`);
+  v.write('tools/added.txt', 'x\n');
+  v.checkout();
+  // The builder's first rename lets the held scripts go, then waits a second, so a builder that moved files out from
+  // under running scripts would fail them while they load.
+  const { liveTools } = await import(pathToFileURL(path.join(ROOT, 'hooks', 'live.mjs')).href);
+  const rename = fs.renameSync;
+  fs.renameSync = (...args) => {
+    rename(...args);
+    if (fs.existsSync(go)) return;
+    fs.writeFileSync(go, '');
+    Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 1000);
+  };
+  try { liveTools(v.root, { fix: 'test', refresh: true }); } finally { fs.renameSync = rename; }
+  fs.writeFileSync(go, '');
+  assert.deepEqual((await listed).map(x => x.name), ROWS);
+  const answer = await called;
+  assert.equal(answer.isError, undefined, textOf(answer));
+  assert.deepEqual(JSON.parse(textOf(answer)).args, ['--json']);
+  assert.equal(v.exists('.state/errors.log') ? v.read('.state/errors.log') : '', '');
 });

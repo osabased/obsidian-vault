@@ -26,7 +26,7 @@ The repo is also a Claude Code plugin with three skills, the hooks and the vault
 - `/obsidian-vault:lint` checks the whole wiki and proposes fixes.
 - `/obsidian-vault:vault` sets when agents propose rules: `corrections` (as soon as you correct them), `ask` (they offer each rule and keep it once you agree; the default) or `off` (only when you ask), for every project or one domain, as `/obsidian-vault:vault off` or `/obsidian-vault:vault corrections <domain>`. Saying it in words works too. `/obsidian-vault:vault status` shows what the vault does in the session.
 - The hooks deliver the rules and pages to your sessions. `hooks/hooks.json` starts SessionStart, UserPromptSubmit, PreToolUse (edits, and a record of each vault tool call), Stop and SubagentStart through `hooks/launch.mjs`, which runs the hook from your vault.
-- The tools are an MCP server the plugin declares in `.claude-plugin/plugin.json`. `mcp/launch.mjs` runs the server from your vault's `.live/tools/`, and it serves `propose`, `keep`, `proposals`, `domain`, `pick`, `log`, `search` and `status` to your sessions, each running its script in `tools/` with the call's arguments exactly as the agent sent them. A server added with `claude mcp add` instead has no hooks, so each of its calls is refused: install the plugin with `node setup.mjs`.
+- The tools are an MCP server the plugin declares in `.claude-plugin/plugin.json`. `mcp/launch.mjs` runs the server from your vault's copy of `tools/` in `.live/`, and it serves `propose`, `keep`, `proposals`, `domain`, `pick`, `log`, `search` and `status` to your sessions, each running its script in `tools/` with the call's arguments exactly as the agent sent them. A server added with `claude mcp add` instead has no hooks, so each of its calls is refused: install the plugin with `node setup.mjs`.
 
 The plugin has one option, `vault`, the folder of your vault checkout. `node setup.mjs` sets it to the folder it runs in, so to move the vault, run it again from the new folder. To see the option, run `claude plugin configure obsidian-vault@obsidian-vault`. An unset option, a relative path, a folder that isn't a git clone of the vault, one inside Claude Code's plugins folder, which an update replaces, or a hook that cannot load prints `vault <hook> failed: <why>` as a hook error, and the call goes ahead. A vault tool call whose hook failed is refused instead, since the server can't tell which session made it; a server that cannot start prints `vault mcp failed: <why>`.
 
@@ -34,13 +34,13 @@ The plugin has one option, `vault`, the folder of your vault checkout. `node set
 
 ## Git hooks
 
-Sessions run the hooks from `.live/tools/`, a copy of `tools/` as of the last commit, so a half-made change to `tools/` never runs in a session. Session start and the tool server make the copy when it is missing, and again when the last commit changed `tools/`. `node setup.mjs` turns on the vault's git hooks, which refresh it after each commit as well and run the checks below. Without Claude Code, as for Codex alone, turn them on in the vault folder yourself:
+Sessions run the hooks from a copy of `tools/` as of the last commit, `.live/<tree>/`, which `.live/current` names, so a half-made change to `tools/` never runs in a session. Session start and the tool server make the copy when it is missing, and a new one when the last commit changed `tools/`. A copy's files are never changed once made, so a hook or tool already running finishes on the copy it started from, and the next one runs the new copy. A later rebuild removes a copy an hour after it stopped being current, unless a tool server still running holds it. `node setup.mjs` turns on the vault's git hooks, which make the new copy after each commit as well and run the checks below. Without Claude Code, as for Codex alone, turn them on in the vault folder yourself:
 
 ```
 git config core.hooksPath .githooks
 ```
 
-`pre-commit` runs the tests, rebuilds the generated files and lints. It commits the generated files only when the notes they are built from are all in the commit, so a commit never names a rule you kept out of git. `post-commit` refreshes `.live/tools/` after each commit, and the other hooks run it after a checkout, merge or rebase.
+`pre-commit` runs the tests, rebuilds the generated files and lints. It commits the generated files only when the notes they are built from are all in the commit, so a commit never names a rule you kept out of git. `post-commit` makes the new copy in `.live/` after each commit, and the other hooks run it after a checkout, merge or rebase.
 
 ## Limits of consent
 
@@ -58,7 +58,7 @@ The same hooks run in Codex through `tools/adapters/codex/`. Codex is opt-in: ad
 node tools/agents.mjs codex
 ```
 
-The command writes nothing, and ends with a `[mcp_servers.vault]` block for `config.toml` that starts the same `mcp/launch.mjs` server. Open `/hooks` in Codex and trust the six vault hooks; Codex skips a hook until you do, and again after its command changes. The commands run the vault's `.live/tools/`, so trust holds across vault commits. They don't make the copy, as the plugin's hooks do, so turn on the git hooks as Git hooks says, then run `git hook run post-commit` (git 2.36 or later) once to make it. Codex reads the vault's `AGENTS.md` natively, and its skills from `.agents/skills/`, which holds copies of `.claude/skills/` that `node tools/lint.mjs --fix` keeps.
+The command writes nothing, and ends with a `[mcp_servers.vault]` block for `config.toml` that starts the same `mcp/launch.mjs` server. Open `/hooks` in Codex and trust the six vault hooks; Codex skips a hook until you do, and again after its command changes. The commands run `hooks/codex.mjs`, which runs the hook from the vault's copy in `.live/` and makes it at session start as the plugin's hooks do, so trust holds across vault commits. Codex reads the vault's `AGENTS.md` natively, and its skills from `.agents/skills/`, which holds copies of `.claude/skills/` that `node tools/lint.mjs --fix` keeps.
 
 In Codex an offer of a rule ends with a short code, and you agree by typing it in your next message.
 

@@ -85,9 +85,11 @@ const startInput = (v, sid = sessionId()) => JSON.stringify({ session_id: sid, c
 
 function liveVault(t) {
   const v = makeVault(t);
-  fs.cpSync(v.at('tools'), v.at('.live', 'tools'), { recursive: true });
+  v.makeLive();
   return v;
 }
+
+const onlyCopy = v => [path.basename(v.live()), 'current'].sort();
 
 test('the launcher runs the hook from the vault, with the timeout it was given', t => {
   const v = liveVault(t);
@@ -114,7 +116,7 @@ test('the launcher fails loudly: one stderr line, exit 1', t => {
     assert.equal(r.stdout, '', what);
     assert.match(r.stderr, line, what);
   }
-  fs.mkdirSync(v.at('.live', 'tools', 'adapters', 'claude-code', 'hooks'), { recursive: true });
+  fs.mkdirSync(v.at('.live', v.makeLive({ tree: 'b'.repeat(40), bare: true }), 'adapters', 'claude-code', 'hooks'), { recursive: true });
   const missing = launch('edit', { vault: v.root });
   assert.equal(missing.code, 1);
   assert.match(missing.stderr, /^vault edit failed: .*edit\.mjs does not exist; commit the vault's tools\/, then start a new session\n$/);
@@ -129,13 +131,13 @@ test('the launcher says what is wrong with the vault folder', t => {
   t.after(() => { for (const dir of [plain, config]) fs.rmSync(dir, { recursive: true, force: true }); });
   fs.mkdirSync(path.join(config, 'plugins', 'marketplaces'), { recursive: true });
   const cached = makeVault(t, { under: path.join(config, 'plugins', 'marketplaces') });
-  fs.cpSync(cached.at('tools'), cached.at('.live', 'tools'), { recursive: true });
+  cached.makeLive();
   const configure = 'run claude plugin configure obsidian-vault@obsidian-vault\n$';
   const cases = [
     ['a folder that is not there', launch('prompt', { vault: v.at('gone') }), new RegExp(`^vault prompt failed: .*gone does not exist; ${configure}`)],
     ['a file', launch('prompt', { vault: v.at('vault.config.json') }), new RegExp(`^vault prompt failed: .*vault\\.config\\.json is a file, not a folder; ${configure}`)],
     ['a folder that is not a vault', launch('prompt', { vault: plain }), new RegExp(`^vault prompt failed: .*vault-plain-\\w+ is not a vault: it needs vault\\.config\\.json and tools/; ${configure}`)],
-    ['a download that is not a git clone', launch('prompt', { vault: v.root }), new RegExp(`^vault prompt failed: .*vault-test-\\w+ is not a git clone, so \\.live/tools can't be made from its last commit; clone the vault with git clone https://github\\.com/osabased/obsidian-vault instead of downloading it, and ${configure}`)],
+    ['a download that is not a git clone', launch('prompt', { vault: v.root }), new RegExp(`^vault prompt failed: .*vault-test-\\w+ is not a git clone, so \\.live can't be made from its last commit; clone the vault with git clone https://github\\.com/osabased/obsidian-vault instead of downloading it, and ${configure}`)],
     ["a vault in Claude Code's plugins folder", launch('prompt', { vault: cached.root, env: { CLAUDE_CONFIG_DIR: config } }), new RegExp(`^vault prompt failed: .*vault-test-\\w+ is inside Claude Code's plugins folder, which an update replaces along with any rules kept there; clone the vault to a folder of your own and ${configure}`)],
   ];
   for (const [what, r, line] of cases) {
@@ -147,19 +149,19 @@ test('the launcher says what is wrong with the vault folder', t => {
   assert.ok(!cached.exists('.state/sessions'), 'the vault in the plugins folder ran no hook');
 });
 
-test("the launcher makes .live/tools from the vault's last commit, without what isn't committed", t => {
+test("the launcher makes .live's copy from the vault's last commit, without what isn't committed", t => {
   const v = makeVault(t);
   v.checkout();
   v.write('tools/half-made.mjs', 'throw new Error("half made");\n');
   const r = launch('session-start', { vault: v.root, input: startInput(v) });
   assert.equal(r.code, 0, r.stderr);
   assert.match(JSON.parse(r.stdout).hookSpecificOutput.additionalContext, /^Vault/);
-  assert.ok(v.exists('.live/tools/adapters/claude-code/hooks/session-start.mjs'));
-  assert.ok(!v.exists('.live/tools/half-made.mjs'));
-  assert.deepEqual(fs.readdirSync(v.at('.live')), ['tools'], 'nothing left over beside the copy');
+  assert.ok(v.exists(v.live('adapters/claude-code/hooks/session-start.mjs')));
+  assert.ok(!v.exists(v.live('half-made.mjs')));
+  assert.deepEqual(fs.readdirSync(v.at('.live')).sort(), onlyCopy(v), 'nothing left over beside the copy and its pointer');
 });
 
-test('session start makes .live/tools again once a commit changes tools/, and the other hooks run the copy they find', t => {
+test('session start makes a new .live copy once a commit changes tools/, and the other hooks run the copy they find', t => {
   const v = makeVault(t);
   v.checkout();
   const sid = sessionId();
@@ -168,24 +170,25 @@ test('session start makes .live/tools again once a commit changes tools/, and th
   v.checkout();
   const prompted = launch('prompt', { vault: v.root, input: JSON.stringify({ session_id: sid, cwd: v.project, prompt: 'hi', hook_event_name: 'UserPromptSubmit' }) });
   assert.equal(prompted.code, 0, prompted.stderr);
-  assert.ok(!v.exists('.live/tools/added.txt'));
+  assert.ok(!v.exists(v.live('added.txt')));
   const started = launch('session-start', { vault: v.root, input: startInput(v) });
   assert.equal(started.code, 0, started.stderr);
-  assert.ok(v.exists('.live/tools/added.txt'));
+  assert.ok(v.exists(v.live('added.txt')));
 });
 
-test('sessions that start at once make one .live/tools between them', async t => {
+test('sessions that start at once make one .live copy between them', async t => {
   const v = makeVault(t);
   v.checkout();
   const runs = await Promise.all([1, 2, 3, 4].map(() => launchAsync('session-start', { vault: v.root, input: startInput(v) })));
   for (const r of runs) assert.equal(r.code, 0, r.stderr);
-  assert.deepEqual(fs.readdirSync(v.at('.live')), ['tools'], 'nothing left over beside the copy');
-  assert.ok(v.exists('.live/tools/adapters/claude-code/hooks/session-start.mjs'));
+  assert.deepEqual(fs.readdirSync(v.at('.live')).sort(), onlyCopy(v), 'nothing left over beside the copy and its pointer');
+  assert.ok(v.exists(v.live('adapters/claude-code/hooks/session-start.mjs')));
 });
 
 test('the launcher runs tools/hooks/<hook>.mjs from a .live copy made before the adapters', t => {
   const v = makeVault(t);
-  v.write('.live/tools/hooks/prompt.mjs', "process.stdout.write('ran the old hook');\n");
+  v.makeLive({ tree: 'b'.repeat(40), bare: true });
+  v.write(v.live('hooks/prompt.mjs'), "process.stdout.write('ran the old hook');\n");
   const r = launch('prompt', { vault: v.root });
   assert.equal(r.code, 0, r.stderr);
   assert.equal(r.stdout, 'ran the old hook');
@@ -193,7 +196,8 @@ test('the launcher runs tools/hooks/<hook>.mjs from a .live copy made before the
 
 test('the launcher reports a hook that cannot load', t => {
   const v = makeVault(t);
-  v.write('.live/tools/adapters/claude-code/hooks/prompt.mjs', 'export const = ;\n');
+  v.makeLive({ tree: 'b'.repeat(40), bare: true });
+  v.write(v.live('adapters/claude-code/hooks/prompt.mjs'), 'export const = ;\n');
   const r = launch('prompt', { vault: v.root });
   assert.equal(r.code, 1);
   assert.match(r.stderr, /^vault prompt failed: .+\n$/);

@@ -5,7 +5,7 @@ These keep the hooks safe to run in every session. Follow them when you change a
 ## Runtime
 
 - Node 22.12 or later, ES modules (`.mjs`), built-in modules only; the hooks load modules with `require`, which reads an ES module only from 22.12 on. No npm packages, no build step.
-- Scripts find the vault through `vaultPath()`, never the working directory. Hooks run from whatever project the session is in, and from `.live/tools/`, a copy of `tools/` as of the last commit, so `vaultPath()` starts at the nearest folder above the code that holds `vault.config.json`. A script a hook tells a session to run comes from `toolsPath()`, the copy the hook runs from.
+- Scripts find the vault through `vaultPath()`, never the working directory. Hooks run from whatever project the session is in, and from a copy of `tools/` in `.live/` as of the last commit, so `vaultPath()` starts at the nearest folder above the code that holds `vault.config.json`. A script a hook tells a session to run comes from `toolsPath()`, the copy the hook runs from.
 - Accept Windows and Git Bash paths and compare them case-insensitively. Use `toPosix`, `inside` and `domainsFor` from `lib/vault.mjs`.
 
 ## Hooks

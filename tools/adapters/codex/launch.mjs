@@ -1,4 +1,4 @@
-// node "<vault>/.live/tools/adapters/codex/launch.mjs" <hook> <seconds>
+// node "<vault>/hooks/codex.mjs" <hook> <seconds>, which imports this file from .live's current copy.
 // The vault is found from this file's own folder, so the command needs no option or environment variable. Codex's hook
 // input carries no timeout, so the seconds repeat the hook's timeout for the deadline.
 import { runHook } from '../../lib/vault.mjs';
