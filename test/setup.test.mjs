@@ -46,7 +46,7 @@ const calls = (s, ...prefix) => s.state().calls.filter(c => prefix.every((p, i) 
 const REPOSITORY = JSON.parse(fs.readFileSync(path.join(ROOT, '.claude-plugin', 'plugin.json'), 'utf8')).repository;
 
 // A folder marketplace would copy the notes and .state/ into Claude Code's plugin cache (seen with claude 2.1.296).
-test('setup installs the plugin from the repo, not this folder, with this folder as its vault, turns on the git hooks and makes .live/tools', t => {
+test('setup installs the plugin from the repo, not this folder, with this folder as its vault, turns on the git hooks and makes the copy in .live', t => {
   const s = setupVault(t);
   const r = s.run();
   assert.equal(r.status, 0, r.stderr + r.stdout);
@@ -56,7 +56,9 @@ test('setup installs the plugin from the repo, not this folder, with this folder
   assert.equal(install[install.indexOf('--marketplace') + 1], REPOSITORY);
   assert.equal(slash(install[install.indexOf('--config') + 1]), `vault=${slash(s.root)}`);
   assert.equal(s.git('config', 'core.hooksPath').stdout.trim(), '.githooks');
-  assert.ok(fs.existsSync(path.join(s.root, '.live', 'tools', 'status.mjs')), '.live/tools made from the last commit');
+  const tree = fs.readFileSync(path.join(s.root, '.live', 'current'), 'utf8').trim();
+  assert.equal(tree, s.git('rev-parse', 'HEAD:tools').stdout.trim());
+  assert.ok(fs.existsSync(path.join(s.root, '.live', tree, 'status.mjs')), '.live/current names a copy made from the last commit');
   assert.match(r.stdout, /Restart Claude Code/);
 });
 

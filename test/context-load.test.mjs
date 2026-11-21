@@ -135,7 +135,7 @@ function toolsListed(root, clientInfo) {
 
 test('the vault\'s tools/list for Claude Code stays within 12,000 characters', async t => {
   const v = makeVault(t);
-  fs.cpSync(v.at('tools'), v.at('.live', 'tools'), { recursive: true });
+  v.makeLive();
   const tools = await toolsListed(v.root, { name: 'claude-code', version: '2.1.309' });
   assert.deepEqual(tools.map(x => x.name).sort(), ['domain', 'keep', 'log', 'pick', 'proposals', 'propose', 'search', 'status']);
   const sizes = tools.map(x => [x.name, JSON.stringify(x).length]).sort((a, b) => b[1] - a[1]);

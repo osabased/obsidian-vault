@@ -7,6 +7,7 @@ import { createHash } from 'node:crypto';
 import { pathToFileURL } from 'node:url';
 
 const TOOLS = path.resolve(import.meta.dirname, '..', 'tools');
+const FAKE_TREE = 'f'.repeat(40);
 
 // The tools find the vault from their own location, so each test runs a copy of tools/ inside a vault of its own.
 // presets names shapes from PRESETS to add; the test's own domains, local and config merge over theirs. quiet is
@@ -47,6 +48,17 @@ export function makeVault(t, { config = {}, domain = 'glim', topics = ['layout',
     },
     read: rel => fs.readFileSync(at(...rel.split('/')), 'utf8'),
     exists: rel => fs.existsSync(at(...rel.split('/'))),
+    // A copy of tools/ in .live/ that current names, as a commit makes one; a vault with no git gets a made-up tree.
+    // A bare copy holds only what the test writes into it.
+    makeLive({ tree = FAKE_TREE, bare = false } = {}) {
+      if (bare) fs.mkdirSync(at('.live', tree), { recursive: true });
+      else fs.cpSync(at('tools'), at('.live', tree), { recursive: true });
+      fs.writeFileSync(at('.live', tree, '.tree'), `${tree}\n`);
+      fs.writeFileSync(at('.live', 'current'), `${tree}\n`);
+      return tree;
+    },
+    // The path under the vault of rel in the copy current names, or of the copy itself.
+    live: (rel = '') => `.live/${fs.readFileSync(at('.live', 'current'), 'utf8').trim()}${rel ? `/${rel}` : ''}`,
     run(script, args = [], { input, env = {}, cwd = root, timeout } = {}) {
       const r = spawnSync(process.execPath, [at('tools', ...script.split('/')), ...args], {
         cwd,

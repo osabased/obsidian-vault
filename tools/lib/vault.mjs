@@ -4,8 +4,7 @@ import crypto from 'node:crypto';
 import { armDeadline } from './deadline.mjs';
 import { globToRegExp, validGlob } from './glob.mjs';
 
-// The plugin's hooks run a copy of tools/ inside the vault, which .githooks/post-commit keeps at the last
-// commit, so the vault is the nearest folder above the code that holds vault.config.json.
+// The plugin's hooks run a copy of tools/ inside the vault's .live/, made from the last commit, so the vault is the nearest folder above the code that holds vault.config.json.
 function findRoot() {
   const home = path.resolve(import.meta.dirname, '..', '..');
   for (let dir = home; ; dir = path.dirname(dir)) {

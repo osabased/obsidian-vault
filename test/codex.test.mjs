@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
-import { execFileSync } from 'node:child_process';
+import { execFileSync, spawnSync } from 'node:child_process';
 import { makeVault, ruleNote, pageNote, sourcePage, sessionId, cleanEnv } from './fixture.mjs';
 import { codexInput, codexPatch, codexRollout, hookPrompt } from './codex.mjs';
 import { parsePatch, applyChunks } from '../tools/adapters/codex/patch.mjs';
@@ -272,14 +272,14 @@ test('SessionStart source maps to the reason, an unknown one read as new', async
 
 const snippet = vault => `{
   "hooks": {
-    "SessionStart": [{ "hooks": [{ "type": "command", "command": "node \\"${vault}/.live/tools/adapters/codex/launch.mjs\\" session-start 10", "timeout": 10, "additionalContextLimit": 4000 }] }],
-    "UserPromptSubmit": [{ "hooks": [{ "type": "command", "command": "node \\"${vault}/.live/tools/adapters/codex/launch.mjs\\" prompt 10", "timeout": 10, "additionalContextLimit": 4000 }] }],
+    "SessionStart": [{ "hooks": [{ "type": "command", "command": "node \\"${vault}/hooks/codex.mjs\\" session-start 10", "timeout": 10, "additionalContextLimit": 4000 }] }],
+    "UserPromptSubmit": [{ "hooks": [{ "type": "command", "command": "node \\"${vault}/hooks/codex.mjs\\" prompt 10", "timeout": 10, "additionalContextLimit": 4000 }] }],
     "PreToolUse": [
-      { "matcher": "apply_patch|mcp__.*", "hooks": [{ "type": "command", "command": "node \\"${vault}/.live/tools/adapters/codex/launch.mjs\\" edit 10", "timeout": 10 }] },
-      { "matcher": "^mcp__vault__[a-z]+$", "hooks": [{ "type": "command", "command": "node \\"${vault}/.live/tools/adapters/codex/launch.mjs\\" vault-call 10", "timeout": 10 }] }
+      { "matcher": "apply_patch|mcp__.*", "hooks": [{ "type": "command", "command": "node \\"${vault}/hooks/codex.mjs\\" edit 10", "timeout": 10 }] },
+      { "matcher": "^mcp__vault__[a-z]+$", "hooks": [{ "type": "command", "command": "node \\"${vault}/hooks/codex.mjs\\" vault-call 10", "timeout": 10 }] }
     ],
-    "SubagentStart": [{ "hooks": [{ "type": "command", "command": "node \\"${vault}/.live/tools/adapters/codex/launch.mjs\\" subagent-start 10", "timeout": 10, "additionalContextLimit": 4000 }] }],
-    "Stop": [{ "hooks": [{ "type": "command", "command": "node \\"${vault}/.live/tools/adapters/codex/launch.mjs\\" stop 10", "timeout": 10 }] }]
+    "SubagentStart": [{ "hooks": [{ "type": "command", "command": "node \\"${vault}/hooks/codex.mjs\\" subagent-start 10", "timeout": 10, "additionalContextLimit": 4000 }] }],
+    "Stop": [{ "hooks": [{ "type": "command", "command": "node \\"${vault}/hooks/codex.mjs\\" stop 10", "timeout": 10 }] }]
   }
 }
 
@@ -300,8 +300,8 @@ test('node tools/agents.mjs codex prints the hooks.json snippet and the config.t
     const hooks = JSON.parse(json).hooks;
     assert.deepEqual(Object.keys(hooks), ['SessionStart', 'UserPromptSubmit', 'PreToolUse', 'SubagentStart', 'Stop']);
     assert.equal(hooks.PreToolUse.length, 2);
-    assert.equal(hooks.PreToolUse[0].hooks[0].command, `node "${root}/.live/tools/adapters/codex/launch.mjs" edit 10`);
-    assert.equal(hooks.PreToolUse[1].hooks[0].command, `node "${root}/.live/tools/adapters/codex/launch.mjs" vault-call 10`);
+    assert.equal(hooks.PreToolUse[0].hooks[0].command, `node "${root}/hooks/codex.mjs" edit 10`);
+    assert.equal(hooks.PreToolUse[1].hooks[0].command, `node "${root}/hooks/codex.mjs" vault-call 10`);
     assert.equal(hooks.PreToolUse[1].matcher, vaultMatcher);
   }
   const r = v.run('agents.mjs', ['codex']);
@@ -337,6 +337,25 @@ test('the launcher runs the hook it names, and fails loudly through runHook for 
   assert.equal(bad.code, 1);
   assert.equal(bad.stdout, '');
   assert.match(bad.stderr, /^vault nope failed: [^\n]+; see \.state\/errors\.log\n$/);
+});
+
+test("hooks/codex.mjs makes .live's copy at session start and runs the hook it names from it", t => {
+  const v = codexVault(t);
+  for (const f of ['codex.mjs', 'live.mjs']) v.write(`hooks/${f}`, fs.readFileSync(path.join(import.meta.dirname, '..', 'hooks', f), 'utf8'));
+  v.checkout();
+  const sid = sessionId();
+  const launch = (name, input) => {
+    const r = spawnSync(process.execPath, [v.at('hooks', 'codex.mjs'), name, '10'], { input: JSON.stringify(input), cwd: v.project, env: cleanEnv(), encoding: 'utf8' });
+    return { code: r.status, stdout: r.stdout, stderr: r.stderr };
+  };
+  const ok = launch('session-start', codexInput('SessionStart', { session_id: sid, cwd: v.project }));
+  assert.equal(ok.code, 0, ok.stderr);
+  assert.match(JSON.parse(ok.stdout).hookSpecificOutput.additionalContext, /glim\/always-rule/);
+  const tree = execFileSync('git', ['rev-parse', 'HEAD:tools'], { cwd: v.root, encoding: 'utf8' }).trim();
+  assert.equal(fs.readFileSync(v.at('.live', 'current'), 'utf8').trim(), tree);
+  const bad = launch('nope', codexInput('Stop', { session_id: sid, cwd: v.project }));
+  assert.equal(bad.code, 1);
+  assert.match(bad.stderr, /^vault nope failed: [^\n]+; see \.state\/errors\.log\n$/, 'the hook name reaches the copy\'s launch.mjs');
 });
 
 test('every codexInput payload, and every output the adapter writes, fits the copied 0.153.4 schemas', async t => {

@@ -125,13 +125,13 @@ export function output(hook, results) {
   return { hookSpecificOutput: { hookEventName: EVENT_NAMES[hook], additionalContext: context } };
 }
 
-// The command names .live, whose content changes with each commit while the definition stays the same, so the trust the
-// user gives in /hooks holds across vault commits. The path is quoted, so cmd.exe keeps one with spaces whole. One key
+// The command names hooks/codex.mjs, which runs the hook from .live's current copy, so the command stays the same and the
+// trust the user gives in /hooks holds across vault commits. The path is quoted, so cmd.exe keeps one with spaces whole. One key
 // holds every group for its event, since a second key of the same name would replace the first when the file is parsed.
 // The server is the vault's own mcp/launch.mjs, which Codex starts per thread.
 export function registration(root) {
   const group = ([, hook, context, match]) => {
-    const command = JSON.stringify(`node "${root}/.live/tools/adapters/codex/launch.mjs" ${hook} 10`);
+    const command = JSON.stringify(`node "${root}/hooks/codex.mjs" ${hook} 10`);
     const limit = context ? ', "additionalContextLimit": 4000' : '';
     return `{ ${match ? `"matcher": ${JSON.stringify(match)}, ` : ''}"hooks": [{ "type": "command", "command": ${command}, "timeout": 10${limit} }] }`;
   };

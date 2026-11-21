@@ -5,7 +5,9 @@ import { registry } from '../lib/sessions.mjs';
 import { agent, hasAgent, listedAgents } from '../lib/agents.mjs';
 import { readCall, allowCall, pruneCalls } from '../lib/calls.mjs';
 import { listen, notify, RpcError } from './rpc.mjs';
-import { TOOLS, toolNamed, parseSchema, listing } from './tools.mjs';
+import { pathToFileURL } from 'node:url';
+import { currentCopy, TREE } from '../lib/current.mjs';
+import * as ownTools from './tools.mjs';
 
 // Newest first. Each has every feature the server uses: tools, their annotations and _meta, and list_changed.
 const PROTOCOLS = ['2025-11-25', '2025-06-18'];
@@ -56,6 +58,37 @@ function failed(row, r) {
   return said || `\`${row.script}\` exited ${r.code} with no message.`;
 }
 
+// Loaded from a .live/<tree> copy, the server runs the scripts of the copy .live/current names, which a commit after it
+// started replaces; its own code stays the copy it loaded from. Loaded from anywhere else, as from the .live/tools an
+// older plugin's launcher keeps and runs its hooks from, it runs that folder's scripts, so hooks and scripts come from
+// one commit.
+const inCopy = TREE.test(path.basename(toolsPath()));
+const currentTools = () => (inCopy && currentCopy(vaultPath())) || toolsPath();
+
+// A copy never changes, so its path tells when current moved; .live/tools, which an older launcher replaces whole, is
+// told by its folder's identity.
+function signature() {
+  const dir = currentTools();
+  if (inCopy) return dir;
+  try {
+    const s = fs.statSync(dir);
+    return `${s.ino}:${s.birthtimeMs}`;
+  } catch {
+    return '';
+  }
+}
+
+// The rows that go with the scripts being run, so a commit that changes a tool's arguments or marking mid-session takes
+// effect with its scripts.
+async function rowsOf(dir) {
+  try {
+    return await import(pathToFileURL(path.join(dir, 'mcp', 'tools.mjs')).href);
+  } catch (e) {
+    logError('vault mcp', `${path.join(dir, 'mcp', 'tools.mjs')} didn't load, so the server's own tool rows are used: ${e.message}`);
+    return ownTools;
+  }
+}
+
 export function serve({ input, output, run }) {
   let info = null;
   let initialized = false;
@@ -71,9 +104,11 @@ export function serve({ input, output, run }) {
     const variant = a?.consent ?? 'prompt';
     const marker = markerFor(a, info?.version);
     const env = scriptEnv();
+    const tools = currentTools();
+    const { TOOLS, parseSchema, listing } = await rowsOf(tools);
     const rows = await Promise.all(TOOLS.map(async row => {
       try {
-        const r = await run(process.execPath, [toolsPath(row.script), '--schema', variant], { input: '', cwd: vaultPath(), env, timeoutMs: SCHEMA_MS });
+        const r = await run(process.execPath, [path.join(tools, row.script), '--schema', variant], { input: '', cwd: vaultPath(), env, timeoutMs: SCHEMA_MS });
         if (r.code !== 0) throw new Error((r.stderr.trim() || r.stdout.trim() || `exit ${r.code}`).replace(/\s+/g, ' '));
         return listing(row, parseSchema(r.stdout), marker);
       } catch (e) {
@@ -86,7 +121,7 @@ export function serve({ input, output, run }) {
   }
 
   async function callTool(params) {
-    const row = toolNamed(params.name);
+    const row = (await rowsOf(currentTools())).toolNamed(params.name);
     if (!row) throw new RpcError(-32602, `No vault tool is named ${JSON.stringify(params.name)}.`);
     const a = clientOf(info);
     if (!a) return refused(UNLISTED);
@@ -99,7 +134,7 @@ export function serve({ input, output, run }) {
     const thread = a.mcp.thread(params._meta);
     if (rec.tool !== row.name || (thread != null && rec.subagent == null && rec.session !== thread)) return refused(MISMATCH);
     const entry = readJsonSafe(registry(safeId(rec.session)));
-    const dir = inVaultFolder(entry?.cwd) ? vaultPath('tools') : toolsPath();
+    const dir = inVaultFolder(entry?.cwd) ? vaultPath('tools') : currentTools();
     // The client ran a marked call only once the user allowed it at its prompt.
     if (row.marked && markerFor(a, info.version)) {
       if (!sentMarked.has(row.name)) return refused(UNPROMPTED);
@@ -125,13 +160,6 @@ export function serve({ input, output, run }) {
     throw new RpcError(-32601, `Method not found: ${method}`);
   }
 
-  // post-commit and the launchers replace .live/tools as a whole, so a new folder is a new set of scripts and schemas.
-  const signature = () => {
-    try {
-      const s = fs.statSync(toolsPath());
-      return `${s.ino}:${s.birthtimeMs}:${s.mtimeMs}`;
-    } catch { return 'missing'; }
-  };
   let seen = signature();
   const timer = setInterval(() => {
     const now = signature();
