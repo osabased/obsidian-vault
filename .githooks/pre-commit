@@ -10,13 +10,13 @@ if [ -n "$changed" ] && [ "$VAULT_ALLOW_RAW_CHANGES" != 1 ]; then
 fi
 # Notes and sources don't change what the tests run, so only a change to the code, the plugin manifest, their tests or the
 # oxlint rules waits on them.
-if git diff --cached --name-only | grep -qE '^((tools|test|hooks|mcp|\.githooks|\.claude-plugin)/|\.oxlintrc\.json$)'; then
+if git diff --cached --name-only | grep -qE '^((tools|test|hooks|mcp|\.githooks|\.claude-plugin)/|\.oxlintrc\.json$|setup\.mjs$)'; then
   # oxlint is required for these commits, but it is not a dependency of the tools: nothing in tools/ imports it.
   if ! command -v oxlint >/dev/null 2>&1; then
     echo "oxlint is required to commit changes to the code: npm i -g oxlint@1.91.0" >&2
     exit 1
   fi
-  oxlint --deny-warnings tools hooks mcp test || exit 1
+  oxlint --deny-warnings tools hooks mcp test setup.mjs || exit 1
   node --test --test-reporter=dot "test/*.test.mjs" || exit 1
 fi
 node tools/build.mjs || exit 1

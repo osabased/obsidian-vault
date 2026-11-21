@@ -16,43 +16,36 @@ An Obsidian vault that an agent keeps, after Andrej Karpathy's [LLM wiki](https:
 - **Lint.** `/lint` checks the whole wiki: contradictions, stale pages, sources that changed since they were saved, and gaps worth a search.
 - **Rules.** Hooks deliver rules to Claude Code and Codex sessions: `global`'s everywhere, a domain's in the projects it covers. Correct the agent and it proposes a new one.
 
-To have agents look things up in the vault in every session, add this to `~/.claude/CLAUDE.md`:
-
-```markdown
-# Vault
-My Obsidian vault at `<absolute path>` is an LLM wiki of my preferences and notes. Before deciding something it would settle, read its `index.md` or call the vault's `search` tool. When I correct you, keep it there through the vault's `propose` tool.
-```
+Each session's start tells the agent to look things up in the vault and to keep your corrections there, so nothing needs adding to your own `CLAUDE.md`.
 
 ## Set up
 
 You need git, Node.js 22.12 or later and Claude Code 2.1.295 or later. Obsidian is optional, for reading and editing the notes.
 
-1. **Get the vault.** Clone it to a folder of your own. Your rules are written as notes in this folder.
+1. **Clone the vault** to a folder of your own, and go into it. Your rules are written as notes in this folder.
 
    ```
-   git clone https://github.com/osabased/obsidian-vault <folder>
+   git clone https://github.com/osabased/obsidian-vault my-vault
+   cd my-vault
    ```
 
-2. **Install the plugin**, with the folder's absolute path as its `vault` option:
+2. **Run setup**, then restart Claude Code:
 
    ```
-   claude plugin marketplace add osabased/obsidian-vault
-   claude plugin install obsidian-vault@obsidian-vault --config "vault=<absolute path to the folder>"
+   node setup.mjs
    ```
 
-3. **Restart Claude Code.** The first session makes `.live/tools/`, the copy of the vault's tools that sessions run, from the folder's last commit. Each session then starts with a line such as `vault: no domain here · 0 global rules · proposals: ask`. A hook error that starts `vault <hook> failed:` says what is wrong and how to fix it.
+   It checks your Node.js and Claude Code versions, installs the plugin from this folder with the folder as its `vault` option (or points an installed plugin at it), turns on the vault's git hooks and makes `.live/tools/`, the copy of the vault's tools that sessions run. It is safe to run again. Each session then starts with a line such as `vault: no domain here · 0 global rules · proposals: ask`. A hook error that starts `vault <hook> failed:` says what is wrong and how to fix it.
 
 ## Updating
 
-The plugin's hooks and tool server come from GitHub, and they run the tools in your vault folder, so update both together. In the vault folder, run these, then restart Claude Code:
+In the vault folder, run this, then restart Claude Code:
 
 ```
-git pull
-claude plugin marketplace update obsidian-vault
-claude plugin update obsidian-vault@obsidian-vault
+node setup.mjs --update
 ```
 
-The next session makes `.live/tools/` again from what you pulled.
+It pulls the vault, then updates the plugin, so its hooks and the tools they run stay in step.
 
 ## Daily use
 
@@ -86,7 +79,7 @@ The plugin has one option, `vault`, the folder of your vault checkout. To set or
 
 ## Hooks
 
-Sessions run the hooks from `.live/tools/`, a copy of `tools/` as of the last commit, so a half-made change to `tools/` never runs in a session. Session start and the tool server make the copy when it is missing, and again when the last commit changed `tools/`. To refresh it after each commit as well, and to run the checks below, turn on the vault's git hooks in this folder:
+Sessions run the hooks from `.live/tools/`, a copy of `tools/` as of the last commit, so a half-made change to `tools/` never runs in a session. Session start and the tool server make the copy when it is missing, and again when the last commit changed `tools/`. `node setup.mjs` turns on the vault's git hooks, which refresh it after each commit as well and run the checks below. Without Claude Code, as for Codex alone, turn them on in this folder yourself:
 
 ```
 git config core.hooksPath .githooks

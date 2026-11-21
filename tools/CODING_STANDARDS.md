@@ -49,4 +49,4 @@ Lint reads the code with comments, strings and regex literals blanked out, so it
 
 ## oxlint
 
-oxlint is a dev check, not a dependency: nothing in `tools/` imports it, and it is the one npm package the repo uses. Pre-commit runs `oxlint --deny-warnings tools hooks mcp test` with the rules in `.oxlintrc.json`, so any warning refuses the commit; a commit that changes the code, the tests or `.oxlintrc.json` is refused on a machine without oxlint (`npm i -g oxlint@1.91.0`). Where code breaks a rule on purpose, put `// oxlint-disable-next-line <rule>` under the comment that says why.
+oxlint is a dev check, not a dependency: nothing in `tools/` imports it, and it is the one npm package the repo uses. Pre-commit runs `oxlint --deny-warnings tools hooks mcp test setup.mjs` with the rules in `.oxlintrc.json`, so any warning refuses the commit; a commit that changes the code, the tests or `.oxlintrc.json` is refused on a machine without oxlint (`npm i -g oxlint@1.91.0`). Where code breaks a rule on purpose, put `// oxlint-disable-next-line <rule>` under the comment that says why.
