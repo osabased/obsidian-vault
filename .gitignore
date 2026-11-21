@@ -6,3 +6,15 @@
 .live/
 .sources/
 vault.local.json
+# Vault content lives only in this folder, never on GitHub.
+/wiki/*
+!/wiki/.gitkeep
+/raw/*/*
+!/raw/*/.gitkeep
+/derived/
+/active.md
+/index.md
+/decisions.md
+/queue.md
+/log.md
+/.claude/backups/

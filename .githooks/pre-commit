@@ -27,6 +27,7 @@ if git status --porcelain --untracked-files=all -- wiki raw/picks raw/queue vaul
   git reset -q -- $gen
   echo "pre-commit: active.md, index.md, decisions.md and queue.md stay out of this commit, since not every note they are built from is in it." >&2
 else
-  git add $gen
+  # A generated file the user keeps out of git is gitignored, and git add would refuse it.
+  for f in $gen; do git check-ignore -q "$f" || git add "$f"; done
 fi
 exec node tools/lint.mjs --fail-on error
