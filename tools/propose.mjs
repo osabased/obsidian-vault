@@ -40,7 +40,7 @@ const fields = () => [
   { name: 'queued', type: S, help: ['the id of a review queue entry (u-) to offer again; besides it, only asked, and repeats or slug for a rule entry'] },
   { name: 'text', type: S, help: ["with page: a page change, the page's whole new text. Always an offer"] },
   { name: 'package', type: S, help: ['knowledge only: the library the rule is about, as ecosystem/name like npm/react'] },
-  { name: 'change', type: S, label: 'change, key', enum: ['reword', 'retire', 'move'], help: ["with the rule's key. reword replaces the do, not, because, applies_to, keywords, kind or checked_with you", 'give and needs a basis like a new rule, unless it gives checked_with alone; a knowledge rule keeps its kind; retire takes because and', 'superseded_by; move takes domain'] },
+  { name: 'change', type: S, label: 'change, key', enum: ['reword', 'retire', 'move'], help: ["with the rule's key. reword replaces the do, not, because, applies_to, keywords, kind, topic or checked_with you", 'give and needs a basis like a new rule, unless it gives checked_with alone; a knowledge rule keeps its kind; retire takes because and', 'superseded_by; move takes domain'] },
   ...['key', 'superseded_by', 'checked_with'].map(name => ({ name, type: S, describe: 'see change' })),
 ];
 
