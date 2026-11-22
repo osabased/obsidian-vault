@@ -1,6 +1,6 @@
 import fs from 'node:fs';
 import { vaultPath, writeSettled, appendLog, config, plainText, plainLayout, restore, inside } from './vault.mjs';
-import { KEY_RE, PAGE_WHERE, parseNote, noteErrors, noteLinks, vaultFile, knownDomain, joinList, loadNotes, readNote, rulePath, kindFolder, kindPlace, PAGE_KINDS } from './rules.mjs';
+import { KEY_RE, PAGE_WHERE, parseNote, noteErrors, noteLinks, vaultFile, knownDomain, joinList, loadNotes, readNote, rulePath, kindFolder, kindPlace, PAGE_KINDS, isOpen } from './rules.mjs';
 import { userNoteGuard } from './note-guards.mjs';
 import { lintLinks, linkIndex, markdownFiles } from './lint.mjs';
 import { openOffers } from './offers.mjs';
@@ -138,9 +138,9 @@ function unifiedDiff(ops) {
 // The lines the user is shown, which are never cut: a new page whole, a changed one as a diff. Shown lines lose their
 // trailing white space, since the agent passes them back to keep and may drop it, so a line the change adds may not end
 // in any: what is written is what the user saw.
-function offerLines(rel, before, after) {
+function offerLines(rel, before, after, opens) {
   const fence = '`'.repeat(Math.max(3, ...[...`${before ?? ''}\n${after}`.matchAll(/`+/g)].map(r => r[0].length + 1)));
-  const head = [`**Keep this page change?** ${rel} · ${before === null ? 'new' : 'change'}`, `${fence}${before === null ? 'markdown' : 'diff'}`];
+  const head = [`**Keep this page change?** ${rel} · ${before === null ? 'new' : 'change'}${opens ? ' · opens it: agents may then write this page without asking' : ''}`, `${fence}${before === null ? 'markdown' : 'diff'}`];
   const cap = config().pages.maxOfferChars;
   const over = (size, least) => refuse(`the offer for ${rel} comes to ${least ? 'at least ' : ''}${size} characters, over pages.maxOfferChars (${cap}). Split the change into smaller ones and propose each.`);
   const frame = [...head, fence].join('\n').length;
@@ -212,7 +212,7 @@ export function pageChange(p, { sid, domains, vault, kept, queued = null, base: 
   if (err) refuse(`${err}.`);
   const link = newLinkProblem(n, was, notes, sid);
   if (link) refuse(`${rel} ${link}.`);
-  return { rel, key, domain, file, text: after, base, layout, lines: offerLines(rel, before, after) };
+  return { rel, key, domain, file, text: after, base, layout, lines: offerLines(rel, before, after, isOpen(n) && !isOpen(was)) };
 }
 
 // In the page's own line endings and byte order mark, settled so the page reaches sessions at once.

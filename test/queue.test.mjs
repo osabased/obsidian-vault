@@ -265,6 +265,19 @@ test('queue.mjs draft takes a page change with no basis, and the entry offered a
   assert.equal(v.read(rel).replace(/\r\n/g, '\n'), text);
 });
 
+test('a queued page change that adds open: true names the opening when offered again', t => {
+  const v = makeVault(t, { config: { proposals: 'ask' } });
+  const sid = sessionId();
+  v.startSession(sid, { cwd: v.root, transcript: v.transcript(sid, typed(['call them by their screen'])) });
+  const rel = 'wiki/glim/entities/zq-lib.md';
+  const text = zqPage().replace('updated: 2026-10-01\n', 'updated: 2026-10-01\nopen: true\n');
+  const r = v.run('queue.mjs', ['draft'], { input: JSON.stringify({ page: rel, text }), env: { CLAUDE_CODE_SESSION_ID: sid } });
+  assert.equal(r.code, 0, r.stderr);
+  const [row] = queueRows(v);
+  const o = offered(v.propose(sid, { queued: row.id }));
+  assert.ok(o.text.startsWith(`**Keep this page change?** ${rel} · new · opens it: agents may then write this page without asking\n`), o.text);
+});
+
 function draftedChange(t) {
   const v = makeVault(t, { config: { proposals: 'ask' } });
   const rel = 'wiki/glim/entities/zq-lib.md';

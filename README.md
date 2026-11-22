@@ -51,7 +51,7 @@ It pulls the vault, then updates the plugin, so its hooks and the tools they run
 
 1. **Work as usual.** Each session starts with a status line, such as `vault: roblox · 12 rules (2 always) · 3 pages · proposals: ask`: the domains the folder is in, the rules and pages that can reach the session, and when agents propose rules.
 2. **Correct the agent.** By default it offers each correction as a rule at Claude Code's permission prompt for the vault's `keep` tool: Allow once keeps it, Deny drops it. `/obsidian-vault:vault` changes when it proposes.
-3. **Read and edit in Obsidian.** Open this folder, not the one above it, as the Obsidian vault. Edit or delete any note; a saved note applies after a minute. Nothing commits your notes: the vault reads them from this folder.
+3. **Read and edit in Obsidian.** Open this folder, not the one above it, as the Obsidian vault. Edit or delete any note; a saved note applies after a minute. Add `open: true` to a page's frontmatter to let agents in any project write its body without asking. Nothing commits your notes: the vault reads them from this folder.
 4. **Ingest and lint here.** Open Claude Code in this folder for `/ingest` and `/lint`; the session start reminds you when lint is due.
 
 A project whose kind no domain covers gets an offer to start one.

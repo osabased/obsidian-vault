@@ -265,6 +265,7 @@ function packageErrors(n) {
 }
 
 const alwaysErrors = n => (n.data.always != null && typeof n.data.always !== 'boolean' ? ['always must be true or false'] : []);
+const openErrors = n => (n.data.open != null && typeof n.data.open !== 'boolean' ? ['open must be true or false'] : []);
 
 function checkNote(n) {
   const errs = n.clash ? [`${joinList(n.clash, 'and')} ${n.clash.length > 1 ? 'have' : 'has'} this note's name too. Rename one: each name is used once in a domain`] : [];
@@ -275,7 +276,7 @@ function checkNote(n) {
   if (n.domain && n.data.domain !== undefined && (typeof n.data.domain === 'string' ? nfc(n.data.domain) : n.data.domain) !== n.domain) errs.push(`domain is ${n.data.domain} but the note is in wiki/${n.domain}/`);
   if (n.data.domain === undefined) errs.push('no domain');
   if (n.type === 'page') {
-    return [...errs, ...listErrors(n), ...alwaysErrors(n), ...(['user', 'agent'].includes(n.author) ? [] : ['author must be user or agent']), ...requiresErrors(n.requires)];
+    return [...errs, ...listErrors(n), ...alwaysErrors(n), ...openErrors(n), ...(['user', 'agent'].includes(n.author) ? [] : ['author must be user or agent']), ...requiresErrors(n.requires)];
   }
   if (n.type !== 'rule') return errs;
   if (isVaultOnly(n.domain)) errs.push(`${n.domain} is vault-only, so it holds pages only. Put the rule in a domain that reaches projects, or in global`);
@@ -296,6 +297,7 @@ function checkNote(n) {
     errs.push('moved_from must name the key the rule had before its move, as <domain>/<slug>');
   }
   if (n.author !== null) errs.push('author is only for pages');
+  if (n.data.open !== undefined) errs.push('open is only for pages');
   if (!hasChannel(n)) errs.push('a rule needs keywords, applies_to, tools or always: true, or nothing brings it up');
   if (!n.do) errs.push('no **Do:** line');
   if (!n.not) errs.push('no **Not:** line');
@@ -736,6 +738,8 @@ const byUser = a => typeof a === 'string' && a.trim().toLowerCase() === 'user';
 export const isUserPage = n => n.type === 'page' && byUser(n.author);
 // Any note marked author: user, as the edit guard reads it; null for a note that doesn't exist yet.
 export const wroteByUser = n => byUser(n?.author);
+// A page the user opened, whose body agents outside the vault folder may write directly. False for no note.
+export const isOpen = n => n?.type === 'page' && n.data?.open === true;
 // The edit guard and lint --fix read the file as it is, so any note marked author: user counts, a malformed one too.
 export const authoredByUser = text => byUser(single(parse(text).data.author));
 
@@ -1033,7 +1037,7 @@ function refPages(notes, resolve) {
 function indexLine(n, refs, sources, link) {
   if (n.type === 'page') {
     const [why] = noteErrors(n);
-    return `- ${link(n.key)} · ${kindLabel(n.kind)}${sources(n)}${why ? ` · not valid: ${why}` : ''} · ${n.summary ? clip(n.summary, 150) : '(no summary)'}`;
+    return `- ${link(n.key)} · ${kindLabel(n.kind)}${isOpen(n) ? ' · open' : ''}${sources(n)}${why ? ` · not valid: ${why}` : ''} · ${n.summary ? clip(n.summary, 150) : '(no summary)'}`;
   }
   const why = isRetired(n) ? null : undelivered(n);
   const ended = [...(validDay(n.retired) ? [`retired on ${n.retired}`] : []), ...(n.superseded_by ? [`superseded by ${link(n.superseded_by)}`] : [])];

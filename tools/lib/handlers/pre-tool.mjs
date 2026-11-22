@@ -2,9 +2,9 @@ import fs from 'node:fs';
 import { config, domainsFor, vaultRel, vaultOwn, toPosix, cwdOf, shortHash, plainText, readJsonSafe, safeId, inVaultFolder } from '../vault.mjs';
 import { routesOf, routesFor } from '../reach.mjs';
 import {
-  loadNotesAsync, settledNotes, liveRules, livePages, deliverable, deliveryFor, byFit, ruleLine, rulePointer, pageLine, fitContext, cmp, clip, QUOTED, isMap, wroteByUser,
+  loadNotesAsync, settledNotes, liveRules, livePages, deliverable, deliveryFor, byFit, ruleLine, rulePointer, pageLine, fitContext, cmp, clip, QUOTED, isMap, wroteByUser, isOpen,
 } from '../rules.mjs';
-import { usersOwn, userNoteGuard, ruleChange, changeOf } from '../note-guards.mjs';
+import { usersOwn, userNoteGuard, ruleChange, changeOf, frontmatter } from '../note-guards.mjs';
 import { matchTarget, targetNames, specificity, bySpecificity } from '../glob.mjs';
 import { matcher, fileScope, fires, dueRules, gatedFile } from '../scope.mjs';
 import { extension } from '../ext.mjs';
@@ -46,21 +46,44 @@ function change(event, file, cwd, rel) {
 
 const wikiNote = rel => rel !== null && /^wiki\/.+\.md$/i.test(rel);
 
-// A project session changes the wiki only through offers the user agrees to. Any note whose frontmatter says
-// `type: rule` is live, so the result is judged, not the folder. In the vault folder too, a rule changes only through
-// an offer the user agrees to, so a retry gets the same answer. The user's own edits in Obsidian reach no hook.
+// Only the user opens a page, so an edit from any session that adds an `open` key, whatever its case or value, is
+// refused. Keys are counted as lines, since the parsed frontmatter keeps only the last of two `open` keys.
+const OPEN_KEY = /^open[ \t]*:(?:[ \t]|$)/gim;
+const openKeys = (text, note) => (text === null || !note ? 0 : frontmatter(text, note).match(OPEN_KEY)?.length ?? 0);
+
+function openSet(rel, c) {
+  if (!c || c.after === null) return null;
+  if (openKeys(c.after, c.now) <= openKeys(c.before, c.was) && (isOpen(c.was) || !isOpen(c.now))) return null;
+  return `${rel} would have open set in its frontmatter. The user sets open themselves; the agent proposes it through the vault's \`propose\` tool with \`page\` and \`text\`.`;
+}
+
+// An open page takes body edits from a project session. Its frontmatter, which decides where the page reaches and that
+// it stays open, is the user's, so it must parse and stay byte for byte as it was; a delete or a move fails that too.
+function openPageGuard(rel, { before, after, was, now }) {
+  if (after === null) return `\`${rel}\` is an open page, but this edit can't be followed to check that it changes only the body. Write the page's whole new text instead.`;
+  if (was.ok && now.ok && frontmatter(before, was) === frontmatter(after, now)) return null;
+  return `\`${rel}\` is an open page. Outside the vault folder, its body may be edited directly, but its frontmatter stays as it is and the page stays where it is. Change only the body; a frontmatter change goes through the vault's \`propose\` tool with \`page\` and \`text\`, so the user agrees to it.`;
+}
+
+// A project session changes the wiki only through offers the user agrees to, except the body of a page the user opened.
+// Any note whose frontmatter says `type: rule` is live, so the result is judged, not the folder. In the vault folder
+// too, a rule changes only through an offer the user agrees to, so a retry gets the same answer. The user's own edits in
+// Obsidian reach no hook.
 function wikiGuard(rel, c, inVault) {
   // A note that exists but can't be read may be a rule, so the vault folder refuses it as one rather than let it through.
   const kind = c ? ruleChange(rel, c) : inVault ? 'changed' : null;
   if (inVault) {
     if (kind === 'new') return `\`${rel}\` would be a new rule. Rules are kept only through the vault's \`propose\` tool, so the user agrees to each one. Propose it there.`;
     if (kind) return `\`${rel}\` is a rule. Its Do, Not, Because and frontmatter change only through the vault's \`propose\` tool with \`key\`, so the user agrees to each change. Add Evidence lines as before.`;
-    return null;
+    return openSet(rel, c);
   }
   if (kind === 'new') return `\`${rel}\` would be a new rule. Outside the vault folder, rules are kept only through the vault's \`propose\` tool, so the user agrees to each one. Propose it there.`;
   if (kind || c?.was?.type === 'rule') {
     return `\`${rel}\` is a rule. Outside the vault folder, rules change only through the vault's \`propose\` tool: \`repeats\` adds evidence, and \`change\` with \`key\` rewords it, so the user agrees to each change.`;
   }
+  const opening = openSet(rel, c);
+  if (opening) return opening;
+  if (isOpen(c?.was)) return openPageGuard(rel, c);
   return `\`${rel}\` is a vault page. Outside the vault folder, pages change only through the vault's \`propose\` tool with \`page\` and \`text\`, so the user agrees to each change.`;
 }
 
@@ -97,7 +120,8 @@ function noteGuard(event, rel, c) {
   return [...why, 'If the user asked for this, retry the same edit. The retry is allowed.'].join('\n');
 }
 
-// A project session is always refused by wikiGuard, so noteGuard only judges edits made from the vault folder.
+// A project session reaches noteGuard only with a body edit to an open page, so noteGuard judges those as it judges
+// edits made from the vault folder.
 function wikiNoteGuards(event, rel, file, cwd) {
   const c = change(event, file, cwd, rel);
   return wikiGuard(rel, c, vaultSession(event, cwd)) ?? noteGuard(event, rel, c);
