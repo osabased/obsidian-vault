@@ -351,7 +351,7 @@ test("hooks/codex.mjs makes .live's copy at session start and runs the hook it n
   const ok = launch('session-start', codexInput('SessionStart', { session_id: sid, cwd: v.project }));
   assert.equal(ok.code, 0, ok.stderr);
   assert.match(JSON.parse(ok.stdout).hookSpecificOutput.additionalContext, /glim\/always-rule/);
-  const tree = execFileSync('git', ['rev-parse', 'HEAD:tools'], { cwd: v.root, encoding: 'utf8' }).trim();
+  const tree = execFileSync('git', ['rev-parse', 'HEAD:tools'], { cwd: v.root, env: cleanEnv(), encoding: 'utf8' }).trim();
   assert.equal(fs.readFileSync(v.at('.live', 'current'), 'utf8').trim(), tree);
   const bad = launch('nope', codexInput('Stop', { session_id: sid, cwd: v.project }));
   assert.equal(bad.code, 1);

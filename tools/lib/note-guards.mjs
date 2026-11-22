@@ -33,7 +33,7 @@ function bodyNotesAdded(before, after) {
 
 // A frontmatter line can read as a heading or a fence, so the section is found in the body, and the frontmatter must
 // stay as it was.
-const frontmatter = (text, note) => (note.ok ? text.slice(0, text.length - note.body.length).replace(/\n$/, '') : '');
+export const frontmatter = (text, note) => (note.ok ? text.slice(0, text.length - note.body.length).replace(/\n$/, '') : '');
 const onlyNotesAdded = (before, after, was, now) => frontmatter(before, was) === frontmatter(after, now) && bodyNotesAdded(was.body, now.body);
 
 export const usersOwn = rel => `${rel} is the user's own writing, so it stays as they wrote it. Add notes as new lines under ## Agent notes, and change nothing else in the file.`;

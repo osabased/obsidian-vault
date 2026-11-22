@@ -138,6 +138,32 @@ test('lint checks a page\'s scope fields as it does a rule\'s, always and trigge
   ]);
 });
 
+test('lint takes open as true or false on a page, and reports any other value, or open on a rule', async t => {
+  const v = makeVault(t);
+  v.write('wiki/glim/open-true.md', pushed({ keywords: ['x'], extra: ['open: true'] }));
+  v.write('wiki/glim/open-false.md', pushed({ keywords: ['x'], extra: ['open: false'] }));
+  v.write('wiki/glim/open-yes.md', pushed({ keywords: ['x'], extra: ['open: yes'] }));
+  v.write('wiki/glim/rules/open-rule.md', ruleNote({ keywords: ['x'], extra: ['open: true'] }));
+  v.write('wiki/glim/rules/shut-rule.md', ruleNote({ keywords: ['y'], extra: ['open: false'] }));
+  const found = await lintFound(v, /^open /);
+  assert.deepEqual(found.map(f => [f.level, f.file, f.msg]).sort(), [
+    ['error', 'wiki/glim/open-yes.md', 'open must be true or false'],
+    ['error', 'wiki/glim/rules/open-rule.md', 'open is only for pages'],
+    ['error', 'wiki/glim/rules/shut-rule.md', 'open is only for pages'],
+  ]);
+});
+
+test("index.md labels an open page's line open, and the hook's pointer line to it stays as it was", async t => {
+  const v = makeVault(t);
+  v.write('wiki/glim/zq-types.md', pushed({ keywords: ['strict mode'], summary: "'How the checker treats strict mode'", extra: ['open: true'] }));
+  const rules = await v.import('lib/rules.mjs');
+  assert.match(rules.renderIndex(rules.loadNotes()), /^- \[\[wiki\/glim\/zq-types\|zq-types\]\] · concept page · open · no sources · /m);
+  assert.equal(context(prompt(v, sessionId(), 'turn on strict mode here')), [
+    'Vault pages on this request. Read the ones that bear on it:',
+    `- glim/zq-types (concept page): How the checker treats strict mode. ${pathOf(v, 'glim/zq-types')}`,
+  ].join('\n'));
+});
+
 test('a rule\'s errors keep their order, and a note of another type gets only the type error', async t => {
   const v = makeVault(t, { domains: { reading: { title: 'Reading', vaultOnly: true, topics: ['solvers'] } } });
   const rules = await v.import('lib/rules.mjs');
