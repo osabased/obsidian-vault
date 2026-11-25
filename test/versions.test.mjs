@@ -570,7 +570,7 @@ test('a rule with a package names the missing entity page once its library has e
   run(failureRule({ package: 'fixture/pkg' }));
   const r = run(failureRule({ package: 'fixture/pkg' }));
   assert.equal(r.code, 0, r.stderr);
-  assert.match(r.stdout, /3 live rules now name fixture\/pkg, and no entity page does\. Hold a page change that adds wiki\/almanac\/entities\/<library>\.md with kind: entity and this package, and release it before your final reply\./);
+  assert.match(r.stdout, /3 live rules now name fixture\/pkg, and no entity page does\. Write wiki\/almanac\/entities\/<library>\.md with kind: entity and this package\. /);
 });
 
 const globalLedger = (v, slug, checked, doLine) => v.write(`wiki/global/rules/${slug}.md`, ruleNote({

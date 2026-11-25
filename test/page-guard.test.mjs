@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
-import { makeVault, ruleNote, denied, sessionId, editVault } from './fixture.mjs';
+import { makeVault, ruleNote, denied, sessionId, editVault, pageNote, zqEntityPage } from './fixture.mjs';
 import { codexInput, codexPatch } from './codex.mjs';
 
 const SID = '9f8e7d6c-0000-4000-8000-000000000002';
@@ -133,15 +133,6 @@ test('a note outside rules/ that is a rule once written is refused, whether new 
 const ENTITY = 'wiki/global/entities/x.md';
 const writePage = (v, sid, rel, cwd, content = PAGE) => editVault(v, sid, rel, 'Write', { content }, cwd);
 
-test('from a project session, a Write to a page under wiki/ is refused and pointed to propose, new or not', t => {
-  const v = vault(t);
-  assert.equal(denied(writePage(v, SID, ENTITY, v.project)),
-    "`wiki/global/entities/x.md` is a vault page. Outside the vault folder, pages change only through the vault's `propose` tool with `page` and `text`, so the user agrees to each change.");
-  assert.ok(denied(writePage(v, SID, ENTITY, v.project)), 'the refusal repeats; it is not a one-time gate');
-  const more = editVault(v, SID, PAGE_REL, 'Edit', { old_string: READING, new_string: `${READING} More.` }, v.project);
-  assert.match(denied(more) ?? '', /^`wiki\/glim\/source-shop\.md` is a vault page\./);
-});
-
 test('from a project session, an edit to a rule that exists is refused too, even one that only adds evidence', t => {
   const v = vault(t, { 'wiki/glim/rules/old.md': ruleNote() });
   const file = v.at('wiki', 'glim', 'rules', 'old.md');
@@ -213,100 +204,143 @@ test("the folder the session registered decides, not the folder of the edit", t 
   assert.equal(denied(writePage(v, inside, ENTITY, v.project)), null);
 });
 
+const SHOP = 'wiki/glim/sources/shop.md';
+const ZQ = 'wiki/glim/entities/zq-lib.md';
 const LOG = ['## Log', '- 2026-11-19 · kept · spark burst', '- 2026-11-19 · rejected · spark trail', ''];
-const OPEN_PAGE = `${PAGE.replace('updated: 2026-10-01\n', 'updated: 2026-10-01\nopen: true\n')}\n${LOG.join('\n')}`;
+const SHOP_PAGE = `${PAGE}\n${LOG.join('\n')}`;
 const KEPT = '- 2026-11-19 · kept · spark burst';
-const fromProject = (v, tool, input, rel = PAGE_REL) => editVault(v, SID, rel, tool, input, v.project);
-const bodyOnly = rel => `\`${rel}\` is an open page. Outside the vault folder, its body may be edited directly, but its frontmatter stays as it is and the page stays where it is. Change only the body; a frontmatter change goes through the vault's \`propose\` tool with \`page\` and \`text\`, so the user agrees to it.`;
-const unfollowed = rel => `\`${rel}\` is an open page, but this edit can't be followed to check that it changes only the body. Write the page's whole new text instead.`;
-const openSet = rel => `${rel} would have open set in its frontmatter. The user sets open themselves; the agent proposes it through the vault's \`propose\` tool with \`page\` and \`text\`.`;
+const fromProject = (v, tool, input, rel = SHOP) => editVault(v, SID, rel, tool, input, v.project);
+const withOpen = (text, value) => text.replace('updated: 2026-10-01\n', `updated: 2026-10-01\nopen: ${value}\n`);
+const closed = rel => `\`${rel}\` is a vault page the user closed with \`open: false\`. Outside the vault folder, it changes only through the vault's \`propose\` tool with \`page\` and \`text\`, so the user agrees to each change.`;
+const unfollowed = rel => `\`${rel}\` is a vault page, but this edit can't be followed to check it. Write the page's whole new text instead.`;
+const gone = rel => `\`${rel}\` would no longer be a vault page. Outside the vault folder, a page stays a page where it is: change its text, and leave deleting or moving it to the user.`;
+const notPage = rel => `\`${rel}\` would not be a vault page. A note under wiki/ needs a page's frontmatter: type: page, its domain, kind, topic and summary.`;
+const cant = (rel, why) => `\`${rel}\` can't be written from this session: ${why}`;
+const openChanged = rel => `${rel} would change open in its frontmatter. The user opens and closes pages themselves; the agent proposes it through the vault's \`propose\` tool with \`page\` and \`text\`.`;
 
-test('from a project session, an open page takes body edits directly through Write, Edit, replace_all and MultiEdit', t => {
-  const v = vault(t, { [PAGE_REL]: OPEN_PAGE });
+test('from a project session, a page is written directly: a new one, and any change to the body or frontmatter of one without open: false', t => {
+  const v = vault(t, { [SHOP]: SHOP_PAGE });
+  assert.equal(denied(fromProject(v, 'Write', { content: zqEntityPage() }, ZQ)), null, 'a new page');
+  assert.equal(denied(fromProject(v, 'Write', { content: pageNote({ domain: 'global', kind: 'concept' }) }, 'wiki/global/concepts/x.md')), null, 'a new page in global');
   const more = `${KEPT}\n- 2026-11-20 · kept · ember ring`;
   assert.equal(denied(fromProject(v, 'Edit', { old_string: KEPT, new_string: more })), null, 'Edit');
   assert.equal(denied(fromProject(v, 'Edit', { old_string: 'spark', new_string: 'ember', replace_all: true })), null, 'Edit with replace_all');
   assert.equal(denied(fromProject(v, 'MultiEdit', { edits: [{ old_string: KEPT, new_string: more }, { old_string: 'ember ring', new_string: 'ember halo' }] })), null, 'MultiEdit');
-  assert.equal(denied(fromProject(v, 'Write', { content: OPEN_PAGE.replace(KEPT, more) })), null, 'Write');
+  assert.equal(denied(fromProject(v, 'Write', { content: SHOP_PAGE.replace(KEPT, more) })), null, 'Write');
+  assert.equal(denied(fromProject(v, 'Edit', { old_string: 'updated: 2026-10-01', new_string: 'updated: 2026-11-20' })), null, 'updated');
+  assert.equal(denied(fromProject(v, 'Edit', { old_string: 'topic: layout', new_string: 'topic: code' })), null, 'topic');
+  assert.equal(denied(fromProject(v, 'Edit', { old_string: 'summary: Shop screens where', new_string: 'summary: The shop screens where' })), null, 'summary');
 });
 
-test("from a project session, any change to an open page's frontmatter is refused, every time", t => {
-  const v = vault(t, { [PAGE_REL]: OPEN_PAGE });
-  const changes = {
-    updated: { old_string: 'updated: 2026-10-01', new_string: 'updated: 2026-11-20' },
-    topic: { old_string: 'topic: layout', new_string: 'topic: code' },
-    'open removed': { old_string: 'open: true\n', new_string: '' },
-    'closing --- broken': { old_string: 'open: true\n---', new_string: 'open: true\n--' },
-    'leading --- indented': { old_string: '---\ntype: page', new_string: ' ---\ntype: page' },
-  };
-  for (const [name, change] of Object.entries(changes)) {
-    assert.equal(denied(fromProject(v, 'Edit', change)), bodyOnly(PAGE_REL), name);
-    assert.equal(denied(fromProject(v, 'Edit', change)), bodyOnly(PAGE_REL), `${name}, retried`);
+test('from a project session, a new page is refused outside its reach or place, on a taken name, with a new lint error, or without a page\'s frontmatter, every time', t => {
+  const v = makeVault(t, { domains: { other: { title: 'Other', topics: ['misc'] } } });
+  v.write('wiki/glim/rules/taken.md', ruleNote());
+  const write = (rel, content) => denied(fromProject(v, 'Write', { content }, rel));
+  const other = 'wiki/other/entities/zq-lib.md';
+  assert.equal(write(other, pageNote({ domain: 'other', topic: 'misc', kind: 'entity' })), cant(other, "the page's domain must be glim or global."));
+  assert.equal(write(other, pageNote({ domain: 'other', topic: 'misc', kind: 'entity' })), cant(other, "the page's domain must be glim or global."), 'retried');
+  const loose = 'wiki/glim/zq-lib.md';
+  assert.equal(write(loose, zqEntityPage()), cant(loose, 'page must be a page under wiki/, like wiki/<domain>/<folder>/<slug>.md.'));
+  const misplaced = 'wiki/glim/concepts/zq-lib.md';
+  assert.match(write(misplaced, zqEntityPage()) ?? '', /^`wiki\/glim\/concepts\/zq-lib\.md` can't be written from this session: an entity\b.* goes in wiki\/glim\/entities\/, not wiki\/glim\/concepts\/zq-lib\.md\.$/);
+  const taken = 'wiki/glim/entities/taken.md';
+  assert.equal(write(taken, zqEntityPage()), cant(taken, 'wiki/glim/rules/taken.md already exists. Pick another slug, or leave that note to the user.'));
+  const wrong = 'wiki/glim/entities/wrong.md';
+  assert.equal(write(wrong, pageNote({ domain: 'global', kind: 'entity' })), cant(wrong, 'domain is global but the note is in wiki/glim/.'));
+  const plain = 'wiki/glim/entities/plain.md';
+  assert.equal(write(plain, 'Just some notes.\n'), notPage(plain));
+  const mine = 'wiki/glim/entities/mine.md';
+  assert.equal(write(mine, zqEntityPage().replace('type: page\n', 'type: page\nauthor: user\n')),
+    `${mine} would be marked author: user. The user sets author: user themselves; the agent doesn't make a page theirs.`);
+  assert.ok(!v.exists(ZQ));
+});
+
+test('from a project session, a page with open: false is refused as before, its body and its frontmatter, every time', t => {
+  const v = vault(t, { [SHOP]: withOpen(SHOP_PAGE, 'false') });
+  for (const [name, change] of Object.entries({ body: { old_string: KEPT, new_string: `${KEPT}!` }, frontmatter: { old_string: 'topic: layout', new_string: 'topic: code' } })) {
+    assert.equal(denied(fromProject(v, 'Edit', change)), closed(SHOP), name);
+    assert.equal(denied(fromProject(v, 'Edit', change)), closed(SHOP), `${name}, retried`);
   }
 });
 
-test('from a project session, an edit to an open page the hook cannot follow is refused', t => {
-  const v = vault(t, { [PAGE_REL]: OPEN_PAGE });
-  assert.equal(denied(fromProject(v, 'Edit', { old_string: 'not in the page', new_string: '' })), unfollowed(PAGE_REL));
-  assert.equal(denied(v.edit(SID, 'NotebookEdit', { notebook_path: v.at(...PAGE_REL.split('/')), new_source: 'x' }, { cwd: v.project })), unfollowed(PAGE_REL));
+test('from any session, an edit that adds, changes or removes an open line is refused, in a new page too', t => {
+  const shut = 'wiki/glim/sources/shut.md';
+  const legacy = 'wiki/glim/sources/legacy.md';
+  const v = vault(t, { [SHOP]: SHOP_PAGE, [shut]: withOpen(SHOP_PAGE, 'false'), [legacy]: withOpen(SHOP_PAGE, 'true') });
+  for (const [where, cwd] of [['project', v.project], ['vault folder', v.root]]) {
+    const at = (rel, change) => denied(editVault(v, SID, rel, 'Edit', change, cwd));
+    for (const line of ['open: true', 'open: True', 'Open: true', 'open: false', 'OPEN: yes']) {
+      assert.equal(at(SHOP, { old_string: 'updated: 2026-10-01\n', new_string: `updated: 2026-10-01\n${line}\n` }), openChanged(SHOP), `${where}: ${line}`);
+    }
+    for (const value of ['true', 'false']) assert.equal(denied(writePage(v, SID, ZQ, cwd, withOpen(zqEntityPage(), value))), openChanged(ZQ), `${where}: a new page with open: ${value}`);
+    assert.equal(at(shut, { old_string: 'open: false', new_string: 'open: true' }), openChanged(shut), `${where}: false turned to true`);
+    assert.equal(at(shut, { old_string: 'open: false\n', new_string: '' }), openChanged(shut), `${where}: open: false removed`);
+    assert.equal(at(legacy, { old_string: 'open: true\n', new_string: '' }), openChanged(legacy), `${where}: open: true removed`);
+    assert.equal(at(legacy, { old_string: 'open: true\n', new_string: 'open: true\nopen: true\n' }), openChanged(legacy), `${where}: a second open key`);
+  }
 });
 
-test("from a project session, an open page still may not become a rule, and dropping the user's words is refused once", t => {
-  const v = vault(t, { [PAGE_REL]: OPEN_PAGE });
-  assert.match(denied(asRule(v, SID, v.project)) ?? '', /^`wiki\/glim\/source-shop\.md` would be a new rule\./);
+test('from a project session, an edit the hook cannot follow, or one that leaves no page there, is refused', t => {
+  const v = vault(t, { [SHOP]: SHOP_PAGE });
+  assert.equal(denied(fromProject(v, 'Edit', { old_string: 'not in the page', new_string: '' })), unfollowed(SHOP));
+  assert.equal(denied(v.edit(SID, 'NotebookEdit', { notebook_path: v.at(...SHOP.split('/')), new_source: 'x' }, { cwd: v.project })), unfollowed(SHOP));
+  assert.equal(denied(fromProject(v, 'Edit', { old_string: 'updated: 2026-10-01\n---', new_string: 'updated: 2026-10-01\n--' })), gone(SHOP), 'closing --- broken');
+  assert.equal(denied(fromProject(v, 'Write', { content: '' })), gone(SHOP), 'emptied');
+});
+
+test("from a project session, a page still may not become a rule, and dropping the user's words is refused every time and pointed to propose", t => {
+  const v = vault(t, { [SHOP]: SHOP_PAGE });
+  assert.match(denied(fromProject(v, 'Edit', { old_string: 'type: page', new_string: 'type: rule' })) ?? '', /^`wiki\/glim\/sources\/shop\.md` would be a new rule\./);
   const cut = { old_string: `${SAID}\n`, new_string: '' };
-  assert.match(denied(fromProject(v, 'Edit', cut)) ?? '', /the user's words[\s\S]*the tabs feel cramped/);
-  assert.equal(denied(fromProject(v, 'Edit', cut)), null, 'the same edit retried goes through');
+  const pointed = /the user's words[\s\S]*the tabs feel cramped[\s\S]*goes through the vault's `propose` tool with `page` and `text`, so the user agrees to it\.$/;
+  assert.match(denied(fromProject(v, 'Edit', cut)) ?? '', pointed);
+  assert.match(denied(fromProject(v, 'Edit', cut)) ?? '', pointed, 'the same edit retried');
 });
 
-test('from a project session, an open page the user wrote takes only lines under ## Agent notes', t => {
-  const mine = `${OPEN_PAGE.replace('open: true\n', 'open: true\nauthor: user\n')}\n## Agent notes\n- first note\n`;
-  const v = vault(t, { [PAGE_REL]: mine });
+test('from a project session, a new page may not take the old key of a rule moved to a domain the session does not reach', t => {
+  const v = makeVault(t, { domains: { other: { title: 'Other', topics: ['misc'] } } });
+  v.write('wiki/other/rules/moved.md', ruleNote({ domain: 'other', topic: 'misc', keywords: ['x'], extra: ['moved_from: glim/moved'] }));
+  const rel = 'wiki/glim/entities/moved.md';
+  assert.equal(denied(fromProject(v, 'Write', { content: zqEntityPage() }, rel)), cant(rel, 'wiki/other/rules/moved.md already exists. Pick another slug, or leave that note to the user.'));
+});
+
+test('from a session in a folder no domain reaches, a page is written directly in global only', t => {
+  const v = vault(t, {});
+  const away = fs.mkdtempSync(`${v.root}-away-`);
+  t.after(() => fs.rmSync(away, { recursive: true, force: true }));
+  const write = (rel, content) => denied(editVault(v, SID, rel, 'Write', { content }, away));
+  assert.equal(write('wiki/global/concepts/x.md', pageNote({ domain: 'global', kind: 'concept' })), null);
+  assert.equal(write(ZQ, zqEntityPage()), cant(ZQ, "the page's domain must be global."));
+});
+
+test('from a project session, a page the user wrote takes only lines under ## Agent notes', t => {
+  const mine = `${SHOP_PAGE.replace('type: page\n', 'type: page\nauthor: user\n')}\n## Agent notes\n- first note\n`;
+  const v = vault(t, { [SHOP]: mine });
   assert.equal(denied(fromProject(v, 'Edit', { old_string: '- first note\n', new_string: '- first note\n- second note\n' })), null);
   assert.equal(denied(fromProject(v, 'Edit', { old_string: KEPT, new_string: `${KEPT}!` })),
-    "wiki/glim/source-shop.md is the user's own writing, so it stays as they wrote it. Add notes as new lines under ## Agent notes, and change nothing else in the file.");
+    "wiki/glim/sources/shop.md is the user's own writing, so it stays as they wrote it. Add notes as new lines under ## Agent notes, and change nothing else in the file.");
+  assert.equal(denied(fromProject(v, 'Edit', { old_string: 'author: user\n', new_string: '' })),
+    "wiki/glim/sources/shop.md is the user's own writing, so it stays as they wrote it. Add notes as new lines under ## Agent notes, and change nothing else in the file.");
 });
 
-test('from a project session, an open page with CRLF line endings and a byte order mark is guarded the same way', t => {
-  const v = vault(t, { [PAGE_REL]: `﻿${OPEN_PAGE.replace(/\n/g, '\r\n')}` });
+test('from a project session, a page with CRLF line endings and a byte order mark is guarded the same way', t => {
+  const v = vault(t, { [SHOP]: `﻿${SHOP_PAGE.replace(/\n/g, '\r\n')}`, 'wiki/glim/sources/shut.md': `﻿${withOpen(SHOP_PAGE, 'false').replace(/\n/g, '\r\n')}` });
   assert.equal(denied(fromProject(v, 'Edit', { old_string: KEPT, new_string: `${KEPT}\n- 2026-11-20 · kept · ember ring` })), null, 'a body edit');
-  assert.equal(denied(fromProject(v, 'Edit', { old_string: '## You said', new_string: 'Shop notes.\n\n## You said' })), null, 'an edit at the start of the body');
-  assert.equal(denied(fromProject(v, 'Edit', { old_string: 'topic: layout', new_string: 'topic: code' })), bodyOnly(PAGE_REL), 'a frontmatter edit');
+  assert.equal(denied(fromProject(v, 'Edit', { old_string: 'topic: layout', new_string: 'topic: code' })), null, 'a frontmatter edit');
   assert.match(denied(fromProject(v, 'Edit', { old_string: `${SAID}\n`, new_string: '' })) ?? '', /the user's words/, 'a dropped quote');
-});
-
-test('from a project session, a closed page is refused as before, and an edit or a new page that sets open names who opens a page', t => {
-  const v = vault(t);
-  assert.match(denied(fromProject(v, 'Edit', { old_string: READING, new_string: `${READING} More.` })) ?? '', /^`wiki\/glim\/source-shop\.md` is a vault page\./);
-  for (const line of ['open: true', 'open: True', 'Open: true']) {
-    assert.equal(denied(fromProject(v, 'Edit', { old_string: 'updated: 2026-10-01\n', new_string: `updated: 2026-10-01\n${line}\n` })), openSet(PAGE_REL), line);
-  }
-  assert.equal(denied(writePage(v, SID, ENTITY, v.project, OPEN_PAGE)), openSet(ENTITY), 'a new page');
-});
-
-test('from a vault-folder session, setting open in any spelling is refused, in a new page too, and removing it is allowed', t => {
-  const opened = 'wiki/glim/opened.md';
-  const unticked = 'wiki/glim/unticked.md';
-  const v = vault(t, { [PAGE_REL]: PAGE, [opened]: OPEN_PAGE, [unticked]: OPEN_PAGE.replace('open: true', 'open: false') });
-  const add = line => editVault(v, SID, PAGE_REL, 'Edit', { old_string: 'updated: 2026-10-01\n', new_string: `updated: 2026-10-01\n${line}\n` });
-  for (const line of ['open: true', 'open: True', 'Open: true', 'open: false', 'OPEN: yes']) assert.equal(denied(add(line)), openSet(PAGE_REL), line);
-  assert.equal(denied(writePage(v, SID, ENTITY, v.root, OPEN_PAGE)), openSet(ENTITY), 'a new page');
-  assert.equal(denied(editVault(v, SID, opened, 'Edit', { old_string: 'open: true\n', new_string: 'open: true\nopen: true\n' })), openSet(opened), 'a second open key');
-  assert.equal(denied(editVault(v, SID, unticked, 'Edit', { old_string: 'open: false', new_string: 'open: true' })), openSet(unticked), 'false turned to true');
-  assert.equal(denied(editVault(v, SID, opened, 'Edit', { old_string: 'open: true\n', new_string: '' })), null, 'removing it');
+  assert.equal(denied(fromProject(v, 'Edit', { old_string: KEPT, new_string: `${KEPT}!` }, 'wiki/glim/sources/shut.md')), closed('wiki/glim/sources/shut.md'), 'open: false');
 });
 
 const codexEdit = (v, ops) => v.hook('edit', codexInput('PreToolUse', { session_id: SID, cwd: v.project, tool_input: { command: codexPatch(ops) } }), { agent: 'codex' });
 const abs = (v, rel) => v.at(...rel.split('/')).replace(/\\/g, '/');
 
-test("Codex, from a project session: an update to an open page's body passes, and a delete or a move of it is refused", t => {
+test("Codex, from a project session: an update to a page's body or frontmatter passes, and a delete or a move of it is refused", t => {
   const v = makeVault(t, { config: { agents: ['claude-code', 'codex'] } });
-  v.write(PAGE_REL, OPEN_PAGE);
-  assert.equal(denied(codexEdit(v, [{ update: abs(v, PAGE_REL), chunks: [{ context: '## Log', lines: [` ${KEPT}`, '+- 2026-11-20 · kept · ember ring'] }] }])), null, 'a body update');
-  assert.equal(denied(codexEdit(v, [{ update: abs(v, PAGE_REL), chunks: [{ lines: ['-updated: 2026-10-01', '+updated: 2026-11-20'] }] }])), bodyOnly(PAGE_REL), 'a frontmatter update');
-  assert.equal(denied(codexEdit(v, [{ delete: abs(v, PAGE_REL) }])), bodyOnly(PAGE_REL), 'a delete');
-  const moved = 'wiki/glim/source-shop-2.md';
-  const why = denied(codexEdit(v, [{ update: abs(v, PAGE_REL), moveTo: abs(v, moved), chunks: [{ context: '## Log', lines: [` ${KEPT}`, '+- more'] }] }])) ?? '';
-  assert.ok(why.includes(bodyOnly(PAGE_REL)), `the move's source: ${why}`);
-  assert.ok(why.includes(openSet(moved)), `the move's destination: ${why}`);
+  v.write(SHOP, SHOP_PAGE);
+  assert.equal(denied(codexEdit(v, [{ update: abs(v, SHOP), chunks: [{ context: '## Log', lines: [` ${KEPT}`, '+- 2026-11-20 · kept · ember ring'] }] }])), null, 'a body update');
+  assert.equal(denied(codexEdit(v, [{ update: abs(v, SHOP), chunks: [{ lines: ['-updated: 2026-10-01', '+updated: 2026-11-20'] }] }])), null, 'a frontmatter update');
+  assert.equal(denied(codexEdit(v, [{ delete: abs(v, SHOP) }])), gone(SHOP), 'a delete');
+  const moved = 'wiki/glim/sources/shop-2.md';
+  const why = denied(codexEdit(v, [{ update: abs(v, SHOP), moveTo: abs(v, moved), chunks: [{ context: '## Log', lines: [` ${KEPT}`, '+- more'] }] }])) ?? '';
+  assert.ok(why.includes(gone(SHOP)), `the move's source: ${why}`);
 });

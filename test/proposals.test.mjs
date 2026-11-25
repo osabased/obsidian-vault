@@ -213,9 +213,9 @@ test('a session in the vault folder that a domain reaches hears that it offers r
   assert.match(out?.systemMessage ?? '', /proposals: ask/);
 });
 
-test('a domain session hears to hold page changes, and a session in the vault folder, which writes pages directly, does not', t => {
+test('a domain session hears to write pages directly, and a session in the vault folder, whose instructions cover pages, does not', t => {
   const v = vaultIn(t, 'ask');
-  const held = /Hold a page change the same way/;
+  const held = /Write a vault page directly when a library needs more than a rule's line\./;
   assert.match(context(started(v, ['hi']).out), held);
   v.write('vault.local.json', JSON.stringify({ domains: { glim: { paths: [v.root] } } }));
   const inVault = context(started(v, ['hi'], { cwd: v.root }).out);

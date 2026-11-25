@@ -1,7 +1,7 @@
 import fs from 'node:fs';
 import { vaultPath, writeSettled, appendLog, config, plainText, plainLayout, restore, inside } from './vault.mjs';
-import { KEY_RE, PAGE_WHERE, parseNote, noteErrors, noteLinks, vaultFile, knownDomain, joinList, loadNotes, readNote, rulePath, kindFolder, kindPlace, PAGE_KINDS, isOpen } from './rules.mjs';
-import { userNoteGuard } from './note-guards.mjs';
+import { PAGE_WHERE, parseNote, noteErrors, noteLinks, vaultFile, joinList, loadNotes, rulePath, isOpen } from './rules.mjs';
+import { userNoteGuard, pagePlace, kindProblem } from './note-guards.mjs';
 import { lintLinks, linkIndex, markdownFiles } from './lint.mjs';
 import { openOffers } from './offers.mjs';
 import { sha256 } from './sources.mjs';
@@ -10,10 +10,6 @@ import { refuse, line } from './input.mjs';
 // A page change: the whole new text of a page under wiki/, offered as the diff the user agrees to. base, the hash of the
 // file the offer was made against, comes only from a stored offer or a review queue entry, so keep can tell the page
 // changed since, and an entry offered again can tell the page changed since it was made.
-
-const PAGE_PATH = /^wiki\/([^/]+)\/([^/]+)\/([^/]+)\.md$/i;
-
-const KIND_FOLDERS = PAGE_KINDS.map(kind => kindFolder({ type: 'page', kind }));
 
 const PAGE_FIELDS = ['page', 'text', 'hold', 'asked'];
 
@@ -177,19 +173,12 @@ export function pageChange(p, { sid, domains, vault, kept, queued = null, base: 
   // keep compares the lines it is passed after turning every line ending into \n, so the offer holds none but \n.
   const text = p.text.replace(/\r\n?/g, '\n');
   const rel = (vaultFile(page) ?? page).normalize('NFC');
-  const m = rel.match(PAGE_PATH);
-  // path.join takes a backslash as a separator on Windows, so a folder like ..\.. would leave wiki/.
-  if (!m || rel.includes('\\') || rel.split('/').some(s => s === '.' || s === '..')) refuse(PAGE_WHERE);
-  const [, domain, folder, slug] = m;
-  if (!knownDomain(domain) || (!vault && !domains.includes(domain))) refuse(`the page's domain must be ${joinList(domains, 'or')}.`);
-  const key = `${domain}/${slug}`;
-  if (!KEY_RE.test(key)) refuse('slug must be lowercase-kebab-case.');
+  const notes = loadNotes();
+  const place = pagePlace(rel, { domains, vault, notes });
+  if (place.why) refuse(place.why);
+  const { domain, key } = place;
   const file = vaultPath(...rel.split('/'));
   if (inside(vaultPath('wiki', domain), file) === null) refuse(PAGE_WHERE);
-  // Every domain, since a page may link a note in any of them. A moved rule keeps its old key, which a page can't take.
-  const notes = loadNotes();
-  const taken = readNote(key, notes.filter(n => n.rel.toLowerCase() !== rel.toLowerCase()));
-  if (taken) refuse(`${taken.rel} already exists. Pick another slug, or leave that note to the user.`);
   const raw = fs.existsSync(file) ? fs.readFileSync(file) : null;
   const base = raw && sha256(raw);
   if (kept && expected !== base) refuse(`${rel} changed since the offer, so it isn't what the user agreed to. Propose the change again.`);
@@ -201,18 +190,15 @@ export function pageChange(p, { sid, domains, vault, kept, queued = null, base: 
   if (was?.type === 'rule') refuse(`${rel} is a rule. Change it with change and key.`);
   const n = parseNote(after, rel);
   if (n.type === 'rule') refuse(`the text would make ${rel} a rule. Propose a rule with do and not instead.`);
-  const wanted = kindFolder(n);
-  if (wanted ? folder !== wanted : !KIND_FOLDERS.includes(folder)) {
-    if (!wanted) refuse(PAGE_WHERE);
-    refuse(`${kindPlace(n, domain)}, not ${rel}.`);
-  }
+  const misplaced = kindProblem(n, place, rel);
+  if (misplaced) refuse(misplaced);
   const guard = userNoteGuard(rel, before ?? '', after);
   if (guard) refuse(guard);
   const [err] = noteErrors(n);
   if (err) refuse(`${err}.`);
   const link = newLinkProblem(n, was, notes, sid);
   if (link) refuse(`${rel} ${link}.`);
-  return { rel, key, domain, file, text: after, base, layout, lines: offerLines(rel, before, after, isOpen(n) && !isOpen(was)) };
+  return { rel, key, domain, file, text: after, base, layout, lines: offerLines(rel, before, after, was?.type === 'page' && !isOpen(was) && isOpen(n)) };
 }
 
 // In the page's own line endings and byte order mark, settled so the page reaches sessions at once.

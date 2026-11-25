@@ -1,6 +1,47 @@
-import { parseNote, agentNotesSpan, AGENT_NOTES, TOP_HEADING, wroteByUser } from './rules.mjs';
+import {
+  parseNote, agentNotesSpan, AGENT_NOTES, TOP_HEADING, wroteByUser, PAGE_WHERE, PAGE_KINDS, KEY_RE, kindFolder, kindPlace, knownDomain, joinList,
+  readNote, noteErrors,
+} from './rules.mjs';
 
-// The checks the edit hook and a page offer share: what a change may do to a page the user wrote, and to a rule.
+// The checks the edit hook and a page offer share: where a page may be written, what a change may do to a page the user
+// wrote, and to a rule.
+
+const PAGE_PATH = /^wiki\/([^/]+)\/([^/]+)\/([^/]+)\.md$/i;
+const KIND_FOLDERS = PAGE_KINDS.map(kind => kindFolder({ type: 'page', kind }));
+
+// A page goes in a folder of its domain, in a domain the session reaches unless it runs in the vault folder, under a key
+// no other note holds: two notes with one key are both left undelivered. The page's place, or why it can't go there.
+export function pagePlace(rel, { domains, vault, notes }) {
+  const m = rel.match(PAGE_PATH);
+  // path.join takes a backslash as a separator on Windows, so a folder like ..\.. would leave wiki/.
+  if (!m || rel.includes('\\') || rel.split('/').some(s => s === '.' || s === '..')) return { why: PAGE_WHERE };
+  const [, domain, folder, slug] = m;
+  if (!knownDomain(domain) || (!vault && !domains.includes(domain))) return { why: `the page's domain must be ${joinList(domains, 'or')}.` };
+  const key = `${domain}/${slug}`;
+  if (!KEY_RE.test(key)) return { why: 'slug must be lowercase-kebab-case.' };
+  // Every domain, since a page may link a note in any of them. A moved rule keeps its old key, which a page can't take.
+  const taken = readNote(key, notes.filter(n => n.rel.toLowerCase() !== rel.toLowerCase()));
+  if (taken) return { why: `${taken.rel} already exists. Pick another slug, or leave that note to the user.` };
+  return { domain, folder, key };
+}
+
+export function kindProblem(n, { domain, folder }, rel) {
+  const wanted = kindFolder(n);
+  if (wanted ? folder === wanted : KIND_FOLDERS.includes(folder)) return null;
+  return wanted ? `${kindPlace(n, domain)}, not ${rel}.` : PAGE_WHERE;
+}
+
+// A page a project session writes directly is checked as a page offer is, but for its links, which lint reports, and
+// for errors the page had before, which the session didn't make.
+export function pageProblem(rel, was, now, opts) {
+  const place = pagePlace(rel, opts);
+  if (place.why) return place.why;
+  const kind = kindProblem(now, place, rel);
+  if (kind) return kind;
+  const had = was ? noteErrors(was) : [];
+  const err = noteErrors(now).find(e => !had.includes(e));
+  return err ? `${err}.` : null;
+}
 
 const headingLine = l => TOP_HEADING.test(l);
 

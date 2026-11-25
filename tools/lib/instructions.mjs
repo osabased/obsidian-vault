@@ -7,11 +7,12 @@ import { joinList } from './rules.mjs';
 
 const WHEN = 'when the user corrects you or says how they want things, in a way that should hold in later sessions too (a taste or practice rule)';
 
-// Gotchas and page changes are held until the task is done, so the user answers them together at the end. Under off the
-// agent proposes only what the user asks to keep, so it holds nothing. The vault folder writes pages directly, so its
-// note leaves out holding a page change.
+// Gotchas are held until the task is done, so the user answers them together at the end. Under off the agent proposes
+// only what the user asks to keep, so it holds nothing and isn't sent to write pages. The edit hook's refusal tells the
+// agent how a page the user closed changes, so the note leaves that out. The vault folder's instructions say how it
+// writes pages, so its note leaves pages out.
 const HOLD_RULE = "When something only worked after a failure caused by an API, version or tool your training gets wrong, or a dated source shows it, hold a knowledge rule with the vault's `propose` tool and `hold: true`.";
-const HOLD_PAGE = "Hold a page change the same way when a library needs more than a rule's line.";
+const HOLD_PAGE = "Write a vault page directly when a library needs more than a rule's line.";
 const RELEASE = 'When the task is done, call `propose` with `release: true` and end your final reply with what it returns.';
 const HOLD = [HOLD_RULE, HOLD_PAGE, RELEASE].join(' ');
 const VAULT_HOLD = [HOLD_RULE, RELEASE].join(' ');
@@ -71,7 +72,7 @@ export function uncoveredNote({ quiet = false } = {}) {
   return [
     'Vault: this project is in no domain.',
     GLOBAL[proposalMode('global')],
-    ...(proposalMode('global') === 'off' ? [] : ['The same holds for knowledge rules and page changes in this project: hold them as `global` rules with `applies_to` globs, and release them before your final reply.']),
+    ...(proposalMode('global') === 'off' ? [] : ['The same holds for knowledge rules in this project: hold them as `global` rules with `applies_to` globs, and release them before your final reply. Write a page under wiki/global/ directly.']),
     ...(quiet ? [] : [
       "If it holds only for projects like this one, suggest a domain to the user in your reply: a name, a title, and a file here that marks the project's kind.",
       "Once they agree, call the vault's `domain` tool.",

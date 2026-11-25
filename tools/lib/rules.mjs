@@ -738,8 +738,9 @@ const byUser = a => typeof a === 'string' && a.trim().toLowerCase() === 'user';
 export const isUserPage = n => n.type === 'page' && byUser(n.author);
 // Any note marked author: user, as the edit guard reads it; null for a note that doesn't exist yet.
 export const wroteByUser = n => byUser(n?.author);
-// A page the user opened, whose body agents outside the vault folder may write directly. False for no note.
-export const isOpen = n => n?.type === 'page' && n.data?.open === true;
+// A page agents outside the vault folder may write directly: every page but one the user closed. Any value of open but
+// true closes it, so a slip in the user's spelling of false still closes the page. False for no note.
+export const isOpen = n => n?.type === 'page' && (n.data?.open === undefined || n.data.open === true);
 // The edit guard and lint --fix read the file as it is, so any note marked author: user counts, a malformed one too.
 export const authoredByUser = text => byUser(single(parse(text).data.author));
 
@@ -1037,7 +1038,7 @@ function refPages(notes, resolve) {
 function indexLine(n, refs, sources, link) {
   if (n.type === 'page') {
     const [why] = noteErrors(n);
-    return `- ${link(n.key)} · ${kindLabel(n.kind)}${isOpen(n) ? ' · open' : ''}${sources(n)}${why ? ` · not valid: ${why}` : ''} · ${n.summary ? clip(n.summary, 150) : '(no summary)'}`;
+    return `- ${link(n.key)} · ${kindLabel(n.kind)}${isOpen(n) ? '' : ' · closed'}${sources(n)}${why ? ` · not valid: ${why}` : ''} · ${n.summary ? clip(n.summary, 150) : '(no summary)'}`;
   }
   const why = isRetired(n) ? null : undelivered(n);
   const ended = [...(validDay(n.retired) ? [`retired on ${n.retired}`] : []), ...(n.superseded_by ? [`superseded by ${link(n.superseded_by)}`] : [])];
