@@ -358,9 +358,9 @@ test('propose quotes a topic YAML would read as something other than text', t =>
   for (const topic of ['true', '2026']) {
     const v = makeVault(t, { topics: [topic] });
     const sid = sessionId();
-    v.startSession(sid);
+    v.startSession(sid, { transcript: v.transcript(sid, [userTurn('rewrite the screen the way I said')]) });
     const r = v.propose(sid, {
-      domain: 'glim', slug: 'new-rule', topic, basis: 'reading', reading: 'The user rewrote the screen twice.',
+      domain: 'glim', slug: 'new-rule', topic, basis: 'stated', quote: 'rewrite the screen the way I said',
       do: 'Zebra quartz mango.', not: 'Plover lantern ember.', applies_to: ['src/new/**'],
     });
     assert.equal(r.code, 0, `${topic}: ${r.stderr}`);

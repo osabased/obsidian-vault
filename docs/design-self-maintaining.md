@@ -17,7 +17,7 @@ Claims about the code are verified unless marked *(unverified)* or *(inferred)*.
 | A3 | The user approves each rule and each page change: Allow once at a prompt, or a typed code. | §3.1, §3.2 |
 | A4 | A skipped or ignored offer goes to the review queue. So does whatever an unattended run learned (a subagent, `claude -p`, a run left alone), marked as unattended. | §3.3 |
 | A5 | Each library has one entity page that collects its gotchas and versions and links its rules. A comparison page appears when two libraries do the same job. | §3.2 |
-| A6 | A gotcha starts as a rule. The library gets a page once a gotcha needs more than one line of background, or once it has about 3 rules. | §3.2 |
+| A6 | Superseded on 2026-11-25 (§11.29): a gotcha goes on the library's page, and becomes a rule only when missing it would be silent or costly at a set moment. Was: a gotcha starts as a rule, and the library gets a page once a gotcha needs more than one line of background, or once it has about 3 rules. | §3.2 |
 | A7 | A page is built from what happened: the error, the fix that worked and the docs read, with links and dates. Anything else is labelled as the agent's reading. | §3.2 |
 | A8 | Rules that cluster on a topic roll up into a page that explains and links them. Roll-ups are drafted into the queue. | §3.2, §3.7 |
 | A9 | Nothing happens to a rule without the user's click: no new rule, no change, no retirement. | §3.4 |
@@ -351,6 +351,16 @@ The first line says "end your final reply with what it returns". On a client tha
 
 - **Status line, one rule past its version:** "· 1 rule past its version here", the singular of the approved "· 2 rules past their version here".
 
+### 7.4 Rule or page, approved on 2026-11-25 (§11.29)
+
+- **Every start note:** "A rule is only for a silent or costly mistake an agent would make at a set moment unless told, and it needs the user's words, a failure or a dated source." Then, outside the vault folder: "Write the rest worth keeping on a vault page directly, and end your final reply with one line naming any vault pages you wrote or changed.", with "on a page under wiki/global/" in a folder no domain reaches. It replaces "Write a vault page directly when a library needs more than a rule's line." and "Write a page under wiki/global/ directly."
+- **Knowledge half of the domain note:** "When a failure or a dated source shows an API, version or tool your training gets wrong in a way that would be silent or costly, hold a knowledge rule with the vault's `propose` tool and `hold: true`."
+- **`propose` description, prompt client:** "Proposes a vault rule, or evidence for one." then the start note's first sentence, which both share as one constant, then "Under corrections a project session's unheld rule is written at once; else it returns an offer to pass to `keep`, written once the user allows it. Subagents' rules go to the review queue." It leaves out where the rest goes, which the start note and the refusal say, to fit the cap.
+- **`propose` description, code client:** the same up to "else it returns", then "an offer to end your reply with, kept once the user's reply has its code. Subagents' rules go to the review queue." The two come to 386 and 399 of the 400-character cap.
+- **Refusal of a new rule on `reading` or `inferred`:** "basis reading and inferred are for rewording a rule the vault has. A new rule, or evidence for one, needs the user's words (basis stated or pick), a failure or a dated source. Write what you saw or generalized on a vault page instead."
+- **Quote refusals for a new rule** end "write it on a vault page instead" where they said "give your own reading with basis reading instead".
+- **Delivered rule line:** ends "More: <page path>".
+
 ## 8. Unverified claims the design leans on
 
 - Claude Code shows parallel `keep` calls as separate prompts, one after another. *(unverified)*
@@ -407,6 +417,7 @@ The user took every recommended option on 2026-11-03, and then the independent r
 26. **The copy in §7.2:** approved as drafted.
 27. **The code/data split and automatic commits:** dropped on 2026-11-05. The vault is personal, so separating its code from its data isn't worth the split's cost. Without the split, automatic commits would land on the plugin's upstream `main` (§11.17). An independent review then found they add little on their own terms: a note reaches sessions as soon as it is written, committed or not, and an automatic commit in a checkout that concurrent sessions share can take in another session's unfinished work. Phase 5 keeps the status-line counts, which need neither. A12's "commit it" and A14 are not built; the user commits the vault as before. Not chosen: the split with automatic commits in its data repository (§11.8, §11.17); automatic commits on `main` without it.
 28. **A dropped retirement:** decided on 2026-11-05. A rule whose `retire` entry is open or dropped leaves the status line's past-version count and `/lint`'s list. While the entry is open, the queue count alone shows it. A drop is final, even if the project later moves on again; the rule still isn't delivered where its version has moved on. Not chosen: leave out only an open entry, so a dropped rule is counted and drafted again at every `/lint`; after a drop, draft a reword that moves `checked_with` up to the project's version.
+29. **Rule or page:** decided on 2026-11-25, after agents proposed rules where a page did better. A rule is only for a silent or costly mistake an agent would make at a set moment unless told, and not catch in time. It stands on the user's words (`stated`, `pick`), a failure or a dated source; `propose` refuses a new rule, or `repeats` evidence, on `reading` or `inferred`, and rewords still take both, since `/lint` drafts them. A delivered rule ends with `More:` and one page, a page it is drawn from before its topic's page. A session's final reply names the pages it wrote or changed. Under `off`, rules stop and pages don't. The four `reading` rules move into pages and are retired. Supersedes A6.
 
 ## 12. Build order
 

@@ -383,3 +383,16 @@ test('a rule whose retired is not a day is listed as not delivered, and the sess
   const start = v.startSession('9f8e7d6c-0000-4000-8000-000000000005', { cwd: v.project });
   assert.match(start?.hookSpecificOutput?.additionalContext ?? '', /glim\/typo \(retired must be the day/);
 });
+
+test('lint checks what a rule says to sessions only while it is delivered, and checks its record after it is retired', async t => {
+  const v = makeVault(t);
+  const long = `Do the thing ${'very '.repeat(60)}carefully.`;
+  v.write('wiki/glim/rules/live.md', ruleNote({ keywords: ['live'], doLine: long }));
+  v.write('wiki/glim/rules/gone.md', ruleNote({ keywords: ['gone'], doLine: long, extra: ['retired: 2026-11-01', 'superseded_by: glim/nothing-here'] }));
+  const of = async (re, rel) => (await lintFound(v, re)).filter(f => f.file === rel).length;
+  for (const re of [/^empty \*\*Because:\*\*/, /come to \d+ characters/]) {
+    assert.equal(await of(re, 'wiki/glim/rules/live.md'), 1, String(re));
+    assert.equal(await of(re, 'wiki/glim/rules/gone.md'), 0, String(re));
+  }
+  assert.equal(await of(/superseded_by names glim\/nothing-here, which has no note/, 'wiki/glim/rules/gone.md'), 1);
+});

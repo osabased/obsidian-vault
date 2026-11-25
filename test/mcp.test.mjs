@@ -4,7 +4,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { spawn } from 'node:child_process';
 import { pathToFileURL } from 'node:url';
-import { makeVault, cleanEnv, sessionId } from './fixture.mjs';
+import { makeVault, cleanEnv, sessionId, userTurn } from './fixture.mjs';
 import { parse } from '../tools/lib/frontmatter.mjs';
 
 const ROOT = path.resolve(import.meta.dirname, '..');
@@ -321,12 +321,12 @@ test('the server tells the client when .live/current names a new copy', async t 
 test('a propose call through the server writes triggers with backslashes exactly', async t => {
   const v = liveVault(t, { stubs: false });
   const sid = sessionId();
-  v.startSession(sid);
+  v.startSession(sid, { transcript: v.transcript(sid, [userTurn('rewrite the screen the way I said')]) });
   await recorded(v, { call: 'toolu_t1', session: sid, tool: 'propose' });
   const c = await open(t, v, CC);
   const triggers = ['\\bzebra\\b', 'quartz\\\\s'];
   const r = await call(c, 'propose', {
-    domain: 'glim', slug: 'new-rule', kind: 'taste', topic: 'code', basis: 'reading', reading: 'The user rewrote the screen twice.',
+    domain: 'glim', slug: 'new-rule', kind: 'taste', topic: 'code', basis: 'stated', quote: 'rewrite the screen the way I said',
     do: 'Zebra quartz mango.', not: 'Plover lantern ember.', applies_to: ['src/new/**'], triggers,
   }, ccMeta('toolu_t1'));
   assert.equal(r.isError, undefined, textOf(r));
@@ -336,11 +336,11 @@ test('a propose call through the server writes triggers with backslashes exactly
 test("a subagent's propose through the server queues the rule for the user's review and makes no offer", async t => {
   const v = liveVault(t, { stubs: false });
   const sid = sessionId();
-  v.startSession(sid);
+  v.startSession(sid, { transcript: v.transcript(sid, [userTurn('use quartz for the build')]) });
   await recorded(v, { call: 'toolu_q1', session: sid, subagent: 'agent-7', tool: 'propose' });
   const c = await open(t, v, CC);
   const r = await call(c, 'propose', {
-    domain: 'glim', slug: 'sub-rule', kind: 'taste', topic: 'code', basis: 'reading', reading: 'The build failed twice on quartz.',
+    domain: 'glim', slug: 'sub-rule', kind: 'taste', topic: 'code', basis: 'stated', quote: 'use quartz for the build',
     do: 'Zebra quartz mango.', not: 'Plover lantern ember.', applies_to: ['src/sub/**'],
   }, ccMeta('toolu_q1'));
   assert.equal(r.isError, undefined, textOf(r));

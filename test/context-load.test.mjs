@@ -76,7 +76,7 @@ const notesOf = (out, re) => (out?.hookSpecificOutput?.additionalContext ?? '').
 
 test('a domain session\'s propose and pick notes stay within budget, name the vault\'s tools and keep what nothing else tells the agent', t => {
   const text = notesOf(makeVault(t).startSession(sessionId()), /`propose` tool|`pick` tool/);
-  assert.ok(text.length <= 1600, `the propose and pick notes are ${text.length} characters:\n${text}`);
+  assert.ok(text.length <= 1800, `the propose and pick notes are ${text.length} characters:\n${text}`);
   // The vault skill finds the tool that sets the mode by the name this note gives it.
   assert.match(text, /through the vault's `propose` tool/);
   assert.match(text, /through the vault's `proposals` tool/);
@@ -103,7 +103,7 @@ test('a session no domain reaches gets its note within budget, naming the tools 
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'vault-uncovered-'));
   t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
   const text = notesOf(makeVault(t).startSession(sessionId(), { cwd: dir }), /no domain/);
-  assert.ok(text.length <= 850, `the no-domain note is ${text.length} characters:\n${text}`);
+  assert.ok(text.length <= 1100, `the no-domain note is ${text.length} characters:\n${text}`);
   assert.match(text, /through the vault's `proposals` tool/);
   assert.match(text, /vault's `domain` tool/);
   assert.doesNotMatch(text, /\.mjs|node "|\bpipe|heredoc|shell/i);

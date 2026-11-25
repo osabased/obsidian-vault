@@ -349,8 +349,8 @@ test('review status counts a rule as not shown only to the sessions seen after i
   // An Evidence line names its session by the id's first part, so the three differ there.
   const [early, writer, late] = ['e', 'f', 'd'].map(c => sessionId().replace(/^./, c));
   v.startSession(early);
-  v.startSession(writer);
-  const r = v.propose(writer, { domain: 'glim', slug: 'roomy-cards', topic: 'code', basis: 'reading', reading: 'The cards looked cramped', do: 'Zebra quartz cards.', not: 'Plover lantern cards.', applies_to: ['src/**'] });
+  v.startSession(writer, { transcript: v.transcript(writer, [userTurn('give the cards more room')]) });
+  const r = v.propose(writer, { domain: 'glim', slug: 'roomy-cards', topic: 'code', basis: 'stated', quote: 'give the cards more room', do: 'Zebra quartz cards.', not: 'Plover lantern cards.', applies_to: ['src/**'] });
   assert.equal(r.code, 0, r.stderr);
   const settled = new Date(Date.now() - 3600e3);
   fs.utimesSync(v.at('wiki', 'glim', 'rules', 'roomy-cards.md'), settled, settled);

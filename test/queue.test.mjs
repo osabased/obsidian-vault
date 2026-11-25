@@ -219,8 +219,9 @@ test('keep of a queued offer points to its entry, and propose with queued offers
   assert.deepEqual(found, [], 'lint checks the quote against the inbox row of the session it was typed in');
 });
 
-test('(8) queue.mjs draft refuses basis stated, inferred and pick, and writes a drafted entry for reading', async t => {
+test('(8) queue.mjs draft refuses basis stated, inferred and pick, refuses a new rule on reading, and writes a drafted reword on reading', async t => {
   const v = makeVault(t, { config: { proposals: 'ask' } });
+  v.write('wiki/glim/rules/the-thing.md', ruleNote({ keywords: ['thing'] }));
   const sid = sessionId();
   // The transcript holds the quote, so only the basis check can refuse.
   v.startSession(sid, { cwd: v.root, transcript: v.transcript(sid, typed(['call them by their screen'])) });
@@ -230,8 +231,13 @@ test('(8) queue.mjs draft refuses basis stated, inferred and pick, and writes a 
     assert.equal(r.code, 1, r.stdout);
     assert.equal(r.stderr, `Not drafted: a draft takes basis reading, source or failure, so basis ${basis} is refused.\n`);
   }
+  const reading = 'The user renamed three widgets after their screens.';
+  const fresh = v.run('queue.mjs', ['draft'], { input: rule({ basis: 'reading', quote: undefined, reading }), env });
+  assert.equal(fresh.code, 1, fresh.stdout);
+  assert.match(fresh.stderr, /vault page/);
   assert.deepEqual(queueRows(v), []);
-  const ok = v.run('queue.mjs', ['draft'], { input: rule({ basis: 'reading', quote: undefined, reading: 'The user renamed three widgets after their screens.' }), env });
+  const before = v.read('wiki/glim/rules/the-thing.md');
+  const ok = v.run('queue.mjs', ['draft'], { input: JSON.stringify({ change: 'reword', key: 'glim/the-thing', basis: 'reading', reading, do: 'Name each widget after its screen.' }), env });
   assert.equal(ok.code, 0, ok.stderr);
   const [row] = queueRows(v);
   assert.equal(row.why, 'drafted');
@@ -239,7 +245,7 @@ test('(8) queue.mjs draft refuses basis stated, inferred and pick, and writes a 
   assert.equal(row.from, null);
   assert.equal(row.session, sid);
   assert.equal(row.quote, null);
-  assert.ok(!v.exists('wiki/glim/rules/tidy-names.md'));
+  assert.equal(v.read('wiki/glim/rules/the-thing.md'), before);
   assert.deepEqual(await queueLint(v), []);
 });
 

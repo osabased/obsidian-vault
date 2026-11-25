@@ -40,7 +40,7 @@ test('6.3d: a rule-covered file a shell command wrote this turn gets that rule o
   assert.equal(context(out), [
     'Rules apply to a file this turn wrote. Re-read the change against them before you stop.',
     'src/a.zq:',
-    '- glim/zq-trigger: Do: Set values through a named step. Not: Set a value inline. Because: The user traces values by step name.',
+    `- glim/zq-trigger: Do: Set values through a named step. Not: Set a value inline. Because: The user traces values by step name. More: ${v.at('wiki', 'glim', 'topics', 'code.md').replace(/\\/g, '/')}`,
   ].join('\n'));
   assert.equal(stop(v, sid, true), null, 'the next stop passes');
   // Stop shows rules only, so the page on the file still comes up on its first edit.

@@ -42,8 +42,9 @@ function addDomain(v, sid, input) {
   const o = r.code === 0 ? offerOf(r.stdout) : null;
   return o ? keepAllowed(v, sid, o.id, o.text) : r;
 }
+const WIDGETS = 'name widgets after their screen';
 const widgetRule = domain => ({
-  domain, slug: 'name-widgets', topic: 'code', basis: 'reading', reading: 'The user renamed the widgets.',
+  domain, slug: 'name-widgets', topic: 'code', basis: 'stated', quote: WIDGETS,
   do: 'Name widgets after their screen.', not: 'Leave widget names bare.', keywords: ['widgetz'],
 });
 
@@ -88,7 +89,7 @@ test('a prompt in a folder no domain reaches registers its session', t => {
 
 test('a session no domain reaches proposes to global, and another domain is refused with a line naming the domain tool', t => {
   const v = makeVault(t);
-  const { sid } = started(v, folder(t), null);
+  const { sid } = started(v, folder(t), [WIDGETS]);
   const r = v.propose(sid, widgetRule('global'));
   assert.equal(r.code, 0, r.stderr);
   assert.ok(v.exists('wiki/global/rules/name-widgets.md'));
@@ -198,7 +199,7 @@ for (const [kind, before] of [
 test('after a marker write the session proposes for the domain, gets its always rule on the next prompt, and its edits are refused once', t => {
   const v = makeVault(t);
   const dir = folder(t, ['quill.project', 'src/a.txt']);
-  const { sid } = started(v, dir);
+  const { sid } = started(v, dir, ['yes, start a quill domain', 'name steps after their screen']);
   const r = addDomain(v, sid, QUILL);
   assert.equal(r.code, 0, r.stderr);
   assert.match(r.stdout, /quill\.project/);
@@ -206,7 +207,7 @@ test('after a marker write the session proposes for the domain, gets its always 
   assert.match(r.stdout, /the vault's `propose` tool/);
   assert.match(r.stdout, /the vault's `pick` tool/);
   const rule = v.propose(sid, {
-    domain: 'quill', slug: 'name-steps', topic: 'code', basis: 'reading', reading: 'The user renamed the steps.',
+    domain: 'quill', slug: 'name-steps', topic: 'code', basis: 'stated', quote: 'name steps after their screen',
     do: 'Name steps after their screen.', not: 'Leave step names bare.', applies_to: ['src/**/*.txt'],
   });
   assert.equal(rule.code, 0, rule.stderr);
@@ -306,7 +307,7 @@ test('a marker another domain lists is written, and the output names that domain
 test('a session no domain reached at start takes a domain added to the config later, from its next prompt', t => {
   const v = makeVault(t);
   const dir = folder(t, ['zeta.project']);
-  const { sid } = started(v, dir, null);
+  const { sid } = started(v, dir, [WIDGETS]);
   const config = JSON.parse(v.read('vault.config.json'));
   config.domains.zeta = { title: 'Zeta', topics: ['code'], markers: ['zeta.project'] };
   v.write('vault.config.json', JSON.stringify(config, null, 2));

@@ -22,6 +22,9 @@ function started(v, said, { cwd = v.project } = {}) {
   return { sid, out };
 }
 
+// A knowledge rule cites a failure, not the user's words, so it needs no transcript.
+const failed = () => rule({ kind: 'knowledge', basis: 'failure', quote: undefined, error: 'zq: unknown flag --strict', fix: 'pass --mode=strict', file: 'src/build.zq' });
+
 const offered = r => {
   assert.equal(r.code, 0, r.stderr);
   const o = offerOf(r.stdout);
@@ -66,7 +69,7 @@ test('in ask, approved is no field, and a session with no transcript is offered 
   assert.match(r.stderr, /^Not proposed: approved isn't a field propose\.mjs takes\./);
 
   const bare = started(v, null);
-  const o = offered(v.propose(bare.sid, rule({ basis: 'reading', quote: undefined, reading: 'The user renamed the widgets.' })));
+  const o = offered(v.propose(bare.sid, failed()));
   assert.equal(keepAllowed(v, bare.sid, o.id, o.text).code, 0);
   assert.ok(v.exists('wiki/glim/rules/tidy-names.md'));
 });
@@ -93,11 +96,11 @@ test('in off, propose.mjs refuses without asked and shows no rule to offer, and 
 
 test('a domain sets its own mode over the top-level one, and global takes the top-level one', t => {
   const v = vaultIn(t, 'ask', { domains: { glim: { proposals: 'corrections' } } });
-  const { sid, out } = started(v, ['call them by their screen']);
+  const { sid, out } = started(v, ['call them by their screen', 'name gizmos plainly']);
   assert.match(context(out), /glim/);
   assert.equal(v.propose(sid, rule()).code, 0);
   const g = v.propose(sid, rule({
-    domain: 'global', slug: 'plain-gizmos', basis: 'reading', quote: undefined, reading: 'The user named gizmos plainly.',
+    domain: 'global', slug: 'plain-gizmos', quote: 'name gizmos plainly',
     do: 'Call gizmos plainly.', not: 'Dress gizmo names up.', keywords: ['gizmoz'],
   }));
   offered(g);
@@ -144,7 +147,7 @@ test('every project session hears how to change the mode', t => {
 test('proposals.mjs sets the mode from a call the user allowed, keeping the rest of the config as it was', t => {
   const v = vaultIn(t, 'ask');
   const before = v.read('vault.config.json');
-  const { sid } = started(v, ['switch rules to off']);
+  const { sid } = started(v, ['call them by their screen', 'switch rules to off']);
   const refused = v.run('proposals.mjs', [sid], { input: { mode: 'off' } });
   assert.equal(refused.code, 1);
   assert.match(refused.stderr, /allows it at the prompt/);
@@ -157,7 +160,9 @@ test('proposals.mjs sets the mode from a call the user allowed, keeping the rest
   assert.equal(JSON.parse(after).proposals, 'off');
   assert.equal(after.replace('"proposals": "off"', '"proposals": "ask"'), before);
   assert.match(r.stdout, /off/);
-  assert.equal(v.propose(sid, rule({ basis: 'reading', quote: undefined, reading: 'The user renamed the widgets.' })).code, 1);
+  const off = v.propose(sid, rule());
+  assert.equal(off.code, 1);
+  assert.match(off.stderr, /only when the user asks/);
 });
 
 test('proposals.mjs sets one domain\'s mode, and refuses an unknown mode or domain', t => {
@@ -198,7 +203,7 @@ test('in ask, a session whose consent is a code and has no transcript is refused
   const v = vaultIn(t, 'ask', { config: { agents: ['claude-code', 'codex'] } });
   const sid = '019a0fb1-dddd-7000-8000-000000000001';
   v.hook('session-start', codexInput('SessionStart', { session_id: sid, cwd: v.project }), { agent: 'codex' });
-  const r = v.propose(sid, rule({ basis: 'reading', quote: undefined, reading: 'The user renamed the widgets.' }));
+  const r = v.propose(sid, failed());
   assert.equal(r.code, 1);
   assert.match(r.stderr, /no transcript/);
   assert.doesNotMatch(r.stderr, /Keep this rule/);
@@ -215,7 +220,7 @@ test('a session in the vault folder that a domain reaches hears that it offers r
 
 test('a domain session hears to write pages directly, and a session in the vault folder, whose instructions cover pages, does not', t => {
   const v = vaultIn(t, 'ask');
-  const held = /Write a vault page directly when a library needs more than a rule's line\./;
+  const held = /Write the rest worth keeping on a vault page directly/;
   assert.match(context(started(v, ['hi']).out), held);
   v.write('vault.local.json', JSON.stringify({ domains: { glim: { paths: [v.root] } } }));
   const inVault = context(started(v, ['hi'], { cwd: v.root }).out);

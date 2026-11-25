@@ -188,8 +188,8 @@ test('a queued knowledge rule keeps the day its entry was checked as as_of and o
 test('a queued rule entry takes repeats and slug, the fields its refusals name, and no other', t => {
   const v = makeVault(t, { config: { proposals: 'ask' } });
   const a = started(v, ['hello']);
-  const reading = rule({ basis: 'reading', quote: undefined, reading: 'the user renamed widgets by screen' });
-  const d = v.run('queue.mjs', ['draft', a], { input: reading });
+  const failed = (o = {}) => rule({ kind: 'knowledge', basis: 'failure', quote: undefined, error: 'zq: unknown flag --strict', fix: 'pass --mode=strict', file: 'src/build.zq', ...o });
+  const d = v.run('queue.mjs', ['draft', a], { input: failed() });
   const u = /`(u-[0-9a-f]{8})`/.exec(d.stdout)?.[1];
   assert.ok(u, d.stdout + d.stderr);
   v.write('wiki/glim/rules/screen-names.md', ruleNote({ keywords: ['widgetz'], topic: 'code' }));
@@ -200,10 +200,10 @@ test('a queued rule entry takes repeats and slug, the fields its refusals name, 
   assert.deepEqual(offerAt(v, o.id).fields, { queued: u, repeats: 'glim/screen-names' });
   const k = keepAllowed(v, a, o.id, o.text);
   assert.equal(k.code, 0, k.stderr);
-  assert.match(v.read('wiki/glim/rules/screen-names.md'), /the user renamed widgets by screen/);
+  assert.match(v.read('wiki/glim/rules/screen-names.md'), /zq: unknown flag --strict/);
   assert.ok(queueRows(v).some(r => r.decides === u && r.decision === 'kept'));
 
-  const d2 = v.run('queue.mjs', ['draft', a], { input: rule({ slug: 'other-names', topic: 'layout', basis: 'reading', quote: undefined, reading: 'the user lined up every panel', do: 'Line panels up on a grid.', not: 'Place panels freely.', keywords: ['panelz'], applies_to: ['x/**'] }) });
+  const d2 = v.run('queue.mjs', ['draft', a], { input: failed({ slug: 'other-names', topic: 'layout', error: 'zq: panels overlap', fix: 'use grid layout', file: 'src/panels.zq', do: 'Line panels up on a grid.', not: 'Place panels freely.', keywords: ['panelz'], applies_to: ['x/**'] }) });
   const u2 = /`(u-[0-9a-f]{8})`/.exec(d2.stdout)?.[1];
   const o2 = offered(v.propose(a, { queued: u2, slug: 'screen-widget-names' }));
   assert.match(o2.text, /^\*\*Keep this rule\?\*\* glim\/screen-widget-names: /);

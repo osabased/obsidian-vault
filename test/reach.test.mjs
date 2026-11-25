@@ -33,12 +33,12 @@ test('6.1a: a session in an unlisted folder holding a domain\'s marker gets its 
   const v = makeVault(t, { presets: ['glim'] });
   const dir = folder(t, ['glim.project', 'src/x.zq']);
   const sid = sessionId();
-  const start = context(v.startSession(sid, { cwd: dir }));
+  const start = context(v.startSession(sid, { cwd: dir, transcript: v.transcript(sid, [userTurn('name steps after their screen')]) }));
   assert.match(start, /glim\/always-rule: Do: Open each glim file with a purpose line\./);
   assert.match(start, /through the vault's `propose` tool/);
   assert.match(denied(edit(v, sid, '', { abs: path.join(dir, 'src', 'x.zq'), cwd: dir })) ?? '', /glim\/zq-trigger/);
   const r = v.propose(sid, {
-    domain: v.domain, slug: 'name-steps', topic: 'naming', basis: 'reading', reading: 'The user renamed the steps.',
+    domain: v.domain, slug: 'name-steps', topic: 'naming', basis: 'stated', quote: 'name steps after their screen',
     do: 'Name steps after their screen.', not: 'Leave step names bare.', applies_to: ['docs/**/*.md'],
   });
   assert.equal(r.code, 0, r.stderr);
@@ -223,14 +223,14 @@ test('a session in the vault folder takes no domain from a marker inside raw/ref
 
 const reachOf = (v, sid) => JSON.parse(v.read(`.state/sessions/${sid}.json`)).reach;
 const widgetRule = domain => ({
-  domain, slug: 'name-widgets', topic: 'code', basis: 'reading', reading: 'The user renamed the widgets.',
+  domain, slug: 'name-widgets', topic: 'code', basis: 'stated', quote: 'name widgets after their screen',
   do: 'Name widgets after their screen.', not: 'Leave widget names bare.', keywords: ['widgetz'],
 });
 const pickFor = (v, sid, domain) => v.run('pick.mjs', [sid], { input: { subject: 'shop', comment: 'cards breathe', domain } });
-// pick.mjs checks a comment against what the user typed, so each session starts with it typed.
+// pick.mjs and propose.mjs check their words against what the user typed, so each session starts with them typed.
 function typing(v) {
   const start = v.startSession;
-  v.startSession = (sid, o = {}) => start(sid, { transcript: v.transcript(sid, [userTurn('cards breathe')]), ...o });
+  v.startSession = (sid, o = {}) => start(sid, { transcript: v.transcript(sid, [userTurn('cards breathe'), userTurn('name widgets after their screen')]), ...o });
   return v;
 }
 

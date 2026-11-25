@@ -77,7 +77,12 @@ function evidence(f, p) {
   return { kind: 'source', said: quote, date, source: cited, cite: `${cited} · dated ${date} · "${quote}"` };
 }
 
-function checkQuote(session, e, queued) {
+// A new rule stands on the user's words, a failure or a dated source. The agent's own reading or generalization goes on a
+// page, and a reword still takes it, since /lint drafts rewords on its reading of the rule's evidence.
+const ON_A_PAGE = "basis reading and inferred are for rewording a rule the vault has. A new rule, or evidence for one, needs the user's words (basis stated or pick), a failure or a dated source. Write what you saw or generalized on a vault page instead.";
+
+function checkQuote(session, e, queued, newRule = false) {
+  const instead = newRule ? 'write it on a vault page instead' : 'give your own reading with basis reading instead';
   if (e.page) {
     const texts = userPageTexts(e.page);
     if (!texts) refuse(`${e.page} isn't an author: user page. Only a page the user marked author: user holds their words.`);
@@ -87,7 +92,7 @@ function checkQuote(session, e, queued) {
   if (e.kind === 'source') {
     if (!REFS.test(e.source)) return;
     const { texts, why } = quoteTexts(e.source);
-    if (why === 'image') refuse(`${e.source} is an image, and what it shows is your reading. Give it as basis reading instead.`);
+    if (why === 'image') refuse(`${e.source} is an image, and what it shows is your reading, so ${instead}.`);
     if (why) {
       refuse(`${e.source} has no text propose.mjs can read: it isn't UTF-8 and has no derived text. Run node tools/extract.mjs ${e.source}, or save it as UTF-8, then propose again.`);
     }
@@ -99,10 +104,10 @@ function checkQuote(session, e, queued) {
   // The entry kept the words that passed the check when it was made, as an inbox row does once its transcript is gone.
   if (!typed && queued && saidIn(e.said, [queued.quote ?? ''])) return;
   if (!typed) {
-    refuse("the vault has no transcript for this session, so it can't check the quote is the user's words. Give your own reading with basis reading instead.");
+    refuse(`the vault has no transcript for this session, so it can't check the quote is the user's words: ${instead}.`);
   }
   if (!saidIn(e.said, typed)) {
-    refuse("the quote isn't in anything the user typed in this session. Quote their words exactly, leaving words out with … if you need to, or give your own reading with basis reading.");
+    refuse(`the quote isn't in anything the user typed in this session. Quote their words exactly, leaving words out with … if you need to, or ${instead}.`);
   }
 }
 
@@ -862,6 +867,7 @@ export function proposeRule(sid, p, { kept = null, queueAs = null, mainWorktree 
   if (!BASES[f.kind]) refuse(`kind must be ${joinList(RULE_KINDS, 'or')}.`);
   f.topic = line(p, 'topic');
   f.basis = line(p, 'basis');
+  if (['reading', 'inferred'].includes(f.basis)) refuse(ON_A_PAGE);
   if (!BASES[f.kind].includes(f.basis)) refuse(`${wrongBasis(f.kind, f.basis)}.`);
   Object.assign(f, { do: line(p, 'do'), not: line(p, 'not'), because: line(p, 'because', false) });
   Object.assign(f, { applies_to: lines(p, 'applies_to'), triggers: lines(p, 'triggers'), keywords: lines(p, 'keywords') });
@@ -879,7 +885,7 @@ export function proposeRule(sid, p, { kept = null, queueAs = null, mainWorktree 
   f.checked_with = !f.package || f.repeats ? null : f.stored ? f.stored.version : sessionVersion(f.package, f.domain, f.here)?.version ?? null;
   const e = evidence(f, p);
   if (queued && !e.pick) Object.assign(e, { day: queued.checked, session: sessionName(queued.session, queued.agent) });
-  checkQuote(queued ? { agent: queued.agent, transcript: queued.transcript } : session, e, queued);
+  checkQuote(queued ? { agent: queued.agent, transcript: queued.transcript } : session, e, queued, true);
 
   const at = new Date().toISOString();
   Object.assign(f, { day: kept?.day || today(), id: newId('a') });

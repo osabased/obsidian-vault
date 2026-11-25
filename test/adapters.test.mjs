@@ -141,10 +141,10 @@ for (const d of [claudeCode, codex]) {
   });
 
   test(`${d.name}: propose with no session argument uses the session from the agent's session variable`, async t => {
-    const { v, sid } = started(t);
+    const { v, sid } = started(t, (v, sid) => ({ transcript: d.transcript(v, sid, 'rewrite the screen the way I said') }));
     const { sessionVar } = await v.import(`adapters/${d.name}/adapter.mjs`);
     const rule = {
-      domain: 'glim', slug: 'own-session', kind: 'taste', topic: 'naming', basis: 'reading', reading: 'The user rewrote the screen twice.',
+      domain: 'glim', slug: 'own-session', kind: 'taste', topic: 'naming', basis: 'stated', quote: 'rewrite the screen the way I said',
       do: 'Zebra quartz mango.', not: 'Plover lantern ember.', applies_to: ['src/new/**'],
     };
     const r = v.run('propose.mjs', [], { input: rule, env: { [sessionVar]: sid } });
@@ -160,7 +160,7 @@ for (const d of [claudeCode, codex]) {
       d.start(v, sid);
       d.start(v, other);
       const rule = {
-        domain: 'glim', slug: 'not-mine', topic: 'naming', basis: 'reading', reading: 'The user rewrote the screen twice.',
+        domain: 'glim', slug: 'not-mine', topic: 'naming', basis: 'stated', quote: 'rewrite the screen the way I said',
         do: 'Zebra quartz mango.', not: 'Plover lantern ember.', applies_to: ['src/new/**'],
       };
       const r = v.run('propose.mjs', [other], { input: rule, env: { [sessionVar]: sid } });

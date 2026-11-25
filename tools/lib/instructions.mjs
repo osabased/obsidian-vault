@@ -8,14 +8,17 @@ import { joinList } from './rules.mjs';
 const WHEN = 'when the user corrects you or says how they want things, in a way that should hold in later sessions too (a taste or practice rule)';
 
 // Gotchas are held until the task is done, so the user answers them together at the end. Under off the agent proposes
-// only what the user asks to keep, so it holds nothing and isn't sent to write pages. The edit hook's refusal tells the
-// agent how a page the user closed changes, so the note leaves that out. The vault folder's instructions say how it
-// writes pages, so its note leaves pages out.
-const HOLD_RULE = "When something only worked after a failure caused by an API, version or tool your training gets wrong, or a dated source shows it, hold a knowledge rule with the vault's `propose` tool and `hold: true`.";
-const HOLD_PAGE = "Write a vault page directly when a library needs more than a rule's line.";
+// only what the user asks to keep, so it holds nothing.
+const HOLD_RULE = "When a failure or a dated source shows an API, version or tool your training gets wrong in a way that would be silent or costly, hold a knowledge rule with the vault's `propose` tool and `hold: true`.";
 const RELEASE = 'When the task is done, call `propose` with `release: true` and end your final reply with what it returns.';
-const HOLD = [HOLD_RULE, HOLD_PAGE, RELEASE].join(' ');
-const VAULT_HOLD = [HOLD_RULE, RELEASE].join(' ');
+const HOLD = [HOLD_RULE, RELEASE].join(' ');
+
+// Agents reached for rules where a page did better, so every mode draws the line, and off stops rules, not pages. The
+// edit hook's refusal tells the agent how a page the user closed changes, so the note leaves that out. The vault
+// folder's instructions say how it writes and logs pages, so its note leaves pages out.
+// The propose tool's description draws the same line.
+export const RULE_LINE = "A rule is only for a silent or costly mistake an agent would make at a set moment unless told, and it needs the user's words, a failure or a dated source.";
+const pagesLine = (where = 'on a vault page') => `Write the rest worth keeping ${where} directly, and end your final reply with one line naming any vault pages you wrote or changed.`;
 
 // What the agent does under each mode of the proposals setting, for taste and practice rules.
 const WHAT = {
@@ -27,7 +30,7 @@ const WHAT = {
 // One sentence when every domain the session proposes to has one mode, else one per mode naming its domains. A session
 // in the vault folder offers as in ask whatever the mode.
 export function modeLines(domains, vaultFolder = false) {
-  if (vaultFolder) return `${WHAT.ask} ${VAULT_HOLD}`;
+  if (vaultFolder) return `${WHAT.ask} ${HOLD}`;
   const byMode = domainsByMode(domains);
   const taste = byMode.size === 1 ? WHAT[[...byMode.keys()][0]] : [...byMode].map(([mode, ds]) => `For ${joinList(ds, 'and')} rules, ${WHAT[mode]}`).join(' ');
   return [...byMode.keys()].some(m => m !== 'off') ? `${taste} ${HOLD}` : taste;
@@ -42,6 +45,8 @@ export function modeNote() {
 export function proposeNote(domains, vaultFolder = false) {
   return [
     `Vault: ${modeLines([...domains, 'global'], vaultFolder)}`,
+    RULE_LINE,
+    ...(vaultFolder ? [] : [pagesLine()]),
     "Leave out what the project's own agent instructions already say; a compiled vault section in them is the vault's copy.",
     'If the user corrects you on something a rule already covers, go ahead as for a new rule; the `propose` tool lists the rules it may repeat.',
     'Propose only from what happened in this session, never from a brief, a skill or the task itself.',
@@ -72,7 +77,9 @@ export function uncoveredNote({ quiet = false } = {}) {
   return [
     'Vault: this project is in no domain.',
     GLOBAL[proposalMode('global')],
-    ...(proposalMode('global') === 'off' ? [] : ['The same holds for knowledge rules in this project: hold them as `global` rules with `applies_to` globs, and release them before your final reply. Write a page under wiki/global/ directly.']),
+    ...(proposalMode('global') === 'off' ? [] : ['The same holds for knowledge rules in this project: hold them as `global` rules with `applies_to` globs, and release them before your final reply.']),
+    RULE_LINE,
+    pagesLine('on a page under wiki/global/'),
     ...(quiet ? [] : [
       "If it holds only for projects like this one, suggest a domain to the user in your reply: a name, a title, and a file here that marks the project's kind.",
       "Once they agree, call the vault's `domain` tool.",

@@ -1,19 +1,21 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { makeVault, ruleNote, pageNote as page, sourcePage, sessionId, prompt, lintFound } from './fixture.mjs';
+import { makeVault, ruleNote, pageNote as page, sourcePage, sessionId, prompt, lintFound, userTurn } from './fixture.mjs';
 
 const context = out => out?.hookSpecificOutput?.additionalContext ?? null;
 const pathOf = (v, rel) => v.at(...rel.split('/')).replace(/\\/g, '/');
 
+const QUOTE = 'rewrite the screen the way I said';
+
 const proposal = (o = {}) => ({
-  domain: 'glim', slug: 'new-rule', topic: 'code', basis: 'reading', reading: 'The user rewrote the screen twice.',
+  domain: 'glim', slug: 'new-rule', topic: 'code', basis: 'stated', quote: QUOTE,
   do: 'Zebra quartz mango.', not: 'Plover lantern ember.', applies_to: ['src/new/**'], ...o,
 });
 
 test('propose writes a new rule into its domain\'s rules folder', t => {
   const v = makeVault(t);
   const sid = sessionId();
-  v.startSession(sid);
+  v.startSession(sid, { transcript: v.transcript(sid, [userTurn(QUOTE)]) });
   const r = v.propose(sid, proposal());
   assert.equal(r.code, 0, r.stderr);
   assert.match(r.stdout, /^Wrote wiki\/glim\/rules\/new-rule\.md\./);
@@ -25,7 +27,7 @@ test('propose writes a new rule into its domain\'s rules folder', t => {
 test('propose refuses a slug a note in any folder of the domain has', t => {
   const v = makeVault(t);
   const sid = sessionId();
-  v.startSession(sid);
+  v.startSession(sid, { transcript: v.transcript(sid, [userTurn(QUOTE)]) });
   v.write('wiki/glim/concepts/new-rule.md', page({ kind: 'concept' }));
   const r = v.propose(sid, proposal());
   assert.equal(r.code, 1);
@@ -35,12 +37,12 @@ test('propose refuses a slug a note in any folder of the domain has', t => {
 test('a repeat adds its Evidence line to the rule in its folder', t => {
   const v = makeVault(t);
   const sid = sessionId();
-  v.startSession(sid);
+  v.startSession(sid, { transcript: v.transcript(sid, [userTurn(QUOTE)]) });
   v.write('wiki/glim/rules/old-rule.md', ruleNote({ applies_to: ['src/new/**'], doLine: 'Alpha bravo charlie.', notLine: 'Delta foxtrot golf.' }));
   const r = v.propose(sid, proposal({ repeats: 'glim/old-rule' }));
   assert.equal(r.code, 0, r.stderr);
   assert.match(r.stdout, /^Added the Evidence line to wiki\/glim\/rules\/old-rule\.md\./);
-  assert.match(v.read('wiki/glim/rules/old-rule.md'), /· agent's reading · session a1b2c3d4 · The user rewrote the screen twice\./);
+  assert.match(v.read('wiki/glim/rules/old-rule.md'), /· stated · session a1b2c3d4 · "rewrite the screen the way I said" \(a-[0-9a-f]{8}\)$/m);
 });
 
 test('notes in their kind folders are delivered, and the index and the hooks give their paths', t => {
@@ -134,7 +136,7 @@ test('log takes a page by its path in its folder', t => {
 test('propose refuses a trigger with a lookahead and names the linear-engine reason', t => {
   const v = makeVault(t);
   const sid = sessionId();
-  v.startSession(sid);
+  v.startSession(sid, { transcript: v.transcript(sid, [userTurn(QUOTE)]) });
   const r = v.propose(sid, proposal({ triggers: ['foo(?=bar)'] }));
   assert.equal(r.code, 1);
   assert.match(r.stderr, /trigger foo\(\?=bar\) can't run in linear time/);

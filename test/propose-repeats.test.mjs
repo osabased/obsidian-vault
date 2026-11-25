@@ -8,7 +8,9 @@ import { setField, parse } from '../tools/lib/frontmatter.mjs';
 import { sessionVar } from '../tools/adapters/claude-code/adapter.mjs';
 import { codexInput } from './codex.mjs';
 
-function setup(t, { quote } = {}) {
+const QUOTE = 'rewrite the screen the way I said';
+
+function setup(t, { quote = QUOTE } = {}) {
   const v = makeVault(t);
   const sid = sessionId();
   v.startSession(sid, quote ? { transcript: v.transcript(sid, [userTurn(quote)]) } : {});
@@ -16,7 +18,7 @@ function setup(t, { quote } = {}) {
 }
 
 const proposal = (o = {}) => ({
-  domain: 'glim', slug: 'new-rule', kind: 'taste', topic: 'code', basis: 'reading', reading: 'The user rewrote the screen twice.',
+  domain: 'glim', slug: 'new-rule', kind: 'taste', topic: 'code', basis: 'stated', quote: QUOTE,
   do: 'Zebra quartz mango.', not: 'Plover lantern ember.', applies_to: ['src/new/**'], ...o,
 });
 const inbox = v => fs.readdirSync(v.at('raw', 'inbox')).flatMap(f => v.read(`raw/inbox/${f}`).trim().split('\n').map(l => JSON.parse(l)));
@@ -29,15 +31,15 @@ test('a rule alone goes straight through and lands in the inbox', t => {
   assert.match(r.stdout, /\*\*New rule\*\* glim\/new-rule: Do: Zebra quartz mango\. Not: Plover lantern ember\./);
   assert.match(r.stdout, /It applies from now on\./);
   assert.ok(v.exists('wiki/glim/rules/new-rule.md'));
-  assert.match(v.read('wiki/glim/rules/new-rule.md'), /· agent's reading · session a1b2c3d4 · The user rewrote the screen twice\. \(a-[0-9a-f]{8}\)/);
+  assert.match(v.read('wiki/glim/rules/new-rule.md'), /· stated · session a1b2c3d4 · "rewrite the screen the way I said" \(a-[0-9a-f]{8}\)/);
   const files = fs.readdirSync(v.at('raw', 'inbox'));
   assert.equal(files.length, 1);
   assert.match(files[0], /^\d{4}-\d\d-\d\d-a1b2c3d4\.jsonl$/);
   const [row] = inbox(v);
   assert.match(row.id, /^a-[0-9a-f]{8}$/);
   assert.equal(row.source, 'agent');
-  assert.equal(row.kind, 'reading');
-  assert.equal(row.text, 'The user rewrote the screen twice.');
+  assert.equal(row.kind, 'stated');
+  assert.equal(row.text, QUOTE);
   assert.equal(row.note, 'glim/new-rule');
   assert.equal(row.session, sid);
   assert.equal(row.domain, 'glim');
@@ -116,7 +118,7 @@ test('repeats adds an Evidence line to the named note instead of writing a new o
   const evidence = note.split('## Evidence\n')[1].trim().split('\n');
   assert.equal(evidence.length, 2);
   assert.match(evidence[0], /do the thing/);
-  assert.match(evidence[1], /· agent's reading · session a1b2c3d4 · The user rewrote the screen twice\. \(a-[0-9a-f]{8}\)$/);
+  assert.match(evidence[1], /· stated · session a1b2c3d4 · "rewrite the screen the way I said" \(a-[0-9a-f]{8}\)$/);
   const [row] = inbox(v);
   assert.equal(row.note, 'glim/old-rule');
   assert.match(v.read('log.md'), /added evidence to glim\/old-rule · session a1b2c3d4/);
@@ -216,7 +218,7 @@ test('repeats naming a rule that is not delivered is refused', t => {
 test('the same stated words back two rules: refused once, then through', t => {
   const quote = 'always use flat buttons';
   const { v, sid } = setup(t, { quote });
-  const stated = o => proposal({ basis: 'stated', quote, reading: undefined, ...o });
+  const stated = o => proposal({ quote, ...o });
   assert.equal(v.propose(sid, stated({ slug: 'first-rule' })).code, 0);
   const second = stated({ slug: 'second-rule', applies_to: ['src/other/**'], do: 'Hotel india juliet.', not: 'Kilo lima mike.', topic: 'layout' });
   const r = v.propose(sid, second);

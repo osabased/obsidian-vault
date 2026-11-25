@@ -10,7 +10,8 @@ import { parsePatch, applyChunks } from '../tools/adapters/codex/patch.mjs';
 const SCHEMAS = path.join(import.meta.dirname, 'fixtures', 'codex', 'schema');
 const EVENTS = { SessionStart: 'session-start', UserPromptSubmit: 'user-prompt-submit', PreToolUse: 'pre-tool-use', SubagentStart: 'subagent-start', Stop: 'stop' };
 const schema = (event, side) => JSON.parse(fs.readFileSync(path.join(SCHEMAS, `${EVENTS[event]}.command.${side}.schema.json`), 'utf8'));
-const ZQ_LINE = '- glim/zq-trigger: Do: Set values through a named step. Not: Set a value inline. Because: The user traces values by step name.';
+// The glim preset's topic page links its rules, so the rule points to it.
+const zqLine = v => `- glim/zq-trigger: Do: Set values through a named step. Not: Set a value inline. Because: The user traces values by step name. More: ${v.at('wiki', 'glim', 'topics', 'code.md').replace(/\\/g, '/')}`;
 const LEAD = 'Rules apply to a file this turn wrote. Re-read the change against them before you stop.';
 
 // The JSON Schema keys the copied schemas use: type, const, enum, required, properties, additionalProperties, $ref into
@@ -197,7 +198,7 @@ test('Stop continues the turn with decision block, and the continuation is neith
   fs.writeFileSync(path.join(v.project, 'src', 'a.zq'), 'set x to 1\n');
   const r = run(v, 'stop', codexInput('Stop', { session_id: sid, cwd: v.project }));
   assert.equal(r.code, 0, r.stderr);
-  const reason = [LEAD, 'src/a.zq:', ZQ_LINE].join('\n');
+  const reason = [LEAD, 'src/a.zq:', zqLine(v)].join('\n');
   assert.equal(r.stdout, `{"decision":"block","reason":${JSON.stringify(reason)}}`);
   const turn = () => v.read(`.state/turns/${sid}/started.json`);
   const stamped = turn();

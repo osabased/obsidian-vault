@@ -1,5 +1,6 @@
 import { domainTopics, maxChars } from './lib/rules.mjs';
 import { proposeRule } from './lib/propose-rule.mjs';
+import { RULE_LINE } from './lib/instructions.mjs';
 import { UsageError, readInput, failure, renderHelp, schemaOf, schemaArg } from './lib/input.mjs';
 import { currentSession } from './lib/agents.mjs';
 import { readCall } from './lib/calls.mjs';
@@ -23,9 +24,9 @@ const fields = () => [
   { name: 'topic', type: S, help: ["a short topic; reuse one the domain's rules or pages have, or one of its listed topics:", ...topicLines()] },
   { name: 'basis', type: S, enum: ['stated', 'inferred', 'pick', 'reading', 'failure', 'source'], help: ['and what to cite for it, written into the note as given:'] },
   row('stated', ["the user's words state the rule. quote: their words, as they typed them in this session", 'page: instead of a session, the vault path of a page of the user\'s own, one with author: user,', 'like wiki/<domain>/<folder>/<slug>.md. quote: their words on that page; propose.mjs refuses one it', "doesn't hold. The page's frontmatter and its ## Agent notes aren't the user's words."], 2),
-  row('inferred', ['taste and practice only: you generalized a correction. quote: the words you generalized, as the user typed them', 'A quote may leave words out with …; propose.mjs refuses one the user never typed in this session.'], 2),
+  row('inferred', ['rewords only, taste and practice: you generalized a correction. quote: the words you generalized, as the user typed them', 'A quote may leave words out with …; propose.mjs refuses one the user never typed in this session.'], 2),
   row('pick', ["taste and practice only: the user's recorded answer from an earlier session backs the rule.", 'pick: the id of a row in raw/picks/ (q-).', "The row's own words are cited; a row backs one rule. A provisional, replaced or confirmed pick backs none."], 2),
-  row('reading', ['taste and practice only: your own reading of what you saw, labelled as yours. reading: what you saw, in one line'], 2),
+  row('reading', ['rewords only, taste and practice: your own reading of what you saw, labelled as yours. reading: what you saw, in one line'], 2),
   row('failure', ['knowledge only: something worked only after a failure.', 'error: one line of the error as it was printed', 'fix: what fixed it, in one line', 'file: the file you fixed, from the project root'], 2),
   row('source', ['knowledge only: a dated source shows it.', 'source: its URL, or a file under raw/refs/', 'source_date: when the source was published or last updated, as YYYY-MM-DD', "quote: the source's words; propose.mjs refuses one a text file under raw/refs/ doesn't hold"], 2),
   ...['quote', 'page', 'pick', 'reading', 'error', 'fix', 'file', 'source', 'source_date'].map(name => ({ name, type: S, describe: 'see basis' })),
@@ -52,9 +53,11 @@ const help = () => renderHelp([RUN, '', 'rule.json is an object with these field
   "A knowledge rule's as_of is set for you: the source_date for a source, the day it was first proposed otherwise. With repeats, it moves up when that day is later.",
 ], 13);
 
+// The line between a rule and a page leads, so a session that never read its start note still meets it.
+const HEAD = `Proposes a vault rule, or evidence for one. ${RULE_LINE} Under corrections a project session's unheld rule is written at once; else it returns`;
 const SUMMARY = {
-  prompt: "Proposes a taste, practice or knowledge rule to the vault, or new evidence for a rule it has. Under corrections a project session's unheld rule is written at once; anything else returns an offer to pass to `keep`, and nothing is written until the user allows it. A subagent's proposals go to the review queue.",
-  code: "Proposes a taste, practice or knowledge rule to the vault, or new evidence for a rule it has. Under corrections a project session's unheld rule is written at once; anything else returns an offer to end your reply with, which `keep` writes once the user's next message has its code. A subagent's proposals go to the review queue.",
+  prompt: `${HEAD} an offer to pass to \`keep\`, written once the user allows it. Subagents' rules go to the review queue.`,
+  code: `${HEAD} an offer to end your reply with, kept once the user's reply has its code. Subagents' rules go to the review queue.`,
 };
 
 const args = process.argv.slice(2);

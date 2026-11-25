@@ -170,7 +170,7 @@ test('a page that is not author: user, or is not there, is refused', t => {
 
 test('page is for basis stated only', t => {
   const v = proposer(t);
-  const r = v.propose(SID, rule({ basis: 'reading', reading: 'The user likes cards.' }));
+  const r = v.propose(SID, rule({ basis: 'pick', pick: 'q-1a2b3c4d' }));
   assert.equal(r.code, 1);
   assert.match(r.stderr, /page is only for basis stated/);
 });

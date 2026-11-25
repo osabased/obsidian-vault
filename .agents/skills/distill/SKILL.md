@@ -17,10 +17,10 @@ Turn what this session learned into vault knowledge a later session can use. The
 
    Leave out what mattered only to this task, and the story of the task. If the session was compacted, its summary is all you see of the part before: distill what you can see, and keep a list of what the summary mentions too thinly to write. Spend nothing to recover it.
 2. **Check the vault.** For each lesson, read the vault's `index.md` and call the vault's `search` tool with its words, then read the notes that come up. A lesson a note already states is covered.
-3. **Route** each lesson to one place:
-   - a preference or correction of the user's: a taste or practice rule, quoting their words;
-   - a fix, or a dated source's fact your training gets wrong: a knowledge rule, basis `failure` or `source`;
-   - understanding, and the background a rule's one line leaves out: a page. Extend the page on its subject if there is one, or start a concept, entity or synthesis page, one subject to a page;
+3. **Route** each lesson to one place. Most lessons are pages: a rule is only for a silent or costly mistake an agent would make at a set moment unless told, and it needs the user's words, a failure or a dated source.
+   - a preference or correction of the user's that an agent would breach unless told: a taste or practice rule, quoting their words;
+   - a fix, or a dated source's fact your training gets wrong, where getting it wrong would be silent or costly: a knowledge rule, basis `failure` or `source`;
+   - understanding, what you saw or generalized, and the background a rule's one line leaves out: a page. Extend the page on its subject if there is one, or start a concept, entity or synthesis page, one subject to a page;
    - steps an agent follows: the skill they belong in;
    - a fact about this project, such as how it builds or where its files live: the session's auto memory, or a line for the project's `CLAUDE.md`;
    - friction with the tools or the workflow: name it in your report;

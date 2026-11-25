@@ -236,19 +236,19 @@ export const prompt = (v, sid, text,{ cwd = v.project } = {}) => v.hook('prompt'
 // Rules on three topics that share no words, globs or keywords with each other or the perf notes, so proposing them at
 // once fails only if the proposes race.
 export const unrelatedRules = (domain, tag) => [
-  { topic: 'naming', reading: 'The user renamed the shop widgets after their screen.', do: 'Name widgets with a screen prefix.', not: 'Leave widget names bare.' },
-  { topic: 'errors', reading: 'The user asked for quieter save failures.', do: 'Retry a failed save twice before showing a toast.', not: 'Show the toast on the first failure.' },
-  { topic: 'docs', reading: 'The user put a purpose line atop each file.', do: 'Open each file with a one-line purpose comment.', not: 'Start a file straight with its imports.' },
-].map((r, i) => ({ domain, slug: `${tag}-${i}`, basis: 'reading', applies_to: [`src/${tag}-${i}/**/*.txt`], ...r }));
+  { topic: 'naming', quote: 'name the shop widgets after their screen', do: 'Name widgets with a screen prefix.', not: 'Leave widget names bare.' },
+  { topic: 'errors', quote: 'make save failures quieter', do: 'Retry a failed save twice before showing a toast.', not: 'Show the toast on the first failure.' },
+  { topic: 'docs', quote: 'put a purpose line atop each file', do: 'Open each file with a one-line purpose comment.', not: 'Start a file straight with its imports.' },
+].map((r, i) => ({ domain, slug: `${tag}-${i}`, basis: 'stated', applies_to: [`src/${tag}-${i}/**/*.txt`], ...r }));
 
 // propose.mjs needs a new rule's kind; most tests are about something else, so their rules are taste rules unless they say.
 export const withKind = input => (input && typeof input === 'object' && !Array.isArray(input) && Object.hasOwn(input, 'slug') && !Object.hasOwn(input, 'kind') && !Object.hasOwn(input, 'queued') ? { ...input, kind: 'taste' } : input);
 
 // Every session starts before the first propose, so the proposes overlap.
 export function proposeAtOnce(v, rules, { timeout } = {}) {
-  const sids = rules.map(() => {
+  const sids = rules.map(rule => {
     const sid = sessionId();
-    v.startSession(sid);
+    v.startSession(sid, { transcript: v.transcript(sid, [userTurn(rule.quote)]) });
     return sid;
   });
   return Promise.all(rules.map((rule, i) => v.runAsync('propose.mjs', [sids[i]], { input: withKind(rule), timeout })));

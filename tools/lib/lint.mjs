@@ -111,8 +111,11 @@ export function lint(notes = loadNotes(), chains = sourceChains()) {
     else if (n.superseded_by && !keys.has(n.superseded_by)) add('error', n.rel, `superseded_by names ${n.superseded_by}, which has no note`);
     if (n.data.status !== undefined) add('warn', n.rel, 'status does nothing. To stop a rule, delete its note or set superseded_by');
     if (n.data.replaces !== undefined) add('warn', n.rel, 'replaces does nothing. Set superseded_by on the note it replaces instead');
+    // A retired rule reaches no session, so only the checks above, on its record, still apply to it.
+    if (isRetired(n)) continue;
+
     if (!n.because) add('warn', n.rel, 'empty **Because:**');
-    if (!isRetired(n) && !n.topic) add('warn', n.rel, 'no topic. Give it a short one, so the repeat check lists it with the rules on its topic');
+    if (!n.topic) add('warn', n.rel, 'no topic. Give it a short one, so the repeat check lists it with the rules on its topic');
     if (n.do && n.not && ruleText(n).length > maxChars(n.kind)) {
       add('warn', n.rel, `${ruleTextParts(n)} come to ${ruleText(n).length} characters; the hooks cut them at ${maxChars(n.kind)}`);
     }
@@ -120,7 +123,7 @@ export function lint(notes = loadNotes(), chains = sourceChains()) {
     if (n.do && n.not && n.always && n.kind === 'knowledge' && ruleText(n).length > delivery.maxRuleChars) {
       add('warn', n.rel, `always: true loads this rule at every session start, and its ${ruleTextParts(n)} come to ${ruleText(n).length} characters, over the ${delivery.maxRuleChars} a taste or practice rule may have. Shorten it, or give it keywords instead`);
     }
-    if (n.kind === 'knowledge' && !isRetired(n) && validDay(n.as_of)) {
+    if (n.kind === 'knowledge' && validDay(n.as_of)) {
       const checked = lastChecked(n);
       const from = checked && checked > n.as_of ? checked : n.as_of;
       const days = daysBetween(from);

@@ -394,6 +394,7 @@ export function domainTopics(notes = loadNotes()) {
 // The rules in the vault, read from the notes as they are now.
 export function liveRules(notes = loadNotes()) {
   const rules = {};
+  const pageOf = morePages(notes);
   for (const n of notes.filter(isLive)) {
     const text = ruleText(n);
     rules[n.key] = {
@@ -401,10 +402,28 @@ export function liveRules(notes = loadNotes()) {
       // Only the delivered wording counts, so an edit to a rule's evidence or globs doesn't deliver it again.
       hash: shortHash(text),
       kind: n.kind, always: n.always, applies_to: n.applies_to, triggers: n.triggers, keywords: n.keywords, tools: n.tools,
-      requires: n.requires, package: n.package, checked_with: n.checked_with, contentHash: n.contentHash,
+      requires: n.requires, package: n.package, checked_with: n.checked_with, contentHash: n.contentHash, page: pageOf(n),
     };
   }
   return rules;
+}
+
+// The one page a delivered rule points to for more: a page it is drawn from, linked either way, before its topic's page.
+function morePages(notes) {
+  const pages = notes.filter(n => n.type === 'page' && !n.superseded_by && !undelivered(n));
+  if (!pages.length) return () => null;
+  const byKey = new Map(pages.map(p => [p.key, p]));
+  const refs = refPages(notes, resolver(notes));
+  const topicPage = new Map();
+  for (const p of pages.filter(isTopicPage).sort((a, b) => cmp(a.key, b.key))) {
+    const at = `${p.domain}\n${normTopic(p.topic)}`;
+    if (!topicPage.has(at)) topicPage.set(at, p);
+  }
+  return n => {
+    const drawn = [...(refs.get(n.key) ?? [])].map(k => byKey.get(k)).filter(Boolean)
+      .sort((a, b) => (a.kind === 'topic') - (b.kind === 'topic') || cmp(a.key, b.key));
+    return (drawn[0] ?? topicPage.get(`${n.domain}\n${normTopic(n.topic)}`))?.rel ?? null;
+  };
 }
 
 // Obsidian saves a note every few seconds while the user types, so a note waits rather than reach sessions half-written,
@@ -565,7 +584,8 @@ export const maxChars = kind => (kind === 'knowledge' ? config().delivery.maxKno
 // The labels deliverable gave a note, after its clipped text, so a cut never drops one.
 const labelled = x => (x.labels ?? []).map(l => ` · ${l}`).join('');
 
-export const ruleLine = (k, r) => `- ${k}: ${clip(r.text, maxChars(r.kind))}${labelled(r)}`;
+// more: false leaves out the page, where the line goes beyond this machine or the user reads it in Obsidian.
+export const ruleLine = (k, r, more = true) => `- ${k}: ${clip(r.text, maxChars(r.kind))}${labelled(r)}${more && r.page ? ` More: ${toPosix(vaultPath(...r.page.split('/')))}` : ''}`;
 
 // For a rule a refusal has no room to show in full: enough to tell whether to open the note.
 export const rulePointer = (k, r) => `- ${k}: ${clip(r.text, 70)}${labelled(r)} ${toPosix(vaultPath(...r.rel.split('/')))}`;
@@ -683,7 +703,7 @@ export function renderActive(rules) {
   const entries = alwaysEntries(rules);
   if (!entries.length) out.push('', 'None yet.');
   for (const d of domainOrder(entries.map(([, r]) => r.domain))) {
-    out.push('', `## ${d} · ${domainTitle(d)}`, '', ...entries.filter(([, r]) => r.domain === d).map(([k, r]) => ruleLine(k, r)));
+    out.push('', `## ${d} · ${domainTitle(d)}`, '', ...entries.filter(([, r]) => r.domain === d).map(([k, r]) => ruleLine(k, r, false)));
   }
   return `${out.join('\n')}\n`;
 }

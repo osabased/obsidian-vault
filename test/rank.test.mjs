@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { makeVault, ruleNote, sessionId, sectionOf } from './fixture.mjs';
+import { makeVault, ruleNote, sessionId, sectionOf, userTurn } from './fixture.mjs';
 
 const fact = (topic, asOf) => ruleNote({ topic, kind: 'knowledge', basis: 'source', extra: [`as_of: ${asOf}`], applies_to: [`src/${topic}/**`] });
 
@@ -34,15 +34,16 @@ test('review status ranks each pair of rules whose globs overlap', t => {
 test('propose ranks the new rule against the rules whose globs it overlaps', t => {
   const v = makeVault(t);
   const sid = sessionId();
-  v.startSession(sid);
-  v.write('wiki/glim/rules/said.md', ruleNote({ applies_to: ['src/new/**'] }));
+  v.startSession(sid, { transcript: v.transcript(sid, [userTurn('zebra quartz mango, every time')]) });
+  const twice = ['- 2026-10-01 · stated · session 1a2b3c4d · "do the thing" (a-00000001)', '- 2026-10-02 · stated · session 1a2b3c4e · "do the thing again" (a-00000002)'];
+  v.write('wiki/glim/rules/said.md', ruleNote({ applies_to: ['src/new/**'], evidence: twice }));
   v.write('wiki/glim/rules/read.md', ruleNote({ basis: 'reading', applies_to: ['src/new/*.zq'], doLine: 'Other thing.', notLine: 'Other skip.' }));
   const proposal = {
-    domain: 'glim', slug: 'new-rule', topic: 'code', basis: 'reading', reading: 'The user rewrote the screen twice.',
+    domain: 'glim', slug: 'new-rule', topic: 'code', basis: 'stated', quote: 'zebra quartz mango, every time',
     do: 'Zebra quartz mango.', not: 'Plover lantern ember.', applies_to: ['src/new/**'],
   };
   assert.match(v.propose(sid, proposal).stderr, /may repeat rules already in the vault/);
   const r = v.propose(sid, proposal);
   assert.equal(r.code, 0, r.stderr);
-  assert.match(r.stdout, /^Wrote wiki\/glim\/rules\/new-rule\.md\. On code, glim\/read and glim\/said cover files this rule covers too\. Check the new rule doesn't contradict them\. If one does, show the user both with the higher-ranked first: glim\/new-rule ranks before glim\/read \(evidence from \d{4}-\d\d-\d\d over 2026-10-01\); glim\/said ranks before glim\/new-rule \(basis stated over reading\)\. End your reply/);
+  assert.match(r.stdout, /^Wrote wiki\/glim\/rules\/new-rule\.md\. On code, glim\/read and glim\/said cover files this rule covers too\. Check the new rule doesn't contradict them\. If one does, show the user both with the higher-ranked first: glim\/new-rule ranks before glim\/read \(basis stated over reading\); glim\/said ranks before glim\/new-rule \(2 Evidence lines to 1\)\. End your reply/);
 });

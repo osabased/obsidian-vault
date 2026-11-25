@@ -3,7 +3,7 @@ import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { makeVault, sessionId, denied, editFile, ledgerEdit, prompt, ruleNote, withFields, LEDGER_GUIDE, sha256, sectionOf, keepAllowed, offerOf } from './fixture.mjs';
+import { makeVault, sessionId, denied, editFile, ledgerEdit, prompt, ruleNote, withFields, LEDGER_GUIDE, sha256, sectionOf, keepAllowed, offerOf, userTurn } from './fixture.mjs';
 import { compareSemver, inRange, fitOf } from '../tools/lib/versions.mjs';
 
 const V2 = /almanac\/ledger-v2: Do: Call openLedger with the path\./;
@@ -58,8 +58,8 @@ test('with no lockfile both rules are delivered, labelled version unknown', t =>
   const sid = sessionId();
   v.startSession(sid, { cwd: v.projects.almanac });
   const refusal = ledgerEdit(v, sid);
-  assert.match(lineOf(refusal, 'almanac/ledger-v2'), / · version unknown$/);
-  assert.match(lineOf(refusal, 'almanac/ledger-v3'), / · version unknown$/);
+  assert.match(lineOf(refusal, 'almanac/ledger-v2'), / · version unknown(?: More: \S+\.md)?$/);
+  assert.match(lineOf(refusal, 'almanac/ledger-v3'), / · version unknown(?: More: \S+\.md)?$/);
 });
 
 test('a lockfile changed to 3.1.0 delivers the v3 rule instead', t => {
@@ -89,8 +89,8 @@ test("a lockfile at a monorepo's root serves its packages, and the search stops 
   assert.match(a, V2);
   assert.doesNotMatch(a, /almanac\/ledger-v3|version unknown/);
   const b = ledgerEdit(v, sid, path.join(root, 'packages', 'b'));
-  assert.match(lineOf(b, 'almanac/ledger-v2'), / · version unknown$/);
-  assert.match(lineOf(b, 'almanac/ledger-v3'), / · version unknown$/);
+  assert.match(lineOf(b, 'almanac/ledger-v2'), / · version unknown(?: More: \S+\.md)?$/);
+  assert.match(lineOf(b, 'almanac/ledger-v3'), / · version unknown(?: More: \S+\.md)?$/);
 });
 
 test('a reader that throws gives version unknown and logs one error for the lockfile', t => {
@@ -114,8 +114,8 @@ test('a reader that throws gives version unknown and logs one error for the lock
   };
   for (let i = 0; i < 3; i++) {
     const refusal = edit(sessionId());
-    assert.match(lineOf(refusal, 'almanac/ledger-v2'), / · version unknown$/);
-    assert.match(lineOf(refusal, 'almanac/ledger-v3'), / · version unknown$/);
+    assert.match(lineOf(refusal, 'almanac/ledger-v2'), / · version unknown(?: More: \S+\.md)?$/);
+    assert.match(lineOf(refusal, 'almanac/ledger-v3'), / · version unknown(?: More: \S+\.md)?$/);
   }
   assert.equal(log().split('reader fixture on ').length - 1, 1, log());
   assert.match(log(), /the lockfile is torn/);
@@ -166,7 +166,7 @@ test('a source changed since the note labels it while the note text is unchanged
   assert.doesNotMatch(before, /source changed on/);
   hand();
   const after = lineOf(context(prompt(v, sid, 'and openLedger again?', { cwd })), 'almanac/ledger-v2');
-  assert.match(after, /Call openLedger with the path\..* · source changed on 2026-11-01$/, 'the label shows the rule again in the same session');
+  assert.match(after, /Call openLedger with the path\..* · source changed on 2026-11-01(?: More: \S+\.md)?$/, 'the label shows the rule again in the same session');
   assert.equal(context(prompt(v, sid, 'openLedger once more', { cwd })), '', 'the labelled rule is marked like any other');
 
   // A save that only moves the note's mtime, as a sync or a checkout does, keeps the label.
@@ -175,7 +175,7 @@ test('a source changed since the note labels it while the note text is unchanged
   const moved = sessionId();
   v.startSession(moved, { cwd });
   const retimed = lineOf(context(prompt(v, moved, 'openLedger?', { cwd })), 'almanac/ledger-v2');
-  assert.match(retimed, /Call openLedger with the path\..* · source changed on 2026-11-01$/, 'a save with the same text kept the label');
+  assert.match(retimed, /Call openLedger with the path\..* · source changed on 2026-11-01(?: More: \S+\.md)?$/, 'a save with the same text kept the label');
 
   // An edit drops the label before any build. The session starts first, since a session start builds and the build
   // rewrites derived.json, and the entry then holds the text from before the edit.
@@ -266,11 +266,11 @@ test('propose writes a taste rule and builds though a reader is gone, since only
   const v = makeVault(t, { presets: ['almanac'] });
   const cwd = v.projects.almanac;
   const sid = sessionId();
-  v.startSession(sid, { cwd });
+  v.startSession(sid, { cwd, transcript: v.transcript(sid, [userTurn('rewrite it as zebra quartz mango')]) });
   fs.rmSync(v.at('tools', 'ext', 'readers', 'fixture.mjs'));
   const propose = () => v.run('propose.mjs', [sid], {
     cwd,
-    input: JSON.stringify({ domain: 'almanac', slug: 'zz-new', kind: 'taste', topic: 'ledger', basis: 'reading', reading: 'The user rewrote it.', do: 'Zebra quartz mango.', not: 'Plover lantern ember.', applies_to: ['src/**'] }),
+    input: JSON.stringify({ domain: 'almanac', slug: 'zz-new', kind: 'taste', topic: 'ledger', basis: 'stated', quote: 'rewrite it as zebra quartz mango', do: 'Zebra quartz mango.', not: 'Plover lantern ember.', applies_to: ['src/**'] }),
   });
   // The first call lists the ledger rules it may repeat and refuses once; the second writes the note.
   const first = propose();
@@ -313,7 +313,7 @@ test('a newer copy with no fetched day labels the rule source changed, as review
   const cwd = v.projects.almanac;
   const sid = sessionId();
   v.startSession(sid, { cwd });
-  assert.match(lineOf(ledgerEdit(v, sid), 'almanac/ledger-v2'), / · source changed$/);
+  assert.match(lineOf(ledgerEdit(v, sid), 'almanac/ledger-v2'), / · source changed(?: More: \S+\.md)?$/);
   assert.match(v.run('review.mjs', ['status'], { cwd }).stdout, /^- almanac\/ledger-v2: since \(no date\)/m);
 });
 
@@ -355,7 +355,7 @@ test("a rule no reader reads the package of is delivered labelled version unknow
   checkedRule(v, 'ledger-other', { checked: '1.4.0', pkg: 'elsewhere, name: pkg', doLine: 'Close the other ledger zz.' });
   checkedRule(v, 'ledger-pinned', { checked: '1.4.0', doLine: 'Pin the ledger zz.', extra: [REQUIRES] });
   const refusal = deliveredAt(v, almanacAt(t, '2.4.0'));
-  assert.match(lineOf(refusal, 'almanac/ledger-other'), / · version unknown$/);
+  assert.match(lineOf(refusal, 'almanac/ledger-other'), / · version unknown(?: More: \S+\.md)?$/);
   assert.match(lineOf(refusal, 'almanac/ledger-pinned'), /Pin the ledger zz./, 'requires matches 2.4.0, so checked_with 1.4.0 is not read');
 });
 
@@ -397,7 +397,7 @@ test('propose with package records checked_with from the lockfile, or says versi
   assert.doesNotMatch(v.read('wiki/almanac/rules/ledger-gone.md'), /checked_with/);
   assert.match(u.stdout, /fixture\/nope: version unknown/);
   assert.match(run(rule({ slug: 'ledger-bad', package: 'pkg' })).stderr, /package must be ecosystem\/name/);
-  assert.match(run(rule({ slug: 'ledger-taste', kind: 'taste', basis: 'reading', reading: 'Seen.', package: 'fixture/pkg' })).stderr, /package is for knowledge rules/);
+  assert.match(run(rule({ slug: 'ledger-taste', kind: 'taste', basis: 'stated', quote: 'Seen.', package: 'fixture/pkg' })).stderr, /package is for knowledge rules/);
 });
 
 test('review status says no readers are set, then lists a rule with no checked_with and one a project has moved past', t => {
@@ -600,7 +600,7 @@ test('outside any repository, a lockfile above the session folder is not its pro
   const cwd = path.join(above, 'app');
   fs.mkdirSync(cwd);
   const refusal = deliveredAt(v, cwd);
-  assert.match(lineOf(refusal, 'global/ledger-old'), /Open the old ledger zz\..* · version unknown$/, refusal);
+  assert.match(lineOf(refusal, 'global/ledger-old'), /Open the old ledger zz\..* · version unknown(?: More: \S+\.md)?$/, refusal);
 });
 
 test("outside any repository, a lockfile above a domain's project is not its own", t => {
@@ -609,7 +609,7 @@ test("outside any repository, a lockfile above a domain's project is not its own
   const sid = sessionId();
   v.startSession(sid, { cwd: root });
   const app = ledgerEdit(v, sid, path.join(root, 'app'));
-  assert.match(lineOf(app, 'almanac/ledger-v2'), / · version unknown$/, app);
+  assert.match(lineOf(app, 'almanac/ledger-v2'), / · version unknown(?: More: \S+\.md)?$/, app);
 });
 
 test("a rule's package name is read trimmed when its version is checked", t => {

@@ -102,10 +102,14 @@ test('text blocks of a user message count', t => {
   assert.equal(v.propose(SID, rule({ quote: 'scripts in strict mode' })).code, 0);
 });
 
+// A new rule can't stand on basis inferred, so a reword carries it.
 test('an inferred quote is checked too', t => {
-  const v = session(t, [userTurn('no, that one should be strict')]);
-  notTyped(v.propose(SID, rule({ basis: 'inferred', quote: 'every script should be strict' })));
-  assert.equal(v.propose(SID, rule({ basis: 'inferred', quote: 'that one should be strict' })).code, 0);
+  const v = makeVault(t);
+  v.write('wiki/glim/rules/the-thing.md', ruleNote({ keywords: ['thing'] }));
+  v.startSession(SID, { transcript: v.transcript(SID, [userTurn('no, that one should be strict')]) });
+  const reword = quote => v.propose(SID, { change: 'reword', key: 'glim/the-thing', basis: 'inferred', quote, do: 'Make each script strict.' });
+  notTyped(reword('every script should be strict'));
+  assert.equal(reword('that one should be strict').code, 0);
 });
 
 test('a session with no transcript cannot back a stated rule', t => {
@@ -126,8 +130,11 @@ test('a session whose transcript can\'t be read cannot back a stated rule', t =>
 });
 
 test('a reading needs no transcript', t => {
-  const v = session(t, null);
-  assert.equal(v.propose(SID, rule({ basis: 'reading', reading: 'the UI files all open with a purpose line' })).code, 0);
+  const v = makeVault(t);
+  v.write('wiki/glim/rules/the-thing.md', ruleNote({ keywords: ['thing'] }));
+  v.startSession(SID);
+  const r = v.propose(SID, { change: 'reword', key: 'glim/the-thing', basis: 'reading', reading: 'the UI files all open with a purpose line', do: 'Open each file with a purpose line.' });
+  assert.equal(r.code, 0, r.stderr);
 });
 
 const knowledge = (source, quote, extra = {}) => rule({ kind: 'knowledge', basis: 'source', source, source_date: '2026-10-01', quote, ...extra });
@@ -180,7 +187,7 @@ test('a binary source is checked against its derived text', t => {
   v.write('raw/refs/shot.png', Buffer.from([0x89, 0x50, 0x4e, 0x47, 0, 0, 0, 0]));
   const image = v.propose(SID, knowledge('raw/refs/shot.png', 'what the image shows'));
   assert.equal(image.code, 1);
-  assert.match(image.stderr, /raw\/refs\/shot\.png is an image, and what it shows is your reading\. Give it as basis reading instead\./);
+  assert.match(image.stderr, /raw\/refs\/shot\.png is an image, and what it shows is your reading, so write it on a vault page instead\./);
   const spec = Buffer.from([...Buffer.from('%PDF-1.7\n'), 0xe2, 0x28, 0xa1, 0xff, 0xfe, 0x9c]);
   v.write('raw/refs/spec.pdf', spec);
   const pdf = (quote, slug, doLine, notLine) => v.propose(SID, knowledge('raw/refs/spec.pdf', quote, { slug, topic: slug, do: doLine, not: notLine, applies_to: [`docs/${slug}/**`] }));

@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { makeVault, sessionId, denied } from './fixture.mjs';
+import { makeVault, sessionId, denied, userTurn } from './fixture.mjs';
 import { codexInput, codexRollout, hookPrompt } from './codex.mjs';
 
 const AGENTS = [
@@ -87,9 +87,9 @@ test('a second keep after one the user allowed is denied as spent, not as denied
 test('a keep of a held offer is denied before it is recorded, so the offer keeps its one keep for after release', t => {
   const v = makeVault(t, { config: { proposals: 'ask' } });
   const sid = sessionId();
-  v.startSession(sid);
+  v.startSession(sid, { transcript: v.transcript(sid, [userTurn('name widgets after their screen')]) });
   const r = v.propose(sid, {
-    domain: 'glim', slug: 'held-one', topic: 'code', basis: 'reading', reading: 'The user renamed three widgets after their screens.',
+    domain: 'glim', slug: 'held-one', topic: 'code', basis: 'stated', quote: 'name widgets after their screen',
     do: 'Name widgets after their screen.', not: 'Leave widget names bare.', keywords: ['widgetz'], hold: true,
   });
   const id = /^Held `(o-[0-9a-f]{8})`/.exec(r.stdout)?.[1];

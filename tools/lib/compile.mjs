@@ -39,7 +39,7 @@ export function sectionsFor(root, { hits, domains }, notes) {
   const under = d => (d === 'global' ? [''] : rootsUnder(root, hits, d));
   const group = (map, id, entry, key, line) => map.set(id, { ...entry, rules: [...(map.get(id)?.rules ?? []), [key, line]] });
   for (const [key, r] of Object.entries(rules)) {
-    const line = ruleLine(key, r);
+    const line = ruleLine(key, r, false);
     if (r.always) {
       always.push([key, line]);
       continue;

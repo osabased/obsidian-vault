@@ -4,7 +4,7 @@ import path from 'node:path';
 import { createHash } from 'node:crypto';
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { makeVault, ruleNote } from './fixture.mjs';
+import { makeVault, ruleNote, pageNote } from './fixture.mjs';
 
 const END = '<!-- vault: end -->';
 const beginLine = hash => `<!-- vault: begin ${hash} · written by node tools/compile.mjs, which refuses to rewrite it once it is edited by hand -->`;
@@ -65,6 +65,14 @@ test('compile writes the project\'s AGENTS.md section byte for byte: always rule
   const got = fs.readFileSync(agentsOf(v), 'utf8');
   assert.equal(got, SECTION);
   assert.match(got, /^<!-- vault: begin [0-9a-f]{16} · /);
+});
+
+// The section goes to other machines and repos, where the vault's paths lead nowhere.
+test('compile leaves out the page a delivered rule points to', t => {
+  const v = glimVault(t);
+  v.write('wiki/glim/topics/code.md', pageNote({ body: ['What the vault holds on code.', '', '## Rules', '- [[wiki/glim/rules/keyword-rule|keyword-rule]]'] }));
+  assert.equal(compile(v).code, 0);
+  assert.equal(fs.readFileSync(agentsOf(v), 'utf8'), SECTION);
 });
 
 test('a project\'s own CRLF AGENTS.md keeps every other byte and its line endings, and the section follows a blank line', t => {
