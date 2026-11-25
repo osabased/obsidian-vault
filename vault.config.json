@@ -1,5 +1,11 @@
 {
-  "domains": {},
+  "domains": {
+    "roblox-games": {
+      "title": "Roblox games",
+      "topics": ["ui", "vfx", "animation"],
+      "markers": ["default.project.json"]
+    }
+  },
   "delivery": {
     "maxRulesPerEdit": 3,
     "maxRuleChars": 300,
@@ -15,5 +21,14 @@
   "lint": {
     "remindAfterDays": 14,
     "remindAfterNotes": 10
+  },
+  "privacy": {
+    "allow": [
+      "bee8e84426316e3f",
+      "bb45261c96784215",
+      "8af61cb22708793c",
+      "424c37f5bb1b1871",
+      "838e3ffd4e5944e2"
+    ]
   }
 }

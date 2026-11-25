@@ -39,6 +39,15 @@ test('an unterminated quote is reported, and the lines after it still parse, a l
   assert.deepEqual(parse(front(['a: 1'])).errors, []);
 });
 
+test('a plain value holding ": " is reported, since Obsidian rejects the whole block, and a quoted one or a URL is not', () => {
+  const r = parse(front(['summary: How to choose: compare them', 'topic: design']));
+  assert.equal(r.errors.length, 1);
+  assert.match(r.errors[0], /^summary: the value on line 2 holds ": "/);
+  assert.equal(r.data.topic, 'design');
+  assert.match(parse(front(['summary: ends with a colon:'])).errors.join(), /^summary: /);
+  assert.deepEqual(parse(front(["summary: 'How to choose: compare'", 'url: https://a.b/c', 'at: 12:30', 'note: a # b: c'])).errors, []);
+});
+
 // A value continues only onto lines indented past its parent, so a quote left open never takes the keys below it.
 const reads = (lines, want, errors = []) => {
   const r = parse(front(lines));

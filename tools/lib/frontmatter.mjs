@@ -266,6 +266,11 @@ function scan(lines, from, to, errors = []) {
       }
     } else {
       row = plainFold(line, i, to, parent, s, v);
+      // YAML reads a second ": " in a plain value as a mapping where none may start, and Obsidian then shows the whole
+      // frontmatter as text, though this reader keeps the value.
+      if (h.key !== undefined && /:(?:\s|$)/.test(row.text.slice(s.length - v.length).replace(/\s#.*$/s, ''))) {
+        errors.push(`${h.key}: the value on line ${i + 1} holds ": " or ends in ":", which YAML and Obsidian can't read unquoted. Put it in single quotes`);
+      }
     }
     out.push(row);
     i += row.n - 1;
