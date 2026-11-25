@@ -2,14 +2,14 @@ import fs from 'node:fs';
 import { config, domainsFor, vaultRel, vaultOwn, toPosix, cwdOf, shortHash, plainText, readJsonSafe, safeId, inVaultFolder } from '../vault.mjs';
 import { routesOf, routesFor } from '../reach.mjs';
 import {
-  loadNotesAsync, settledNotes, liveRules, livePages, deliverable, deliveryFor, byFit, ruleLine, rulePointer, pageLine, fitContext, cmp, clip, QUOTED, isMap, wroteByUser, isOpen,
+  loadNotes, loadNotesAsync, settledNotes, liveRules, livePages, deliverable, deliveryFor, byFit, ruleLine, rulePointer, pageLine, fitContext, cmp, clip, QUOTED, isMap, wroteByUser, isOpen,
 } from '../rules.mjs';
-import { usersOwn, userNoteGuard, ruleChange, changeOf, frontmatter } from '../note-guards.mjs';
+import { usersOwn, userNoteGuard, ruleChange, changeOf, frontmatter, pageProblem } from '../note-guards.mjs';
 import { matchTarget, targetNames, specificity, bySpecificity } from '../glob.mjs';
 import { matcher, fileScope, fires, dueRules, gatedFile } from '../scope.mjs';
 import { extension } from '../ext.mjs';
 import { rootOutside } from '../versions.mjs';
-import { mark, marked, markMany, markShown, markPages, duePages, agentKey, keyHash, sessionHits, turnStart, registry } from '../sessions.mjs';
+import { mark, marked, markMany, markShown, markPages, duePages, agentKey, keyHash, sessionHits, turnStart, registry, proposeDomains } from '../sessions.mjs';
 
 function vaultGuard(rel, file, cwd, inVault) {
   if (!vaultOwn(rel)) return null;
@@ -46,30 +46,36 @@ function change(event, file, cwd, rel) {
 
 const wikiNote = rel => rel !== null && /^wiki\/.+\.md$/i.test(rel);
 
-// Only the user opens a page, so an edit from any session that adds an `open` key, whatever its case or value, is
-// refused. Keys are counted as lines, since the parsed frontmatter keeps only the last of two `open` keys.
-const OPEN_KEY = /^open[ \t]*:(?:[ \t]|$)/gim;
-const openKeys = (text, note) => (text === null || !note ? 0 : frontmatter(text, note).match(OPEN_KEY)?.length ?? 0);
+// Only the user opens and closes a page, so an edit from any session that adds, changes or removes an `open` line, in any
+// case or spelling, is refused. Lines are compared rather than values, since the parsed frontmatter keeps only the last
+// of two `open` keys.
+const OPEN_LINE = /^open[ \t]*:(?:[ \t].*)?$/gim;
+const openLines = (text, note) => (text === null || !note ? '' : (frontmatter(text, note).match(OPEN_LINE) ?? []).map(l => l.trim()).sort().join('\n'));
 
 function openSet(rel, c) {
-  if (!c || c.after === null) return null;
-  if (openKeys(c.after, c.now) <= openKeys(c.before, c.was) && (isOpen(c.was) || !isOpen(c.now))) return null;
-  return `${rel} would have open set in its frontmatter. The user sets open themselves; the agent proposes it through the vault's \`propose\` tool with \`page\` and \`text\`.`;
+  if (!c || c.after === null || openLines(c.after, c.now) === openLines(c.before, c.was)) return null;
+  return `${rel} would change open in its frontmatter. The user opens and closes pages themselves; the agent proposes it through the vault's \`propose\` tool with \`page\` and \`text\`.`;
 }
 
-// An open page takes body edits from a project session. Its frontmatter, which decides where the page reaches and that
-// it stays open, is the user's, so it must parse and stay byte for byte as it was; a delete or a move fails that too.
-function openPageGuard(rel, { before, after, was, now }) {
-  if (after === null) return `\`${rel}\` is an open page, but this edit can't be followed to check that it changes only the body. Write the page's whole new text instead.`;
-  if (was.ok && now.ok && frontmatter(before, was) === frontmatter(after, now)) return null;
-  return `\`${rel}\` is an open page. Outside the vault folder, its body may be edited directly, but its frontmatter stays as it is and the page stays where it is. Change only the body; a frontmatter change goes through the vault's \`propose\` tool with \`page\` and \`text\`, so the user agrees to it.`;
+// A page a project session writes must stay a page, in a domain the session reaches, checked as a page offer is. A delete
+// or a move leaves no page where one was, and the wiki isn't in git, so both are left to the user.
+function pageGuard(rel, c, event, cwd) {
+  if (!c || c.after === null) return `\`${rel}\` is a vault page, but this edit can't be followed to check it. Write the page's whole new text instead.`;
+  if (c.now.type !== 'page') {
+    return c.was
+      ? `\`${rel}\` would no longer be a vault page. Outside the vault folder, a page stays a page where it is: change its text, and leave deleting or moving it to the user.`
+      : `\`${rel}\` would not be a vault page. A note under wiki/ needs a page's frontmatter: type: page, its domain, kind, topic and summary.`;
+  }
+  const domains = [...proposeDomains(readJsonSafe(registry(safeId(event.session))) ?? { cwd }), 'global'];
+  const why = pageProblem(rel, c.was, c.now, { domains, vault: false, notes: loadNotes() });
+  return why && `\`${rel}\` can't be written from this session: ${why}`;
 }
 
-// A project session changes the wiki only through offers the user agrees to, except the body of a page the user opened.
-// Any note whose frontmatter says `type: rule` is live, so the result is judged, not the folder. In the vault folder
-// too, a rule changes only through an offer the user agrees to, so a retry gets the same answer. The user's own edits in
-// Obsidian reach no hook.
-function wikiGuard(rel, c, inVault) {
+// A project session writes pages directly, but for one the user closed with `open: false`, and changes rules only
+// through offers the user agrees to. Any note whose frontmatter says `type: rule` is live, so the result is judged, not
+// the folder. In the vault folder too, a rule changes only through an offer the user agrees to, so a retry gets the same
+// answer. The user's own edits in Obsidian reach no hook.
+function wikiGuard(rel, c, inVault, event, cwd) {
   // A note that exists but can't be read may be a rule, so the vault folder refuses it as one rather than let it through.
   const kind = c ? ruleChange(rel, c) : inVault ? 'changed' : null;
   if (inVault) {
@@ -83,8 +89,12 @@ function wikiGuard(rel, c, inVault) {
   }
   const opening = openSet(rel, c);
   if (opening) return opening;
-  if (isOpen(c?.was)) return openPageGuard(rel, c);
-  return `\`${rel}\` is a vault page. Outside the vault folder, pages change only through the vault's \`propose\` tool with \`page\` and \`text\`, so the user agrees to each change.`;
+  if (c?.was && !isOpen(c.was)) {
+    return c.was.type === 'page'
+      ? `\`${rel}\` is a vault page the user closed with \`open: false\`. Outside the vault folder, it changes only through the vault's \`propose\` tool with \`page\` and \`text\`, so the user agrees to each change.`
+      : `\`${rel}\` is neither a vault page nor a rule, so outside the vault folder it is left to the user.`;
+  }
+  return pageGuard(rel, c, event, cwd);
 }
 
 // Fences are kept: a quote the user wrote inside one is still theirs.
@@ -95,7 +105,7 @@ const PAGE_KEEPS = 0.7;
 
 // Notes are rewritten in place, so an edit that drops the user's words or most of a page is more likely a slip than a
 // choice. The same edit sent again goes through, for when the user asked for it.
-function noteGuard(event, rel, c) {
+function noteGuard(event, rel, c, inVault) {
   if (!c) return null;
   const { before, after, was, now } = c;
   // The agent refuses an edit it can't apply before the hook runs, so one the guard can't follow still applies. A tool
@@ -109,8 +119,10 @@ function noteGuard(event, rel, c) {
   const lost = quotedLines(was).filter(l => !kept.has(l));
   const why = [];
   if (lost.length) {
-    why.push(`This edit removes the user's words or a rule's evidence from ${rel}:`, ...lost.slice(0, 3).map(l => `  ${clip(l, 160)}`));
-    why.push('Lines under ## You said and ## Evidence stay as written. Add a line instead.');
+    const lines = [`This edit removes the user's words or a rule's evidence from ${rel}:`, ...lost.slice(0, 3).map(l => `  ${clip(l, 160)}`)];
+    // A project session gets no retry: the user agrees to losing their words through a page offer, which shows the diff.
+    if (!inVault) return [...lines, "Lines under ## You said and ## Evidence stay as written. Outside the vault folder, a change that drops them goes through the vault's `propose` tool with `page` and `text`, so the user agrees to it."].join('\n');
+    why.push(...lines, 'Lines under ## You said and ## Evidence stay as written. Add a line instead.');
   }
   if (was.type === 'page') {
     const ratio = after.trim().length / Math.max(1, before.trim().length);
@@ -120,11 +132,12 @@ function noteGuard(event, rel, c) {
   return [...why, 'If the user asked for this, retry the same edit. The retry is allowed.'].join('\n');
 }
 
-// A project session reaches noteGuard only with a body edit to an open page, so noteGuard judges those as it judges
+// A project session reaches noteGuard only with a write to a page it may write, so noteGuard judges those as it judges
 // edits made from the vault folder.
 function wikiNoteGuards(event, rel, file, cwd) {
   const c = change(event, file, cwd, rel);
-  return wikiGuard(rel, c, vaultSession(event, cwd)) ?? noteGuard(event, rel, c);
+  const inVault = vaultSession(event, cwd);
+  return wikiGuard(rel, c, inVault, event, cwd) ?? noteGuard(event, rel, c, inVault);
 }
 
 // A tool that edits something other than files is gated once config maps it to a namespace, naming the fields of its

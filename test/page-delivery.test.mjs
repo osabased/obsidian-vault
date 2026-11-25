@@ -153,11 +153,14 @@ test('lint takes open as true or false on a page, and reports any other value, o
   ]);
 });
 
-test("index.md labels an open page's line open, and the hook's pointer line to it stays as it was", async t => {
+test("index.md labels a closed page's line closed and an open one's not at all, and the hook's pointer line stays as it was", async t => {
   const v = makeVault(t);
-  v.write('wiki/glim/zq-types.md', pushed({ keywords: ['strict mode'], summary: "'How the checker treats strict mode'", extra: ['open: true'] }));
+  v.write('wiki/glim/zq-types.md', pushed({ keywords: ['strict mode'], summary: "'How the checker treats strict mode'", extra: ['open: false'] }));
+  v.write('wiki/glim/zq-forms.md', pushed({ keywords: ['form fields'], summary: "'How forms lay out'" }));
   const rules = await v.import('lib/rules.mjs');
-  assert.match(rules.renderIndex(rules.loadNotes()), /^- \[\[wiki\/glim\/zq-types\|zq-types\]\] · concept page · open · no sources · /m);
+  const index = rules.renderIndex(rules.loadNotes());
+  assert.match(index, /^- \[\[wiki\/glim\/zq-types\|zq-types\]\] · concept page · closed · no sources · /m);
+  assert.match(index, /^- \[\[wiki\/glim\/zq-forms\|zq-forms\]\] · concept page · no sources · /m);
   assert.equal(context(prompt(v, sessionId(), 'turn on strict mode here')), [
     'Vault pages on this request. Read the ones that bear on it:',
     `- glim/zq-types (concept page): How the checker treats strict mode. ${pathOf(v, 'glim/zq-types')}`,

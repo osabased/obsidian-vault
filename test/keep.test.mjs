@@ -430,60 +430,64 @@ test('a page change keeps the byte order mark of the page it changes', t => {
 const opened = (text, value = 'true') => text.replace('updated: 2026-10-01\n', `updated: 2026-10-01\nopen: ${value}\n`);
 const OPENS = ' · opens it: agents may then write this page without asking';
 
-test('a page offer that adds open: true names the opening in its head line, to a new page and to an existing one, and keep writes it', t => {
+test('a page offer that takes open: false off a page names the opening in its head line, and keep writes it', t => {
   const v = makeVault(t, { config: { proposals: 'ask' } });
   const sid = started(v);
-  const o = offered(v.propose(sid, { page: ENTITY_REL, text: opened(entityPage()) }));
-  assert.ok(o.text.startsWith(`**Keep this page change?** ${ENTITY_REL} · new${OPENS}\n`), o.text);
-  assert.equal(keepAllowed(v, sid, o.id, o.text).code, 0);
-  assert.equal(v.read(ENTITY_REL).replace(/\r\n/g, '\n'), opened(entityPage()));
-  const other = 'wiki/glim/entities/zq-other.md';
-  v.write(other, entityPage());
-  const c = offered(v.propose(sid, { page: other, text: opened(entityPage()) }));
-  assert.ok(c.text.startsWith(`**Keep this page change?** ${other} · change${OPENS}\n`), c.text);
-  assert.equal(keepAllowed(v, sid, c.id, c.text).code, 0);
-  assert.equal(v.read(other).replace(/\r\n/g, '\n'), opened(entityPage()));
+  for (const [rel, text] of [[ENTITY_REL, entityPage()], ['wiki/glim/entities/zq-other.md', opened(entityPage())]]) {
+    v.write(rel, opened(entityPage(), 'false'));
+    const o = offered(v.propose(sid, { page: rel, text }));
+    assert.ok(o.text.startsWith(`**Keep this page change?** ${rel} · change${OPENS}\n`), o.text);
+    assert.equal(keepAllowed(v, sid, o.id, o.text).code, 0);
+    assert.equal(v.read(rel).replace(/\r\n/g, '\n'), text);
+  }
 });
 
-test('a page offer names no opening when the page is open already or the text sets open: false', t => {
+test('a page offer names no opening for a new page, a page that is open already, or a text that keeps open: false', t => {
   const v = makeVault(t, { config: { proposals: 'ask' } });
-  v.write(ENTITY_REL, opened(entityPage()));
+  v.write(ENTITY_REL, entityPage());
   const sid = started(v);
-  const o = offered(v.propose(sid, { page: ENTITY_REL, text: opened(entityPage('Zq-lib parses screens and themes.')) }));
+  const o = offered(v.propose(sid, { page: ENTITY_REL, text: entityPage('Zq-lib parses screens and themes.') }));
   assert.ok(o.text.startsWith(`**Keep this page change?** ${ENTITY_REL} · change\n`), o.text);
+  const fresh = 'wiki/glim/entities/zq-fresh.md';
+  const n = offered(v.propose(sid, { page: fresh, text: entityPage() }));
+  assert.ok(n.text.startsWith(`**Keep this page change?** ${fresh} · new\n`), n.text);
   const shut = 'wiki/glim/entities/zq-shut.md';
   const f = offered(v.propose(sid, { page: shut, text: opened(entityPage(), 'false') }));
   assert.ok(f.text.startsWith(`**Keep this page change?** ${shut} · new\n`), f.text);
+  v.write(shut, opened(entityPage(), 'false'));
+  const s = offered(v.propose(sid, { page: shut, text: opened(entityPage('Zq-lib parses screens and themes.'), 'false') }));
+  assert.ok(s.text.startsWith(`**Keep this page change?** ${shut} · change\n`), s.text);
 });
 
 test('a held page offer that opens a page names the opening when released', t => {
   const v = makeVault(t);
+  v.write(ENTITY_REL, opened(entityPage(), 'false'));
   const sid = started(v);
-  v.propose(sid, { page: ENTITY_REL, text: opened(entityPage()), hold: true });
+  v.propose(sid, { page: ENTITY_REL, text: entityPage(), hold: true });
   const out = v.propose(sid, { release: true });
   assert.equal(out.code, 0, out.stderr);
   const o = offerOf(out.stdout.slice(out.stdout.indexOf('Offered')));
-  assert.ok(o.text.startsWith(`**Keep this page change?** ${ENTITY_REL} · new${OPENS}\n`), o.text);
+  assert.ok(o.text.startsWith(`**Keep this page change?** ${ENTITY_REL} · change${OPENS}\n`), o.text);
 });
 
-test('an agent writing an open page directly makes an offer on that page made before it stale', t => {
+test('an agent writing a page directly makes an offer on that page made before it stale', t => {
   const v = makeVault(t, { config: { proposals: 'ask' } });
-  v.write(ENTITY_REL, opened(entityPage()));
+  v.write(ENTITY_REL, entityPage());
   const sid = started(v);
-  const o = offered(v.propose(sid, { page: ENTITY_REL, text: entityPage() }));
+  const o = offered(v.propose(sid, { page: ENTITY_REL, text: entityPage('Zq-lib parses screens and fonts.') }));
   const free = { old_string: 'Zq-lib parses screens.', new_string: 'Zq-lib parses screens and themes.' };
   assert.equal(denied(editVault(v, sid, ENTITY_REL, 'Edit', free, v.project)), null, 'the free write is allowed');
-  v.write(ENTITY_REL, opened(entityPage('Zq-lib parses screens and themes.')));
+  v.write(ENTITY_REL, entityPage('Zq-lib parses screens and themes.'));
   const k = keepAllowed(v, sid, o.id, o.text);
   assert.equal(k.code, 1);
   assert.match(k.stderr, /^Not kept: wiki\/glim\/entities\/zq-lib\.md changed since the offer/);
-  assert.match(v.read(ENTITY_REL), /^open: true$/m);
+  assert.match(v.read(ENTITY_REL), /screens and themes/);
 });
 
-test("propose's text field says a text that adds open: true asks the user to open the page", t => {
+test("propose's text field says a text that drops open: false asks the user to open the page", t => {
   const v = makeVault(t);
   const s = JSON.parse(v.run('propose.mjs', ['--schema']).stdout);
-  assert.match(s.inputSchema.properties.text.description, /A text that adds open: true asks the user to let agents write that page directly\.?$/);
+  assert.match(s.inputSchema.properties.text.description, /A text that drops open: false asks the user to let agents write that page directly\.?$/);
 });
 
 const WHERE = 'Not proposed: page must be a page under wiki/, like wiki/<domain>/<folder>/<slug>.md.\n';

@@ -20,9 +20,10 @@ For folders where the domain offer is noise, such as an app's scratch folders, l
 
 ## Plugin
 
-The repo is also a Claude Code plugin with three skills, the hooks and the vault's tools. In a session opened in this folder the same skills also answer to `/ingest`, `/lint` and `/vault`, the names the session-start reminder uses:
+The repo is also a Claude Code plugin with four skills, the hooks and the vault's tools. In a session opened in this folder the same skills also answer to `/ingest`, `/distill`, `/lint` and `/vault`, the names the session-start reminder uses:
 
 - `/obsidian-vault:ingest` goes through a source with you, a file or a URL whose text it saves, and turns it and what you say about it into pages and rules. `/obsidian-vault:ingest batch` takes in every file in `raw/refs/` no source page names yet, and asks before adding any rule.
+- `/obsidian-vault:distill`, typed in a session that taught something worth keeping, writes what it learned into pages at once and proposes each rule as your `proposals` setting says. What belongs elsewhere, such as steps for a skill or a fact about the project, it names for you.
 - `/obsidian-vault:lint` checks the whole wiki and proposes fixes.
 - `/obsidian-vault:vault` sets when agents propose rules: `corrections` (as soon as you correct them), `ask` (they offer each rule and keep it once you agree; the default) or `off` (only when you ask), for every project or one domain, as `/obsidian-vault:vault off` or `/obsidian-vault:vault corrections <domain>`. Saying it in words works too. `/obsidian-vault:vault status` shows what the vault does in the session.
 - The hooks deliver the rules and pages to your sessions. `hooks/hooks.json` starts SessionStart, UserPromptSubmit, PreToolUse (edits, and a record of each vault tool call), Stop and SubagentStart through `hooks/launch.mjs`, which runs the hook from your vault.
@@ -30,7 +31,7 @@ The repo is also a Claude Code plugin with three skills, the hooks and the vault
 
 The plugin has one option, `vault`, the folder of your vault checkout. `node setup.mjs` sets it to the folder it runs in, so to move the vault, run it again from the new folder. To see the option, run `claude plugin configure obsidian-vault@obsidian-vault`. An unset option, a relative path, a folder that isn't a git clone of the vault, one inside Claude Code's plugins folder, which an update replaces, or a hook that cannot load prints `vault <hook> failed: <why>` as a hook error, and the call goes ahead. A vault tool call whose hook failed is refused instead, since the server can't tell which session made it; a server that cannot start prints `vault mcp failed: <why>`.
 
-`ingest` and `lint` run this vault's `tools/` in the working folder, so open a checkout of the vault before using them. `vault` works in any session the hooks reach. If `settings.json` still holds the vault's hooks from before the plugin, remove them, or each hook runs twice.
+`ingest` and `lint` run this vault's `tools/` in the working folder, so open a checkout of the vault before using them. `distill` and `vault` work in any session the hooks reach. If `settings.json` still holds the vault's hooks from before the plugin, remove them, or each hook runs twice.
 
 ## Git hooks
 

@@ -938,5 +938,5 @@ function entityHint(f, rules, notes) {
   const count = Object.values(rules).filter(r => packageId(r.package) === id).length + 1;
   if (count < config().pages.entityAfterRules) return '';
   if (notes.some(n => n.type === 'page' && n.kind === 'entity' && packageId(n.package) === id)) return '';
-  return `${count} live rules now name ${id}, and no entity page does. Hold a page change that adds wiki/${f.domain}/entities/<library>.md with kind: entity and this package, and release it before your final reply. `;
+  return `${count} live rules now name ${id}, and no entity page does. Write wiki/${f.domain}/entities/<library>.md with kind: entity and this package. `;
 }
