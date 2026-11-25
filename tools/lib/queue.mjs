@@ -3,6 +3,7 @@ import { registryEntry } from './sessions.mjs';
 import { shortName } from './agents.mjs';
 import { allOffers, offersLocked, saveOffer, consentOf, plainText } from './offers.mjs';
 import { keepCallFor } from './calls.mjs';
+import { loadNotes, ruleEnded } from './rules.mjs';
 
 // The review queue: entries the user hasn't seen or answered, in raw/queue/, and decision rows that name them. Rows are
 // never edited, so an entry is open until a kept or dropped row names it; a later row only records it was seen. Every write
@@ -16,14 +17,15 @@ export const CLOSING = ['kept', 'dropped'];
 // Each kind of change an offer holds, in the order lint lists them. noun is what keep calls it. queued: the review queue
 // holds it, and propose takes its entry again. offerOnly: an offer in every mode, since corrections writes only what the
 // user corrected. citesNoOne: it takes no one's words as evidence. change: propose takes it as a change to a live rule.
+// onRule: its key names the rule it adds to or changes, so it ends with that rule.
 export const CHANGE_KINDS = {
   rule: { noun: 'rule', queued: true },
-  evidence: { noun: 'rule', queued: true },
+  evidence: { noun: 'rule', queued: true, onRule: true },
   page: { noun: 'page', queued: true, offerOnly: true, citesNoOne: true },
-  reword: { noun: 'rule', queued: true, change: true },
-  retire: { noun: 'rule', queued: true, offerOnly: true, citesNoOne: true, change: true },
+  reword: { noun: 'rule', queued: true, change: true, onRule: true },
+  retire: { noun: 'rule', queued: true, offerOnly: true, citesNoOne: true, change: true, onRule: true },
   domain: { noun: 'domain', queued: true, offerOnly: true },
-  move: { noun: 'rule', queued: true, offerOnly: true, citesNoOne: true, change: true },
+  move: { noun: 'rule', queued: true, offerOnly: true, citesNoOne: true, change: true, onRule: true },
   mode: { noun: 'setting', offerOnly: true },
 };
 export const kindIs = (kind, fact) => Object.hasOwn(CHANGE_KINDS, kind) && CHANGE_KINDS[kind][fact] === true;
@@ -111,6 +113,10 @@ export function sweep(self, { waitMs = 5000 } = {}) {
   const quiet = sid => { const read = registered(sid); return read !== null && quietSince(read.entry, hours); };
   const due = o => o.session !== String(self) && o.kind !== 'mode' && ['held', 'pending'].includes(o.state) && quiet(o.session);
   if (!allOffers().some(due)) return 0;
+  // An offer on a rule that has since ended can't be kept, so it isn't queued. The notes are every domain's, since the
+  // offer's may be one this session doesn't read, and are read before the locks, only when such an offer is due.
+  const onRule = o => due(o) && kindIs(o.kind, 'onRule');
+  const notes = allOffers().some(onRule) ? loadNotes() : null;
   const added = new Map();
   const queued = [];
   const giveUp = Date.now() + waitMs;
@@ -120,6 +126,10 @@ export function sweep(self, { waitMs = 5000 } = {}) {
       const { entry } = registered(o.session);
       if (o.state === 'pending' && consentOf(entry ?? { agent: o.agent }) === 'prompt' && keepCallFor(o.id)?.allowed === null) {
         saveOffer({ ...o, state: 'denied' });
+        continue;
+      }
+      if (notes && kindIs(o.kind, 'onRule') && ruleEnded(o.key, notes)) {
+        saveOffer({ ...o, state: 'moot' });
         continue;
       }
       // An offer made again from an entry stays that entry, so one rule never has two.

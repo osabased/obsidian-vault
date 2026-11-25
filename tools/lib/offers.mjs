@@ -41,7 +41,7 @@ export const offerReply = o => `${REPLY[o.code ? 'code' : 'prompt'](o.id)}\n\n${
 
 // A held offer waits for the agent's release and a pending one for the user, so the purge spares both: the sweep moves
 // them to the review queue instead. A mode offer has no place in the queue and goes with the purge.
-const PURGED = new Set(['kept', 'used', 'superseded', 'denied', 'queued']);
+const PURGED = new Set(['kept', 'used', 'superseded', 'denied', 'queued', 'moot']);
 const purged = o => (PURGED.has(o.state) || o.kind === 'mode') && olderThan(o.at, MAX_AGE);
 
 // Held evidence for one rule is kept apart unless it is the same evidence, since each backs the rule on its own. Any other

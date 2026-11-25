@@ -295,7 +295,8 @@ All of these build on `test/fixture.mjs` and run with `node --test test/*.test.m
    - (c) an offer whose `keep` was denied is not queued, and the purge deletes it;
    - (d) two sweeps at once write one row;
    - (e) an 8-day-old pending offer is queued, not deleted;
-   - (f) a session resumed after the offer, with no typed message since, gives `why: ignored`, not `skipped`.
+   - (f) a session resumed after the offer, with no typed message since, gives `why: ignored`, not `skipped`;
+   - (g) added on 2026-11-25: an offer on a rule since retired or deleted is marked `moot`, not queued, and one on a rule present but not delivered is queued, judged by every domain's notes whatever the sweeping session reads.
 
    Today nothing is queued, and the offer is deleted.
 7. `mcp.test.mjs`: `propose` through the server, from a call whose record has `subagent`, writes a queue row and no offer. Today `propose` gets no call id and returns an offer.

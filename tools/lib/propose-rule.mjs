@@ -4,7 +4,7 @@ import {
 } from './vault.mjs';
 import {
   KEY_RE, BASES, RULE_KINDS, PAGE_WHERE, wrongBasis, parseNote, noteErrors, ruleText, ruleTextParts, sentence, loadNotes, readNote, liveRules, isLive, mentions, isUrl, validDay, byKey, normTopic, vaultFile, joinList,
-  sharedFiles, rankPair, maxChars, fitIn, hasChannel, rulePath, leadPattern, isRetired, packageId, knownDomain, resolver, relink, toKey, authoredByUser, noteLinks,
+  sharedFiles, rankPair, maxChars, fitIn, hasChannel, rulePath, leadPattern, ruleEnded, packageId, knownDomain, resolver, relink, toKey, authoredByUser, noteLinks,
 } from './rules.mjs';
 import { projectVersions, versionIn, compareFor } from './versions.mjs';
 import { build } from './build.mjs';
@@ -220,8 +220,8 @@ function sameFiles(f, n, notes, rules) {
 }
 
 function gone(key, notes) {
-  const n = readNote(key, notes);
-  return !n ? ', which has since been deleted' : isRetired(n) ? ', which has since been retired' : '';
+  const ended = ruleEnded(key, notes);
+  return ended ? `, which has since been ${ended}` : '';
 }
 
 const sameList = (a, b) => Array.isArray(a) && a.length === b.length && a.every((x, i) => x === b[i]);

@@ -1,4 +1,6 @@
 import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { pathToFileURL } from 'node:url';
@@ -98,6 +100,32 @@ test('a session that is not quiet yet keeps its offers, and its own start never 
   v.startSession(a, { source: 'resume' });
   assert.deepEqual(queueRows(v), []);
   assert.equal(offerAt(v, o.id).state, 'pending');
+});
+
+test('the sweep closes an offer whose rule has since been retired or deleted, and queues one whose rule still stands', t => {
+  const v = makeVault(t, { config: { proposals: 'ask' } });
+  const slugs = ['retired', 'deleted', 'held', 'live', 'half'];
+  for (const s of slugs) v.write(`wiki/glim/rules/${s}.md`, ruleNote({ keywords: [`kw${s}`], doLine: `Do the ${s} thing.` }));
+  const a = started(v);
+  const id = {};
+  for (const s of slugs) {
+    const r = v.propose(a, { change: 'retire', key: `glim/${s}`, because: 'Old.', ...(s === 'held' ? { hold: true } : {}) });
+    id[s] = s === 'held' ? heldId(r) : offered(r).id;
+  }
+  const retired = s => v.write(`wiki/glim/rules/${s}.md`, ruleNote({ keywords: [`kw${s}`], doLine: `Do the ${s} thing.`, extra: ['retired: 2026-11-01'] }));
+  retired('retired');
+  retired('held');
+  fs.rmSync(v.at('wiki', 'glim', 'rules', 'deleted.md'));
+  // Present but not delivered, as a half-typed edit is: the rule may come back, so its offer waits for the user.
+  v.write('wiki/glim/rules/half.md', ruleNote({ keywords: ['kwhalf'], doLine: 'Do the half thing.', extra: ['retired: someday'] }));
+  quiet(v, a);
+  // From a folder no domain reaches, so a sweep that judged by the notes this session reads would find none of glim's.
+  const elsewhere = fs.mkdtempSync(path.join(os.tmpdir(), 'vault-elsewhere-'));
+  t.after(() => fs.rmSync(elsewhere, { recursive: true, force: true }));
+  v.startSession(sessionId(), { cwd: elsewhere });
+  assert.deepEqual(entries(v).map(r => r.key).sort(), ['glim/half', 'glim/live']);
+  for (const s of ['retired', 'deleted', 'held']) assert.equal(offerAt(v, id[s]).state, 'moot', s);
+  for (const s of ['live', 'half']) assert.equal(offerAt(v, id[s]).state, 'queued', s);
 });
 
 test('(b) a held offer never released becomes why: unreleased', t => {

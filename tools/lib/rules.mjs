@@ -362,6 +362,13 @@ export function undelivered(n) {
 // A retired field that isn't a day is an error, which undelivered names, not a retirement.
 export const isRetired = n => Boolean(n.superseded_by || validDay(n.retired));
 export const isLive = n => n.type === 'rule' && !isRetired(n) && !undelivered(n);
+
+// How the rule a key names ended: its note is gone or retired. A note there but not delivered, such as one half-typed in
+// Obsidian, may still come back, so it hasn't ended.
+export function ruleEnded(key, notes = loadNotes()) {
+  const n = readNote(key, notes);
+  return n?.type !== 'rule' ? 'deleted' : isRetired(n) ? 'retired' : null;
+}
 export const isTopicPage = n => n.type === 'page' && n.kind === 'topic';
 export const isSourcePage = n => n.type === 'page' && n.kind === 'source';
 // The keys of the entity pages a synthesis page compares, as its compares field names them.
