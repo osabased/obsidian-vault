@@ -3,7 +3,7 @@ import path from 'node:path';
 import v8 from 'node:v8';
 import { parse, yamlQuote } from './frontmatter.mjs';
 import { validGlob, overlapping, entryParts, globListProblems } from './glob.mjs';
-import { config, vaultPath, shortHash, toPosix, today, inside, plural, isVaultOnly, memo, readJson, statePath, logError } from './vault.mjs';
+import { config, vaultPath, shortHash, toPosix, today, inside, plural, isVaultOnly, memo, readJson, statePath, logError, isMap } from './vault.mjs';
 import { cachedNotes, cleanFromGit, noteStats } from './cache.mjs';
 import { SEMVER, SCHEMES, fitOf, checkedFit, movedOnFrom, projectVersions, rootOutside, osvPackage, compareFor, comparable, compareSemver } from './versions.mjs';
 import { checkDeadline } from './deadline.mjs';
@@ -215,7 +215,7 @@ function listErrors(n) {
 export const hasChannel = n => n.always === true || ['applies_to', 'keywords', 'tools'].some(f => n[f]?.length);
 
 const EVENTS = ['introduced', 'fixed', 'last_affected', 'limit'];
-export const isMap = x => x !== null && typeof x === 'object' && !Array.isArray(x);
+export { isMap };
 export const filled = x => typeof x === 'string' && x.trim() !== '';
 const oneEvent = e => isMap(e) && Object.keys(e).length === 1 && EVENTS.includes(Object.keys(e)[0]) && filled(Object.values(e)[0]);
 

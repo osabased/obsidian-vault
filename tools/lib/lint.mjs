@@ -1029,6 +1029,7 @@ function lintReach(add) {
   const view = configView();
   const { shared, merged, fileOf } = view;
   const declared = Object.fromEntries(declaredDomains(view));
+  const inShared = d => isMap(shared.domains) && Object.hasOwn(shared.domains, d);
   const modes = joinList(PROPOSAL_MODES, 'or');
   const topMode = merged.proposals;
   if (topMode !== undefined && !PROPOSAL_MODES.includes(topMode)) add('error', fileOf('proposals'), `proposals is ${JSON.stringify(topMode)}; it must be ${modes}`);
@@ -1037,10 +1038,11 @@ function lintReach(add) {
     if (mode !== undefined && !PROPOSAL_MODES.includes(mode)) add('error', fileOf('domains', d, 'proposals'), `${d}: proposals is ${JSON.stringify(mode)}; it must be ${modes}`);
   }
   const localFile = vaultPath(LOCAL_CONFIG);
-  const local = fs.existsSync(localFile) ? readJsonSafe(localFile) : {};
+  // Past a broken local file, the domains vault.config.json declares are still checked, with no local paths.
+  let local = fs.existsSync(localFile) ? readJsonSafe(localFile) : {};
   if (!isMap(local) || (local.domains !== undefined && !isMap(local.domains))) {
     add('error', LOCAL_CONFIG, 'vault.local.json must be a JSON object, with any domains as an object by name, such as { "domains": { "<domain>": { "paths": ["<folder>"] } } }');
-    return;
+    local = isMap(local) ? { ...local, domains: undefined } : {};
   }
   // Windows calls /scratch absolute, but a session's folder there starts with its drive, so such a glob never matches.
   const rooted = g => process.platform !== 'win32' || /^(?:[A-Za-z]:[\\/]|[\\/]{2}[^\\/])/.test(g);
@@ -1059,14 +1061,15 @@ function lintReach(add) {
     const marked = Array.isArray(c.markers) && c.markers.length > 0;
     if (c.vaultOnly === true && (marked || c.everywhere === true)) add('error', at('vaultOnly'), `${d} is vaultOnly, so it holds only pages and takes no markers or everywhere`);
     if (c.projects !== undefined) add('warn', at('projects'), `${d}: projects does nothing. Put its folders in vault.local.json as paths, or give it markers`);
-    if (isMap(shared.domains) && shared.domains[d]?.paths !== undefined) add('warn', SHARED_CONFIG, `${d}: paths in vault.config.json do nothing. Put them in vault.local.json, which holds this machine's folders`);
+    if (inShared(d) && shared.domains[d]?.paths !== undefined) add('warn', SHARED_CONFIG, `${d}: paths in vault.config.json do nothing. Put them in vault.local.json, which holds this machine's folders`);
     if (d !== 'global' && c.vaultOnly !== true && !marked && !pathsOf(d).length && c.everywhere !== true) {
-      const home = isMap(shared.domains) && Object.hasOwn(shared.domains, d) ? SHARED_CONFIG : LOCAL_CONFIG;
-      add('warn', home, `${d} reaches no project on this machine. Add its folders to vault.local.json as paths, give it markers, or set vaultOnly: true if it holds only pages`);
+      add('warn', inShared(d) ? SHARED_CONFIG : LOCAL_CONFIG, `${d} reaches no project on this machine. Add its folders to vault.local.json as paths, give it markers, or set vaultOnly: true if it holds only pages`);
     }
   }
   for (const [d, x] of Object.entries(mine)) {
-    if (d === 'global') add('error', LOCAL_CONFIG, 'global reaches every project, so it takes no paths');
+    if (d === 'global') {
+      add('error', LOCAL_CONFIG, x?.paths !== undefined ? 'global reaches every project, so it takes no paths' : 'global is built in, so it takes no entry here. Set its proposals mode with the top-level proposals');
+    } else if (!isMap(x)) add('error', LOCAL_CONFIG, `${d} must be an object, such as { "paths": ["<folder>"] }`);
     else if (!Object.hasOwn(declared, d)) add('error', LOCAL_CONFIG, `${d} has only paths, so it isn't a domain. Declare it with a title and topics, or fix the name`);
     else if (declared[d]?.vaultOnly === true && pathsOf(d).length) add('error', LOCAL_CONFIG, `${d} is vaultOnly, so it takes no paths`);
     else if (x?.paths !== undefined && !isList(x.paths, isFolder)) add('error', LOCAL_CONFIG, `${d}: paths must be a list of absolute folder paths`);

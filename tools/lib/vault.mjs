@@ -42,10 +42,12 @@ const strings = xs => (Array.isArray(xs) ? xs.filter(x => typeof x === 'string' 
 // the user's own settings (their domains, proposals mode and privacy allow ids) and this machine's (paths, quiet).
 export const SHARED_CONFIG = 'vault.config.json';
 export const LOCAL_CONFIG = 'vault.local.json';
-const plain = x => x !== null && typeof x === 'object' && !Array.isArray(x);
-// Objects merge key by key; any other value the second gives replaces the first's.
-const merge = (a, b) => (!plain(a) || !plain(b) ? (b === undefined ? a : b)
-  : Object.fromEntries([...new Set([...Object.keys(a), ...Object.keys(b)])].map(k => [k, merge(a[k], b[k])])));
+export const isMap = x => x !== null && typeof x === 'object' && !Array.isArray(x);
+// Objects merge key by key; any other value the second gives replaces the first's. Only own keys count, so a domain
+// named like an inherited member, such as constructor, isn't replaced by it.
+const own = (x, k) => (Object.hasOwn(x, k) ? x[k] : undefined);
+const merge = (a, b) => (!isMap(a) || !isMap(b) ? (b === undefined ? a : b)
+  : Object.fromEntries([...new Set([...Object.keys(a), ...Object.keys(b)])].map(k => [k, merge(own(a, k), own(b, k))])));
 
 // The config as its files give it, before defaults, with vault.local.json winning. A local file, or a local domains, that
 // isn't a JSON object gives nothing, and lint reports it. fileOf names the file that gives the value at keys, for a
@@ -53,25 +55,25 @@ const merge = (a, b) => (!plain(a) || !plain(b) ? (b === undefined ? a : b)
 export function configView() {
   const shared = readJson(vaultPath(SHARED_CONFIG), {});
   const mine = readJsonSafe(vaultPath(LOCAL_CONFIG));
-  const local = plain(mine) ? { ...mine } : {};
-  if (Object.hasOwn(local, 'domains') && !plain(local.domains)) delete local.domains;
+  const local = isMap(mine) ? { ...mine } : {};
+  if (Object.hasOwn(local, 'domains') && !isMap(local.domains)) delete local.domains;
   const fileOf = (...keys) => {
     let x = local;
     for (const k of keys) {
-      if (!plain(x) || !Object.hasOwn(x, k)) return SHARED_CONFIG;
+      if (!isMap(x) || !Object.hasOwn(x, k)) return SHARED_CONFIG;
       x = x[k];
     }
     return keys.length ? LOCAL_CONFIG : SHARED_CONFIG;
   };
-  const sharedFile = plain(shared) ? shared : {};
+  const sharedFile = isMap(shared) ? shared : {};
   return { shared: sharedFile, local, merged: merge(sharedFile, local), fileOf };
 }
 
 // A local entry with only paths places a domain declared elsewhere on this machine, so a misspelt name there is an error
 // lint reports rather than a new domain.
 export function declaredDomains({ shared, local, merged }) {
-  const own = (file, d) => plain(file.domains) && Object.hasOwn(file.domains, d);
-  return domainEntries(merged.domains).filter(([d]) => own(shared, d) || (own(local, d) && Object.keys(local.domains[d] ?? {}).some(k => k !== 'paths')));
+  const holds = (file, d) => isMap(file.domains) && Object.hasOwn(file.domains, d);
+  return domainEntries(merged.domains).filter(([d]) => holds(shared, d) || (holds(local, d) && isMap(local.domains[d]) && Object.keys(local.domains[d]).some(k => k !== 'paths')));
 }
 
 export const aboveZero = (x, whole = false) => typeof x === 'number' && (whole ? Number.isInteger(x) : Number.isFinite(x)) && x > 0;

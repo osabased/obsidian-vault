@@ -99,3 +99,43 @@ test('privacy.allow in vault.local.json lets a listed value through', t => {
   const r = v.run('scan.mjs', ['raw/refs/notes.md']);
   assert.equal(r.code, 0, r.stdout);
 });
+
+test('lint reports a domain vault.config.json sets to null rather than failing', t => {
+  const v = makeVault(t);
+  v.write('vault.config.json', JSON.stringify({ ...JSON.parse(v.read('vault.config.json')), domains: { ...JSON.parse(v.read('vault.config.json')).domains, ghost: null } }));
+  const r = v.run('lint.mjs');
+  assert.doesNotMatch(r.stdout + r.stderr, /lint failed/);
+  assert.match(r.stdout, /ghost/);
+});
+
+test('a domain entry in vault.local.json that is a list or a string is an error, not a domain', t => {
+  const v = makeVault(t);
+  v.write('vault.local.json', JSON.stringify({ ...local(v), domains: { ...local(v).domains, listed: [os.tmpdir()], named: 'x' } }));
+  const errors = lintErrors(v);
+  for (const d of ['listed', 'named']) assert.ok(errors.some(l => l.startsWith('error vault.local.json') && l.includes(`${d} must be an object`)), errors.join('\n'));
+});
+
+test('a domain named after an object built-in keeps its settings when vault.local.json has domains', t => {
+  const v = makeVault(t);
+  const shared = JSON.parse(v.read('vault.config.json'));
+  v.write('vault.config.json', JSON.stringify({ ...shared, domains: { ...shared.domains, constructor: { title: 'C', topics: ['code'], markers: ['c.txt'] } } }));
+  assert.doesNotMatch(lintLines(v).join('\n'), /constructor reaches no project/);
+});
+
+test('a broken vault.local.json still leaves vault.config.json checked', t => {
+  const v = makeVault(t);
+  const shared = JSON.parse(v.read('vault.config.json'));
+  v.write('vault.config.json', JSON.stringify({ ...shared, domains: { ...shared.domains, glim: { ...shared.domains.glim, markers: 'x.txt' } } }));
+  v.write('vault.local.json', '{ broken');
+  const errors = lintErrors(v);
+  assert.ok(errors.some(l => l.startsWith('error vault.local.json') && /must be a JSON object/.test(l)), errors.join('\n'));
+  assert.ok(errors.some(l => l.startsWith('error vault.config.json') && /glim: markers/.test(l)), errors.join('\n'));
+});
+
+test('a global entry in vault.local.json without paths is not told it takes no paths', t => {
+  const v = makeVault(t);
+  v.write('vault.local.json', JSON.stringify({ ...local(v), domains: { ...local(v).domains, global: { proposals: 'off' } } }));
+  const errors = lintErrors(v);
+  assert.ok(errors.some(l => l.startsWith('error vault.local.json') && /global is built in/.test(l)), errors.join('\n'));
+  assert.ok(!errors.some(l => /takes no paths/.test(l)), errors.join('\n'));
+});
