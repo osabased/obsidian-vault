@@ -1,10 +1,10 @@
 import fs from 'node:fs';
 import {
-  config, vaultPath, statePath, withLock, writeText, appendLog, toPosix, inVaultFolder, reloadConfig, PROPOSAL_MODES,
+  config, vaultPath, statePath, withLock, writeText, appendLog, toPosix, inVaultFolder, reloadConfig, PROPOSAL_MODES, LOCAL_CONFIG,
 } from './vault.mjs';
 import { joinList } from './rules.mjs';
 import { callerEntry, proposeDomains, PASS } from './sessions.mjs';
-import { valuesOf, setMember } from './json.mjs';
+import { setIn } from './json.mjs';
 import { modeLines } from './instructions.mjs';
 import { typedFor, shortName } from './agents.mjs';
 import { refuse, line } from './input.mjs';
@@ -21,25 +21,21 @@ function fields(p) {
   const named = line(p, 'domain', false).normalize('NFC');
   const domain = named === 'global' ? '' : named;
   if (domain && !Object.hasOwn(config().domains, domain)) {
-    refuse(`vault.config.json has no domain ${domain}. Give one of ${joinList(Object.keys(config().domains), 'or')}, or leave domain out.`);
+    refuse(`the vault has no domain ${domain}. Give one of ${joinList(Object.keys(config().domains), 'or')}, or leave domain out.`);
   }
   return { mode, domain };
 }
 
+// The mode is the user's own, so it goes in the untracked vault.local.json, which wins over the vault.config.json the repo
+// ships.
 function write({ mode, domain }) {
-  const file = vaultPath('vault.config.json');
-  const raw = fs.readFileSync(file, 'utf8');
-  const top = raw.indexOf('{');
-  if (top < 0) refuse("vault.config.json holds no JSON object. /lint names the problem; it is the user's to fix.");
-  if (!domain) {
-    writeText(file, setMember(raw, top, 1, 'proposals', mode));
-    return;
-  }
-  const domains = valuesOf(raw, top).get('domains');
-  const at = domains !== undefined && raw[domains] === '{' ? valuesOf(raw, domains).get(domain) : undefined;
-  // Another run may have changed the file since the checks.
-  if (at === undefined || raw[at] !== '{') refuse(`vault.config.json has no domain ${domain} to set.`);
-  writeText(file, setMember(raw, at, 3, 'proposals', mode));
+  const file = vaultPath(LOCAL_CONFIG);
+  // Another run may have changed the domains since the checks.
+  reloadConfig();
+  if (domain && !Object.hasOwn(config().domains, domain)) refuse(`the vault has no domain ${domain} to set.`);
+  const text = setIn(fs.existsSync(file) ? fs.readFileSync(file, 'utf8') : '{}\n', domain ? ['domains', domain, 'proposals'] : ['proposals'], mode);
+  if (text === null) refuse("vault.local.json holds no JSON object, or a key on the way to the mode isn't one. /lint names the problem; it is the user's to fix.");
+  writeText(file, text);
 }
 
 const MEANS = {
@@ -57,10 +53,10 @@ function reply({ mode, domain }, entry) {
     : `From now on in this session: ${modeLines([...proposeDomains(entry), 'global'])}`;
   const what = `${mode}${domain ? ` for ${domain}` : ''}`;
   return [
-    `Set proposals to ${what} in vault.config.json. ${now}`,
+    `Set proposals to ${what} in vault.local.json. ${now}`,
     'End your reply with this line as it is:',
     '',
-    `**Proposals** ${what}: ${MEANS[mode]}.${own.length ? ` ${own.join(' ')}` : ''} To change it, ask again or edit ${toPosix(vaultPath('vault.config.json'))}.`,
+    `**Proposals** ${what}: ${MEANS[mode]}.${own.length ? ` ${own.join(' ')}` : ''} To change it, ask again or edit ${toPosix(vaultPath(LOCAL_CONFIG))}.`,
   ].join('\n');
 }
 
@@ -82,7 +78,7 @@ export function setMode(sid, p, { call = null, kept = null } = {}) {
   if (kept) {
     if (offerText(offer, kept.code) !== kept.text) refuse("the vault changed since the offer, so it isn't what the user agreed to. Propose it again.");
   } else if (!prompted) {
-    if (!typedFor(entry)) refuse("the vault has no transcript for this session, so it can't check the user agreed. Ask the user to set proposals in vault.config.json.");
+    if (!typedFor(entry)) refuse("the vault has no transcript for this session, so it can't check the user agreed. Ask the user to set proposals in vault.local.json.");
     return makeOffer({ kind: 'mode', sid, entry, key: `mode:${f.domain || 'global'}`, fields: p, lines: offer }).reply;
   }
   withLock(statePath('config.lock'), () => {

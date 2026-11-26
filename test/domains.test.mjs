@@ -129,7 +129,7 @@ test('domain.mjs refuses each bad field with one line and writes nothing', t => 
     [{ approved: 'yes' }, /approved isn't a field/],
     [{ name: 'Quill' }, /name must be lowercase-kebab-case/],
     [{ name: 'global' }, /global/],
-    [{ name: 'glim' }, /vault\.config\.json already has a domain glim/],
+    [{ name: 'glim' }, /the vault already has a domain glim/],
     [{ name: 'propose' }, /^(?=.*key "propose")(?=.*tools\/\S+:\d+)/],
     [{ title: 'Change this rule' }, /^(?=.*title "Change this rule")(?=.*tools\/\S+:\d+)/],
     [{ title: undefined }, /title/],
@@ -166,21 +166,21 @@ test('domain.mjs writes nothing until the offer is kept, and a session with no t
   assert.equal(v.read('vault.config.json'), config);
   const k = keepAllowed(v, sid, o.id, o.text);
   assert.equal(k.code, 0, k.stderr);
-  assert.ok(Object.hasOwn(JSON.parse(v.read('vault.config.json')).domains, 'quill'));
+  assert.ok(Object.hasOwn(JSON.parse(v.read('vault.local.json')).domains, 'quill'));
 });
 
 for (const [kind, before] of [
   ['CRLF with a BOM', '\uFEFF{\r\n  "domains": {\r\n    "glim": {\r\n      "title": "Glim",\r\n      "topics": ["layout", "code"],\r\n      "markers": ["glim.project"]\r\n    }\r\n  },\r\n  "delivery": { "settleSeconds": 60 }\r\n}\r\n'],
   ['LF with tabs', '{\n\t"domains": {\n\t\t"glim": {"title": "Glim", "topics": ["layout", "code"], "markers": ["glim.project"]}\n\t},\n\t"lint": {"remindAfterDays": 14}\n}\n'],
 ]) {
-  test(`a marker write, ${kind}, keeps every byte of vault.config.json outside the entry and the comma before it`, t => {
+  test(`a marker write, ${kind}, keeps every byte of vault.local.json outside the entry and the comma before it`, t => {
     const v = makeVault(t);
-    v.write('vault.config.json', before);
+    v.write('vault.local.json', before);
     const dir = folder(t, ['quill.project', 'src/a.txt']);
     const { sid } = started(v, path.join(dir, 'src'));
     const r = addDomain(v, sid, QUILL);
     assert.equal(r.code, 0, r.stderr);
-    const after = v.read('vault.config.json');
+    const after = v.read('vault.local.json');
     const span = inserted(before, after);
     const [eol, indent] = kind.startsWith('CRLF') ? ['\r\n', '  '] : ['\n', '\t'];
     assert.ok(span.startsWith(`,${eol}${indent}${indent}"quill": `), JSON.stringify(span));
@@ -203,7 +203,7 @@ test('after a marker write the session proposes for the domain, gets its always 
   const r = addDomain(v, sid, QUILL);
   assert.equal(r.code, 0, r.stderr);
   assert.match(r.stdout, /quill\.project/);
-  assert.match(r.stdout, /vault\.config\.json/);
+  assert.match(r.stdout, /vault\.local\.json/);
   assert.match(r.stdout, /the vault's `propose` tool/);
   assert.match(r.stdout, /the vault's `pick` tool/);
   const rule = v.propose(sid, {
@@ -234,7 +234,8 @@ test('a path write creates vault.local.json when it is missing, and adds to it w
   assert.deepEqual(Object.keys(local), ['alpha', 'quill']);
   assert.deepEqual(local.alpha.paths, [elsewhere]);
   assert.deepEqual(local.quill.paths.map(posix), [posix(path.join(dir, 'src'))]);
-  assert.deepEqual(JSON.parse(v.read('vault.config.json')).domains.quill, { title: 'Quill', topics: ['code'] });
+  assert.deepEqual({ ...local.quill, paths: undefined }, { title: 'Quill', topics: ['code'], paths: undefined });
+  assert.equal(JSON.parse(v.read('vault.config.json')).domains.quill, undefined);
   assert.deepEqual(lintErrors(v), []);
   assert.deepEqual(lintLines(v).filter(l => /quill reaches no project/.test(l)), []);
 
@@ -268,7 +269,7 @@ test('from the vault folder, vaultOnly is written, a marker is taken without loo
   const { sid } = started(v, v.root);
   const pages = addDomain(v, sid, { ...QUILL, marker: undefined, vaultOnly: true });
   assert.equal(pages.code, 0, pages.stderr);
-  assert.deepEqual(JSON.parse(v.read('vault.config.json')).domains.quill, { title: 'Quill', topics: ['code'], vaultOnly: true });
+  assert.deepEqual(JSON.parse(v.read('vault.local.json')).domains.quill, { title: 'Quill', topics: ['code'], vaultOnly: true });
   assert.deepEqual(lintErrors(v), []);
   assert.deepEqual(lintLines(v).filter(l => /quill reaches no project/.test(l)), []);
   const marked = addDomain(v, sid, { ...QUILL, name: 'brook', title: 'Brook', marker: 'brook.project' });
@@ -291,7 +292,8 @@ test('two keeps of domain offers at once both land', async t => {
   const [ra, rb] = await Promise.all([keepOf(a, QUILL), keepOf(b, { ...QUILL, name: 'brook', title: 'Brook', marker: 'brook.project' })]);
   assert.equal(ra.code, 0, ra.stderr);
   assert.equal(rb.code, 0, rb.stderr);
-  assert.deepEqual(Object.keys(JSON.parse(v.read('vault.config.json')).domains).sort(), ['brook', 'glim', 'quill']);
+  const local = JSON.parse(v.read('vault.local.json')).domains;
+  assert.ok(Object.hasOwn(local, 'brook') && Object.hasOwn(local, 'quill'), JSON.stringify(local));
   assert.equal(v.read('log.md').split('\n').filter(l => /added domain/.test(l)).length, 2);
 });
 
@@ -301,7 +303,7 @@ test('a marker another domain lists is written, and the output names that domain
   const r = addDomain(v, sid, { ...QUILL, marker: 'glim.project' });
   assert.equal(r.code, 0, r.stderr);
   assert.match(r.stdout, /glim also has glim\.project as a marker/);
-  assert.deepEqual(JSON.parse(v.read('vault.config.json')).domains.quill.markers, ['glim.project']);
+  assert.deepEqual(JSON.parse(v.read('vault.local.json')).domains.quill.markers, ['glim.project']);
 });
 
 test('a session no domain reached at start takes a domain added to the config later, from its next prompt', t => {
@@ -345,7 +347,7 @@ test('domain.mjs writes the name composed, as propose.mjs reads a domain', t => 
   const { sid } = started(v, folder(t, ['quill.project']));
   const r = addDomain(v, sid, { ...QUILL, name: `cafe${String.fromCodePoint(0x301)}`, title: 'Cafe' });
   assert.equal(r.code, 0, r.stderr);
-  assert.ok(Object.hasOwn(JSON.parse(v.read('vault.config.json')).domains, `caf${String.fromCodePoint(0xe9)}`));
+  assert.ok(Object.hasOwn(JSON.parse(v.read('vault.local.json')).domains, `caf${String.fromCodePoint(0xe9)}`));
 });
 
 test('a path that holds the vault folder is refused', t => {
@@ -367,7 +369,7 @@ test('a domain the user denied at the prompt is refused when offered again in th
   const again = offerDomain(v, sid, QUILL);
   assert.equal(again.code, 1);
   assert.equal(again.stderr, "Not added: the user denied starting this domain at the prompt in this session. Don't offer it again unless they ask.\n");
-  assert.equal(JSON.parse(v.read('vault.config.json')).domains.quill, undefined);
+  assert.equal(JSON.parse(v.read('vault.local.json')).domains?.quill, undefined);
 
   const { sid: other } = started(v, folder(t, ['quill.project']));
   const first = offerOf(offerDomain(v, other, QUILL).stdout);

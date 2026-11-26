@@ -14,7 +14,7 @@ Work in the vault root. `reference/notes.md` has the note and page formats. A ru
    - **Rules no session was shown.** Draft the keywords or applies_to that would bring each up in the sessions its domain gets.
 
    Then relay the sections on versions, domains and pages, each drafted in step 5:
-   - **Knowledge rules with a package and no checked_with.** Draft a reword that gives `checked_with` alone: the package's version in the projects that rule was shown in, from `.state/versions.json`. When the section says no version readers are set, tell the user that no rule is checked against a version until they name readers under `domains.<domain>.readers` in `vault.config.json`.
+   - **Knowledge rules with a package and no checked_with.** Draft a reword that gives `checked_with` alone: the package's version in the projects that rule was shown in, from `.state/versions.json`. When the section says no version readers are set, tell the user that no rule is checked against a version until they name readers under `domains.<domain>.readers` in `vault.local.json`.
    - **Rules past their version in a project.** Draft each one's retirement.
    - **Global rules that keep matching one kind of project.** Draft a domain for each marker, with a name and title you propose, and a move of each rule it lists into it.
    - **Libraries with enough rules for an entity page**, **Entity pages that do the same job, with no comparison** and **Topics whose rules need a topic page to roll them up.** Draft the entity page, the comparison or the topic page, or the links the topic page lacks.

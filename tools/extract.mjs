@@ -99,7 +99,7 @@ async function extractFile(rel, extractors, force) {
   if (secrets.length) {
     const found = secrets.map(x => secretLine(rel, x));
     const it = secrets.length === 1 ? 'it' : 'them';
-    return [`failed ${rel}: its text holds ${plural(secrets.length, 'key- or token-shaped value')}. Remove ${it}, or add an allow id to privacy.allow in vault.config.json if it isn't a secret, then extract again:`, ...found].join('\n');
+    return [`failed ${rel}: its text holds ${plural(secrets.length, 'key- or token-shaped value')}. Remove ${it}, or add an allow id to privacy.allow in vault.local.json if it isn't a secret, then extract again:`, ...found].join('\n');
   }
   try {
     writeText(vaultPath('derived', `${hash}.md`), text);

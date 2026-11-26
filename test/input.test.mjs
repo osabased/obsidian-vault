@@ -163,7 +163,7 @@ test('keep and proposals print their fields as pinned, and no script asks for ap
   assert.equal(help('proposals.mjs'), [
     'usage: node tools/proposals.mjs [session-id] [call-id] < mode.json',
     '',
-    'Sets when agents propose rules, in vault.config.json. mode.json is an object with these fields:',
+    'Sets when agents propose rules, in vault.local.json. mode.json is an object with these fields:',
     '  mode       corrections: propose writes a rule as soon as the agent proposes it',
     '             ask: the agent offers each rule, and keep writes it once the user agrees',
     '             off: the agent proposes a rule only when the user asks for one',

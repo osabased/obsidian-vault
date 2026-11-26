@@ -17,7 +17,7 @@ function vaultGuard(rel, file, cwd, inVault) {
   if (low === 'active.md' || low === 'index.md') {
     return `${rel} is generated from the notes. ${inVault ? 'Edit the notes instead, then run `node tools/build.mjs`.' : "Outside the vault folder, rules and pages change only through the vault's `propose` tool."}`;
   }
-  if (low === 'vault.local.json') return `${rel} lists this machine's project folders for each domain. \`node tools/domain.mjs\` adds a session's folder once the user agrees to a new domain; otherwise leave it to the user.`;
+  if (low === 'vault.local.json') return `${rel} holds the user's own settings, such as their domains, proposals mode and privacy allow ids, and this machine's project folders. The vault's \`domain\` and \`proposals\` tools write it once the user agrees; otherwise leave it to the user.`;
   if (low === 'decisions.md') return `${rel} is generated from the picks in raw/picks/. Record picks with tools/pick.mjs instead.`;
   if (low === 'queue.md') return `${rel} is generated from the entries in raw/queue/. Use tools/queue.mjs instead.`;
   if (low === 'derived' || low.startsWith('derived/')) return 'derived/ is written by extraction, not edited by hand. A better extraction replaces the file.';

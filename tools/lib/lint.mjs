@@ -2,8 +2,8 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { isBuiltin } from 'node:module';
 import {
-  config, vaultPath, plural, today, daysBetween, datedFiles, filesIn, pickRows, proposalRows, rewriteText, writeText, lf, readJson, readJsonSafe, toPosix, memo, statePath, isVaultOnly, isMarkerName, clock, inVaultFolder,
-  PROPOSAL_MODES, aboveZero, domainEntries,
+  config, vaultPath, plural, today, daysBetween, datedFiles, filesIn, pickRows, proposalRows, rewriteText, writeText, lf, readJsonSafe, toPosix, memo, statePath, isVaultOnly, isMarkerName, clock, inVaultFolder,
+  PROPOSAL_MODES, aboveZero, domainEntries, configView, declaredDomains, LOCAL_CONFIG, SHARED_CONFIG,
 } from './vault.mjs';
 import { editsFile, sentToHook, hookMatchers, listedAgents, typedFor, hasAgent, AGENT_NAME } from './agents.mjs';
 import {
@@ -89,7 +89,7 @@ export function lint(notes = loadNotes(), chains = sourceChains()) {
 
   for (const n of notes) {
     if (n.depth === 1) add('error', n.rel, 'notes go in wiki/<domain>/');
-    else if (!knownDomain(n.domain)) add('error', n.rel, `${n.domain} isn't a domain in vault.config.json`);
+    else if (!knownDomain(n.domain)) add('error', n.rel, `${n.domain} isn't a domain in vault.config.json or vault.local.json`);
     const folder = kindFolder(n);
     if (n.depth > 1 && folder && n.folder !== folder) {
       add('warn', n.rel, kindPlace(n, n.domain));
@@ -197,6 +197,7 @@ function refootnote(rel, id, target, from, to) {
 // captured yet rather than a fault, so /lint reports it from review.mjs status.
 function lintTopics(notes, domains, add) {
   const used = topicNotes(notes);
+  const { fileOf } = configView();
   for (const [d, c] of Object.entries(domains)) {
     const mine = used.get(d) ?? new Map();
     const listed = (c.topics ?? []).map(normTopic);
@@ -204,7 +205,7 @@ function lintTopics(notes, domains, add) {
       if (more.length || listed.includes(t)) continue;
       const others = [...new Set([...listed, ...[...mine.keys()].filter(k => k !== t)])];
       const fix = others.length ? ` Use one of ${others.join(', ')}, or add it to the list` : '';
-      add('warn', n.rel, `no other ${d} rule has topic ${n.data.topic.trim()}, and vault.config.json doesn't list it.${fix}`);
+      add('warn', n.rel, `no other ${d} rule has topic ${n.data.topic.trim()}, and ${fileOf('domains', d, 'topics')} doesn't list it.${fix}`);
     }
   }
 }
@@ -312,88 +313,93 @@ function lintQueue(add) {
   }
 }
 
-// Reads the file rather than config(), which fills in defaults and would hide a value of the wrong shape.
+// Reads the files rather than config(), which fills in defaults and would hide a value of the wrong shape. Each finding
+// names the file that gives the value.
 export function lintConfig(add) {
-  const c = readJson(vaultPath('vault.config.json'), {}) ?? {};
-  const bad = msg => add('error', 'vault.config.json', msg);
-  if (c.agents !== undefined && !Array.isArray(c.agents)) bad('agents must be a list of adapter names');
+  const { merged: c, fileOf } = configView();
+  const bad = (keys, msg) => add('error', fileOf(...keys), msg);
+  if (c.agents !== undefined && !Array.isArray(c.agents)) bad(['agents'], 'agents must be a list of adapter names');
   for (const name of Array.isArray(c.agents) ? c.agents : []) {
-    if (typeof name !== 'string' || !AGENT_NAME.test(name)) bad(`agents names ${name}, which isn't an adapter name: lowercase letters, digits, - or _`);
-    else if (!hasAgent(name)) bad(`agents names ${name}, and tools/adapters/${name}/adapter.mjs doesn't exist`);
+    if (typeof name !== 'string' || !AGENT_NAME.test(name)) bad(['agents'], `agents names ${name}, which isn't an adapter name: lowercase letters, digits, - or _`);
+    else if (!hasAgent(name)) bad(['agents'], `agents names ${name}, and tools/adapters/${name}/adapter.mjs doesn't exist`);
   }
   const namespaces = c.namespaces ?? {};
-  if (!isMap(namespaces)) bad('namespaces must be an object of { separator, escape } by namespace name');
+  if (!isMap(namespaces)) bad(['namespaces'], 'namespaces must be an object of { separator, escape } by namespace name');
   else {
     for (const [name, ns] of Object.entries(namespaces)) {
       const at = `namespaces.${name}`;
-      if (!NAMESPACE_NAME.test(name)) bad(`${at}: a namespace name is two or more lowercase letters, digits, - or _, starting with a letter`);
-      else if (name === 'file') bad(`${at}: file is the namespace of bare globs; pick another name`);
+      const keys = ['namespaces', name];
+      if (!NAMESPACE_NAME.test(name)) bad(keys, `${at}: a namespace name is two or more lowercase letters, digits, - or _, starting with a letter`);
+      else if (name === 'file') bad(keys, `${at}: file is the namespace of bare globs; pick another name`);
       if (!isMap(ns)) {
-        bad(`${at} must be an object with separator and escape`);
+        bad(keys, `${at} must be an object with separator and escape`);
         continue;
       }
-      if (typeof ns.separator !== 'string' || !ns.separator) bad(`${at}.separator must be a non-empty string`);
-      if (typeof ns.escape !== 'string' || [...ns.escape].length !== 1) bad(`${at}.escape must be one character`);
-      else if ('*?[]{},!'.includes(ns.escape)) bad(`${at}.escape ${ns.escape} is a glob character. Pick one that isn't * ? [ ] { } , or !`);
-      else if (typeof ns.separator === 'string' && ns.separator.includes(ns.escape)) bad(`${at}.escape ${ns.escape} is in the separator. Pick another character`);
+      if (typeof ns.separator !== 'string' || !ns.separator) bad(keys, `${at}.separator must be a non-empty string`);
+      if (typeof ns.escape !== 'string' || [...ns.escape].length !== 1) bad(keys, `${at}.escape must be one character`);
+      else if ('*?[]{},!'.includes(ns.escape)) bad(keys, `${at}.escape ${ns.escape} is a glob character. Pick one that isn't * ? [ ] { } , or !`);
+      else if (typeof ns.separator === 'string' && ns.separator.includes(ns.escape)) bad(keys, `${at}.escape ${ns.escape} is in the separator. Pick another character`);
     }
   }
   const declared = ns => isMap(namespaces) && typeof ns === 'string' && ns !== 'file' && Object.hasOwn(namespaces, ns);
   for (const [d, x] of domainEntries(c.domains)) {
     if (x?.aliases === undefined) continue;
     const at = `${d}.aliases`;
+    const keys = ['domains', d, 'aliases'];
     if (!isMap(x.aliases)) {
-      bad(`${at} must be an object of alias extension names by namespace`);
+      bad(keys, `${at} must be an object of alias extension names by namespace`);
       continue;
     }
     for (const [ns, name] of Object.entries(x.aliases)) {
-      if (!declared(ns)) bad(`${at}.${ns}: ${ns} isn't a namespace that vault.config.json declares under namespaces`);
-      if (typeof name !== 'string' || !EXTENSION_NAME.test(name)) bad(`${at}.${ns} must name an extension in lowercase letters, digits, - or _`);
-      else if (!hasExtension('aliases', name)) bad(`${at}.${ns} names ${name}, and ${extensionRel('aliases', name)} doesn't exist`);
+      if (!declared(ns)) bad(keys, `${at}.${ns}: ${ns} isn't a namespace that vault.config.json declares under namespaces`);
+      if (typeof name !== 'string' || !EXTENSION_NAME.test(name)) bad(keys, `${at}.${ns} must name an extension in lowercase letters, digits, - or _`);
+      else if (!hasExtension('aliases', name)) bad(keys, `${at}.${ns} names ${name}, and ${extensionRel('aliases', name)} doesn't exist`);
     }
   }
   for (const [d, x] of domainEntries(c.domains)) {
     if (x?.compile === undefined) continue;
-    if (!Array.isArray(x.compile) || x.compile.some(name => typeof name !== 'string')) bad(`${d}.compile must be a list of adapter names`);
-    else for (const name of x.compile) if (!hasFormat(name)) bad(`${d}.compile names ${name}, and tools/adapters/${name}/compile.mjs doesn't exist`);
+    const keys = ['domains', d, 'compile'];
+    if (!Array.isArray(x.compile) || x.compile.some(name => typeof name !== 'string')) bad(keys, `${d}.compile must be a list of adapter names`);
+    else for (const name of x.compile) if (!hasFormat(name)) bad(keys, `${d}.compile names ${name}, and tools/adapters/${name}/compile.mjs doesn't exist`);
   }
   if (c.compile !== undefined && (!isMap(c.compile) || (c.compile.maxBytes !== undefined && !(Number.isInteger(c.compile.maxBytes) && c.compile.maxBytes > 0)))) {
-    bad('compile.maxBytes must be a whole number of bytes above 0');
+    bad(['compile'], 'compile.maxBytes must be a whole number of bytes above 0');
   }
   if (c.queue !== undefined && (!isMap(c.queue) || (c.queue.sweepAfterHours !== undefined && !aboveZero(c.queue.sweepAfterHours)))) {
-    bad('queue.sweepAfterHours must be a number of hours above 0');
+    bad(['queue'], 'queue.sweepAfterHours must be a number of hours above 0');
   }
   if (c.pages !== undefined && (!isMap(c.pages) || (c.pages.maxOfferChars !== undefined && !aboveZero(c.pages.maxOfferChars, true)))) {
-    bad('pages.maxOfferChars must be a whole number of characters above 0');
+    bad(['pages', 'maxOfferChars'], 'pages.maxOfferChars must be a whole number of characters above 0');
   }
   for (const f of ['entityAfterRules', 'rollupAfterRules']) {
-    if (isMap(c.pages) && c.pages[f] !== undefined && !aboveZero(c.pages[f], true)) bad(`pages.${f} must be a whole number of rules above 0`);
+    if (isMap(c.pages) && c.pages[f] !== undefined && !aboveZero(c.pages[f], true)) bad(['pages', f], `pages.${f} must be a whole number of rules above 0`);
   }
   if (isMap(c.domains) && c.domains.suggestAfterProjects !== undefined && !aboveZero(c.domains.suggestAfterProjects, true)) {
-    bad('domains.suggestAfterProjects must be a whole number of projects above 0');
+    bad(['domains', 'suggestAfterProjects'], 'domains.suggestAfterProjects must be a whole number of projects above 0');
   }
-  if (isMap(c.knowledge) && c.knowledge.movedOn !== undefined && c.knowledge.movedOn !== 'major') bad('knowledge.movedOn must be major, the only policy so far');
+  if (isMap(c.knowledge) && c.knowledge.movedOn !== undefined && c.knowledge.movedOn !== 'major') bad(['knowledge', 'movedOn'], 'knowledge.movedOn must be major, the only policy so far');
   for (const [d, x] of domainEntries(c.domains)) {
-    if (x?.feeds !== undefined) add('warn', 'vault.config.json', `${d}.feeds does nothing yet: no feed parser ships, so refresh reads no feeds`);
+    if (x?.feeds !== undefined) add('warn', fileOf('domains', d, 'feeds'), `${d}.feeds does nothing yet: no feed parser ships, so refresh reads no feeds`);
   }
   const editTools = c.editTools ?? {};
-  if (!isMap(editTools)) return bad('editTools must be an object of { namespace, path, after } by tool name');
+  if (!isMap(editTools)) return bad(['editTools'], 'editTools must be an object of { namespace, path, after } by tool name');
   const FIELD = /^tool_input\.\S+$/;
   for (const [tool, t] of Object.entries(editTools)) {
     const at = `editTools.${tool}`;
-    if (!/^\S+$/.test(tool)) bad(`${at}: a tool name has no spaces`);
-    else if (editsFile(tool)) bad(`${at}: ${tool} edits a file, which the edit hook reads from the call itself; take it out of editTools`);
-    else if (!listedAgents().length) bad(`${at}: agents in vault.config.json lists no agent, so lint can't tell whether an edit hook is sent ${tool}`);
-    else if (!sentToHook(tool)) bad(`${at}: the edit hook's matcher, ${hookMatchers()}, never sends ${tool} to the hook, so it would never be gated`);
+    const keys = ['editTools', tool];
+    if (!/^\S+$/.test(tool)) bad(keys, `${at}: a tool name has no spaces`);
+    else if (editsFile(tool)) bad(keys, `${at}: ${tool} edits a file, which the edit hook reads from the call itself; take it out of editTools`);
+    else if (!listedAgents().length) bad(keys, `${at}: agents in vault.config.json lists no agent, so lint can't tell whether an edit hook is sent ${tool}`);
+    else if (!sentToHook(tool)) bad(keys, `${at}: the edit hook's matcher, ${hookMatchers()}, never sends ${tool} to the hook, so it would never be gated`);
     if (!isMap(t)) {
-      bad(`${at} must be an object with namespace, path and after`);
+      bad(keys, `${at} must be an object with namespace, path and after`);
       continue;
     }
     if (!isMap(namespaces) || typeof t.namespace !== 'string' || !Object.hasOwn(namespaces, t.namespace)) {
-      bad(`${at}.namespace names ${t.namespace ?? 'nothing'}, which namespaces doesn't declare`);
+      bad(keys, `${at}.namespace names ${t.namespace ?? 'nothing'}, which namespaces doesn't declare`);
     }
-    if (typeof t.path !== 'string' || !FIELD.test(t.path)) bad(`${at}.path must be tool_input.<field>`);
-    if (t.after !== undefined && (typeof t.after !== 'string' || !FIELD.test(t.after))) bad(`${at}.after must be tool_input.<field>`);
+    if (typeof t.path !== 'string' || !FIELD.test(t.path)) bad(keys, `${at}.path must be tool_input.<field>`);
+    if (t.after !== undefined && (typeof t.after !== 'string' || !FIELD.test(t.after))) bad(keys, `${at}.after must be tool_input.<field>`);
   }
 }
 
@@ -563,24 +569,25 @@ function lintDerived(add, hashOf, versions) {
 // Each listed extractor, loaded as extract.mjs loads it, so one that would fail extraction fails lint first. Returns the
 // version of each that loads, which the derived text it made is checked against.
 function lintExtractors(add) {
-  const { extractors } = readJson(vaultPath('vault.config.json'), {}) ?? {};
+  const { merged: { extractors }, fileOf } = configView();
+  const file = fileOf('extractors');
   const versions = new Map();
   if (extractors === undefined) return versions;
   if (!Array.isArray(extractors)) {
-    add('error', 'vault.config.json', 'extractors must be a list of extractor extension names');
+    add('error', file, 'extractors must be a list of extractor extension names');
     return versions;
   }
   for (const name of extractors) {
     const { mod, problems } = loadExtractor(name);
-    for (const msg of problems ?? []) add('error', 'vault.config.json', msg);
+    for (const msg of problems ?? []) add('error', file, msg);
     if (mod) versions.set(name, mod.version);
   }
   return versions;
 }
 
 function lintPrivacy(add) {
-  const { privacy } = readJson(vaultPath('vault.config.json'), {}) ?? {};
-  const bad = msg => add('error', 'vault.config.json', msg);
+  const { merged: { privacy }, fileOf } = configView();
+  const bad = msg => add('error', fileOf('privacy', 'allow'), msg);
   if (privacy === undefined) return;
   if (!isMap(privacy)) return bad('privacy must be an object, such as { "allow": [] }');
   if (privacy.allow === undefined) return;
@@ -875,12 +882,12 @@ function fsWrites(scanned) {
 // Each domain's readers, loaded as a hook loads them, so a reader that would fail a hook fails lint first. A note's
 // requires names an ecosystem one of its domain's readers answers to, or no project can say whether it fits.
 function lintReaders(notes, add) {
-  const c = readJson(vaultPath('vault.config.json'), {}) ?? {};
-  const bad = msg => add('error', 'vault.config.json', msg);
+  const { merged: c, fileOf } = configView();
   const answers = new Map();
   for (const [d, x] of domainEntries(c.domains)) {
     if (x?.readers === undefined) continue;
     const at = `${d}.readers`;
+    const bad = msg => add('error', fileOf('domains', d, 'readers'), msg);
     if (!Array.isArray(x.readers)) {
       bad(`${at} must be a list of reader extension names`);
       continue;
@@ -1015,53 +1022,57 @@ function lintSkillCopies(found) {
 const isList = (v, ok) => Array.isArray(v) && v.every(ok);
 const isFolder = p => typeof p === 'string' && Boolean(p.trim()) && path.isAbsolute(p);
 
-// Reach comes from vault.config.json, which every machine shares, and the paths in vault.local.json, which only this
-// machine has, so each file is read as written rather than through config(), which keeps only what parses.
+// Reach comes from the domains either file declares, and the paths in vault.local.json, which only this machine has, so
+// each file is read as written rather than through config(), which keeps only what parses. Each finding names the file
+// that gives the value.
 function lintReach(add) {
-  const sharedFile = readJsonSafe(vaultPath('vault.config.json'));
-  const shared = Object.fromEntries(domainEntries(sharedFile?.domains));
-  const localFile = vaultPath('vault.local.json');
+  const view = configView();
+  const { shared, merged, fileOf } = view;
+  const declared = Object.fromEntries(declaredDomains(view));
   const modes = joinList(PROPOSAL_MODES, 'or');
-  const topMode = sharedFile?.proposals;
-  if (topMode !== undefined && !PROPOSAL_MODES.includes(topMode)) add('error', 'vault.config.json', `proposals is ${JSON.stringify(topMode)}; it must be ${modes}`);
-  for (const [d, x] of Object.entries(shared)) {
+  const topMode = merged.proposals;
+  if (topMode !== undefined && !PROPOSAL_MODES.includes(topMode)) add('error', fileOf('proposals'), `proposals is ${JSON.stringify(topMode)}; it must be ${modes}`);
+  for (const [d, x] of Object.entries(declared)) {
     const mode = x?.proposals;
-    if (mode !== undefined && !PROPOSAL_MODES.includes(mode)) add('error', 'vault.config.json', `${d}: proposals is ${JSON.stringify(mode)}; it must be ${modes}`);
+    if (mode !== undefined && !PROPOSAL_MODES.includes(mode)) add('error', fileOf('domains', d, 'proposals'), `${d}: proposals is ${JSON.stringify(mode)}; it must be ${modes}`);
   }
+  const localFile = vaultPath(LOCAL_CONFIG);
   const local = fs.existsSync(localFile) ? readJsonSafe(localFile) : {};
-  const mine = local?.domains ?? {};
-  if (!local || typeof mine !== 'object' || Array.isArray(mine)) {
-    add('error', 'vault.local.json', 'vault.local.json must be JSON in the form { "domains": { "<domain>": { "paths": ["<folder>"] } } }');
+  if (!isMap(local) || (local.domains !== undefined && !isMap(local.domains))) {
+    add('error', LOCAL_CONFIG, 'vault.local.json must be a JSON object, with any domains as an object by name, such as { "domains": { "<domain>": { "paths": ["<folder>"] } } }');
     return;
   }
   // Windows calls /scratch absolute, but a session's folder there starts with its drive, so such a glob never matches.
   const rooted = g => process.platform !== 'win32' || /^(?:[A-Za-z]:[\\/]|[\\/]{2}[^\\/])/.test(g);
   if (local.quiet !== undefined && !isList(local.quiet, g => isFolder(g) && rooted(g) && validGlob(g))) {
-    add('error', 'vault.local.json', 'quiet must be a list of globs over absolute folder paths, such as "C:/scratch/**"');
+    add('error', LOCAL_CONFIG, 'quiet must be a list of globs over absolute folder paths, such as "C:/scratch/**"');
   }
+  const mine = Object.fromEntries(domainEntries(local.domains));
   const pathsOf = d => (Array.isArray(mine[d]?.paths) ? mine[d].paths : []);
-  for (const [d, x] of Object.entries(shared)) {
+  for (const [d, x] of Object.entries(declared)) {
     const c = x ?? {};
-    if (c.markers !== undefined && !isList(c.markers, isMarkerName)) add('error', 'vault.config.json', `${d}: markers must be a list of file names, with no folders in them`);
+    const at = key => fileOf('domains', d, key);
+    if (c.markers !== undefined && !isList(c.markers, isMarkerName)) add('error', at('markers'), `${d}: markers must be a list of file names, with no folders in them`);
     for (const flag of ['everywhere', 'vaultOnly']) {
-      if (c[flag] !== undefined && typeof c[flag] !== 'boolean') add('error', 'vault.config.json', `${d}: ${flag} must be true or false`);
+      if (c[flag] !== undefined && typeof c[flag] !== 'boolean') add('error', at(flag), `${d}: ${flag} must be true or false`);
     }
     const marked = Array.isArray(c.markers) && c.markers.length > 0;
-    if (c.vaultOnly === true && (marked || c.everywhere === true)) add('error', 'vault.config.json', `${d} is vaultOnly, so it holds only pages and takes no markers or everywhere`);
-    if (c.projects !== undefined) add('warn', 'vault.config.json', `${d}: projects does nothing. Put its folders in vault.local.json as paths, or give it markers`);
-    if (c.paths !== undefined) add('warn', 'vault.config.json', `${d}: paths in vault.config.json do nothing. Put them in vault.local.json, which holds this machine's folders`);
+    if (c.vaultOnly === true && (marked || c.everywhere === true)) add('error', at('vaultOnly'), `${d} is vaultOnly, so it holds only pages and takes no markers or everywhere`);
+    if (c.projects !== undefined) add('warn', at('projects'), `${d}: projects does nothing. Put its folders in vault.local.json as paths, or give it markers`);
+    if (isMap(shared.domains) && shared.domains[d]?.paths !== undefined) add('warn', SHARED_CONFIG, `${d}: paths in vault.config.json do nothing. Put them in vault.local.json, which holds this machine's folders`);
     if (d !== 'global' && c.vaultOnly !== true && !marked && !pathsOf(d).length && c.everywhere !== true) {
-      add('warn', 'vault.config.json', `${d} reaches no project on this machine. Add its folders to vault.local.json as paths, give it markers, or set vaultOnly: true if it holds only pages`);
+      const home = isMap(shared.domains) && Object.hasOwn(shared.domains, d) ? SHARED_CONFIG : LOCAL_CONFIG;
+      add('warn', home, `${d} reaches no project on this machine. Add its folders to vault.local.json as paths, give it markers, or set vaultOnly: true if it holds only pages`);
     }
   }
   for (const [d, x] of Object.entries(mine)) {
-    if (d === 'global') add('error', 'vault.local.json', 'global reaches every project, so it takes no paths');
-    else if (!Object.hasOwn(shared, d)) add('error', 'vault.local.json', `${d} isn't a domain in vault.config.json`);
-    else if (shared[d]?.vaultOnly === true && pathsOf(d).length) add('error', 'vault.local.json', `${d} is vaultOnly in vault.config.json, so it takes no paths`);
-    else if (x?.paths !== undefined && !isList(x.paths, isFolder)) add('error', 'vault.local.json', `${d}: paths must be a list of absolute folder paths`);
+    if (d === 'global') add('error', LOCAL_CONFIG, 'global reaches every project, so it takes no paths');
+    else if (!Object.hasOwn(declared, d)) add('error', LOCAL_CONFIG, `${d} has only paths, so it isn't a domain. Declare it with a title and topics, or fix the name`);
+    else if (declared[d]?.vaultOnly === true && pathsOf(d).length) add('error', LOCAL_CONFIG, `${d} is vaultOnly, so it takes no paths`);
+    else if (x?.paths !== undefined && !isList(x.paths, isFolder)) add('error', LOCAL_CONFIG, `${d}: paths must be a list of absolute folder paths`);
     else {
       for (const p of pathsOf(d)) {
-        if (!fs.statSync(toPosix(p), { throwIfNoEntry: false })?.isDirectory()) add('error', 'vault.local.json', `${d}'s path ${p} doesn't exist on this machine. Fix it or remove it`);
+        if (!fs.statSync(toPosix(p), { throwIfNoEntry: false })?.isDirectory()) add('error', LOCAL_CONFIG, `${d}'s path ${p} doesn't exist on this machine. Fix it or remove it`);
       }
     }
   }

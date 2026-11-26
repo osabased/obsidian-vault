@@ -232,7 +232,7 @@ test('a swept domain offer is offered again from the queue, and keep starts the 
   assert.match(again.text, /^\*\*Start this domain\?\*\* quill, "Quill": a project holding quill\.project is in it\. Topics: code\.$/);
   const k = keepAllowed(v, b, again.id, again.text);
   assert.equal(k.code, 0, k.stderr);
-  assert.ok(JSON.parse(v.read('vault.config.json')).domains.quill);
+  assert.ok(JSON.parse(v.read('vault.local.json')).domains.quill);
   assert.ok(queueRows(v).some(r => r.decides === u && r.decision === 'kept'));
   assert.match(v.propose(b, { queued: u }).stderr, new RegExp(`\`${u}\` was already kept`));
 });

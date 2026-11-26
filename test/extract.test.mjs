@@ -12,7 +12,7 @@ const derivedFiles = v => (v.exists('derived') ? fs.readdirSync(v.at('derived'))
 const hashOf = (v, rel) => sha256(fs.readFileSync(v.at(...rel.split('/'))));
 const extract = (v, ...args) => v.run('extract.mjs', args);
 const allowOf = value => sha256(value).slice(0, 16);
-const REMOVE = "Remove it, or add an allow id to privacy.allow in vault.config.json if it isn't a secret, then extract again:";
+const REMOVE = "Remove it, or add an allow id to privacy.allow in vault.local.json if it isn't a secret, then extract again:";
 
 // An extractor that returns whatever JSON the file holds after its first byte, which keeps the file from reading as
 // UTF-8, so a test can hand extract.mjs any result.
@@ -105,7 +105,7 @@ test('a refused text lists each value as scan.mjs lists it once the text is writ
   const refused = extract(v, rel);
   assert.equal(refused.code, 1);
   const [head, ...found] = refused.stdout.trimEnd().split('\n');
-  assert.equal(head, `failed ${rel}: its text holds 2 key- or token-shaped values. Remove them, or add an allow id to privacy.allow in vault.config.json if it isn't a secret, then extract again:`);
+  assert.equal(head, `failed ${rel}: its text holds 2 key- or token-shaped values. Remove them, or add an allow id to privacy.allow in vault.local.json if it isn't a secret, then extract again:`);
   assert.equal(found.length, 2);
   assert.match(v.run('scan.mjs', [rel]).stdout, /^skipped /);
   const ids = found.map(l => l.match(/ · allow ([0-9a-f]{16})$/)[1]);

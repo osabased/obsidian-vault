@@ -166,8 +166,8 @@ test('lint checks the shape of markers, everywhere, vaultOnly and vault.local.js
     ['error', 'vault.config.json', 'beta: vaultOnly must be true or false'],
     ['error', 'vault.config.json', 'gamma is vaultOnly, so it holds only pages and takes no markers or everywhere'],
     ['error', 'vault.local.json', 'alpha: paths must be a list of absolute folder paths'],
-    ['error', 'vault.local.json', 'delta is vaultOnly in vault.config.json, so it takes no paths'],
-    ['error', 'vault.local.json', "nobody isn't a domain in vault.config.json"],
+    ['error', 'vault.local.json', 'delta is vaultOnly, so it takes no paths'],
+    ['error', 'vault.local.json', "nobody has only paths, so it isn't a domain. Declare it with a title and topics, or fix the name"],
     ['warn', 'vault.config.json', 'beta reaches no project on this machine. Add its folders to vault.local.json as paths, give it markers, or set vaultOnly: true if it holds only pages'],
     ['warn', 'vault.config.json', 'old: projects does nothing. Put its folders in vault.local.json as paths, or give it markers'],
   ]);

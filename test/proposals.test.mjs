@@ -144,21 +144,23 @@ test('every project session hears how to change the mode', t => {
   assert.match(context(out), /the vault's `proposals` tool/);
 });
 
-test('proposals.mjs sets the mode from a call the user allowed, keeping the rest of the config as it was', t => {
+test('proposals.mjs sets the mode in vault.local.json from a call the user allowed, keeping the rest of the config as it was', t => {
   const v = vaultIn(t, 'ask');
   const before = v.read('vault.config.json');
+  const local = v.read('vault.local.json');
   const { sid } = started(v, ['call them by their screen', 'switch rules to off']);
   const refused = v.run('proposals.mjs', [sid], { input: { mode: 'off' } });
   assert.equal(refused.code, 1);
   assert.match(refused.stderr, /allows it at the prompt/);
   assert.equal(setMode(v, sid, { mode: 'off', approved: 'switch rules to off' }).code, 1, 'approved is no field');
-  assert.equal(v.read('vault.config.json'), before);
+  assert.equal(v.read('vault.local.json'), local);
 
   const r = setMode(v, sid, { mode: 'off' });
   assert.equal(r.code, 0, r.stderr);
-  const after = v.read('vault.config.json');
-  assert.equal(JSON.parse(after).proposals, 'off');
-  assert.equal(after.replace('"proposals": "off"', '"proposals": "ask"'), before);
+  assert.equal(v.read('vault.config.json'), before);
+  const after = JSON.parse(v.read('vault.local.json'));
+  assert.equal(after.proposals, 'off');
+  assert.deepEqual({ ...after, proposals: undefined }, { ...JSON.parse(local), proposals: undefined });
   assert.match(r.stdout, /off/);
   const off = v.propose(sid, rule());
   assert.equal(off.code, 1);
@@ -176,12 +178,13 @@ test('proposals.mjs sets one domain\'s mode, and refuses an unknown mode or doma
   assert.match(none.stderr, /nope/);
   const r = setMode(v, sid, { mode: 'corrections', domain: 'glim' });
   assert.equal(r.code, 0, r.stderr);
-  const c = JSON.parse(v.read('vault.config.json'));
+  const c = JSON.parse(v.read('vault.local.json'));
   assert.equal(c.domains.glim.proposals, 'corrections');
-  assert.equal(c.proposals, 'ask');
+  assert.equal(c.proposals, undefined);
+  assert.equal(JSON.parse(v.read('vault.config.json')).proposals, 'ask');
   const again = setMode(v, sid, { mode: 'off', domain: 'glim' });
   assert.equal(again.code, 0, again.stderr);
-  assert.equal(JSON.parse(v.read('vault.config.json')).domains.glim.proposals, 'off');
+  assert.equal(JSON.parse(v.read('vault.local.json')).domains.glim.proposals, 'off');
 });
 
 test('setting the top-level mode names the domains that keep their own', t => {
@@ -237,17 +240,17 @@ test('lint reports a bad proposals value even when vault.local.json is broken', 
 test('a proposals call refused for its fields is spent, so a shell rerun of that call with another mode sets nothing', t => {
   const v = vaultIn(t, 'ask');
   const { sid } = started(v, ['switch it off']);
-  const before = v.read('vault.config.json');
+  const before = v.read('vault.local.json');
   const sent = { mode: 'off', domain: 'nope' };
   const call = recordedCall(v, sid, { tool: 'proposals', input: sent });
   const first = v.run('proposals.mjs', [sid, call], { input: sent });
   assert.equal(first.code, 1);
-  assert.match(first.stderr, /^Not set: vault\.config\.json has no domain nope\./);
+  assert.match(first.stderr, /^Not set: the vault has no domain nope\./);
   assert.ok(JSON.parse(v.read(`.state/calls/${call}.json`)).used, 'the refused run spent its call');
   const rerun = v.run('proposals.mjs', [sid, call], { input: { mode: 'corrections' } });
   assert.equal(rerun.code, 1, rerun.stdout);
   assert.equal(rerun.stderr, "Not set: proposals changes the mode only from the vault's `proposals` tool, once the user allows it at the prompt.\n");
-  assert.equal(v.read('vault.config.json'), before);
+  assert.equal(v.read('vault.local.json'), before);
 });
 
 test('/vault off as a slash command sets the mode through the proposals call the user allows', t => {
@@ -255,7 +258,7 @@ test('/vault off as a slash command sets the mode through the proposals call the
   const { sid } = started(v, ['<command-message>vault</command-message>\n<command-name>/vault</command-name>\n<command-args>off</command-args>']);
   const r = setMode(v, sid, { mode: 'off' });
   assert.equal(r.code, 0, r.stderr);
-  assert.equal(JSON.parse(v.read('vault.config.json')).proposals, 'off');
+  assert.equal(JSON.parse(v.read('vault.local.json')).proposals, 'off');
   assert.equal(setMode(v, sid, { mode: 'ask' }, { allow: false }).code, 1, 'a denied call sets nothing');
-  assert.equal(JSON.parse(v.read('vault.config.json')).proposals, 'off');
+  assert.equal(JSON.parse(v.read('vault.local.json')).proposals, 'off');
 });

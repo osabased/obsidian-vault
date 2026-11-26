@@ -3,14 +3,14 @@ import os from 'node:os';
 import path from 'node:path';
 import {
   config, vaultPath, statePath, withLock, writeText, appendLog, toPosix, inside, inVaultFolder, isMarkerName, isFileAt, markerDomains, mainCheckout,
-  readJson, guarded, reloadConfig, newId, today,
+  readJson, guarded, reloadConfig, newId, today, LOCAL_CONFIG,
 } from './vault.mjs';
 import { build } from './build.mjs';
 import { KEBAB, joinList } from './rules.mjs';
 import { callerEntry, addReach, PASS } from './sessions.mjs';
 import { namedIn } from './neutral.mjs';
 import { proposeNote, pickNote } from './instructions.mjs';
-import { valuesOf, addMember } from './json.mjs';
+import { setIn } from './json.mjs';
 import { typedFor, shortName } from './agents.mjs';
 import { refuse, line, lines } from './input.mjs';
 import { makeOffer, offerText, consentOf, declined } from './offers.mjs';
@@ -64,7 +64,7 @@ function fields(p, { folder, vaultFolder, mainWorktree }) {
   const name = line(p, 'name').normalize('NFC');
   if (!KEBAB.test(name)) refuse('name must be lowercase-kebab-case.');
   if (name === 'global') refuse('global is the domain every project is in, so it is never started. Pick another name.');
-  if (Object.hasOwn(config().domains, name)) refuse(`vault.config.json already has a domain ${name}. Pick another name.`);
+  if (Object.hasOwn(config().domains, name)) refuse(`the vault already has a domain ${name}. Pick another name.`);
   if (Object.hasOwn(localDomains(), name)) refuse(`vault.local.json already has paths for ${name}, which are the user's to remove. Pick another name.`);
   const title = line(p, 'title');
   const topics = lines(p, 'topics');
@@ -102,35 +102,21 @@ function clashes(f) {
   refuse(`the vault's tools, skills, tests, AGENTS.md and reference files name no domain, and they already use this name or title: ${hits.slice(0, 3).join('; ')}${more}. Pick another.`);
 }
 
-function withDomain(text, name, entry) {
-  const top = text.indexOf('{');
-  if (top < 0) throw new Error('the file holds no JSON object');
-  const domains = valuesOf(text, top).get('domains');
-  if (domains === undefined) return addMember(text, top, 1, 'domains', { [name]: entry });
-  if (text[domains] !== '{') refuse("the file's domains isn't an object. /lint names the problem; it is the user's to fix.");
-  return addMember(text, domains, 2, name, entry);
-}
-
+// The domain is the user's own, so it goes in the untracked vault.local.json, never the vault.config.json the repo ships.
 function write(f) {
-  const configFile = vaultPath('vault.config.json');
-  const raw = fs.readFileSync(configFile, 'utf8');
-  // Another run may have added the key since the checks.
-  if (Object.hasOwn(JSON.parse(raw.replace(/^\uFEFF/, '')).domains ?? {}, f.name)) refuse(`vault.config.json already has a domain ${f.name}. Pick another name.`);
+  // Another run may have added the domain since the checks.
+  reloadConfig();
+  if (Object.hasOwn(config().domains, f.name) || Object.hasOwn(localDomains(), f.name)) refuse(`the vault already has a domain ${f.name}. Pick another name.`);
   const entry = { title: f.title, topics: f.topics, ...(f.marker ? { markers: [f.marker] } : {}), ...(f.vaultOnly ? { vaultOnly: true } : {}) };
-  const local = vaultPath('vault.local.json');
-  let localText;
-  if (f.path) {
-    if (Object.hasOwn(localDomains(), f.name)) refuse(`vault.local.json already has paths for ${f.name}, which are the user's to remove. Pick another name.`);
-    localText = fs.existsSync(local) ? withDomain(fs.readFileSync(local, 'utf8'), f.name, { paths: [f.path] }) : `${JSON.stringify({ domains: { [f.name]: { paths: [f.path] } } }, null, 2)}\n`;
-  }
-  writeText(configFile, withDomain(raw, f.name, entry));
-  if (localText) writeText(local, localText);
+  const file = vaultPath(LOCAL_CONFIG);
+  const text = setIn(fs.existsSync(file) ? fs.readFileSync(file, 'utf8') : '{}\n', ['domains', f.name], { ...entry, ...(f.path ? { paths: [f.path] } : {}) });
+  if (text === null) refuse("vault.local.json holds no JSON object, or its domains isn't one. /lint names the problem; it is the user's to fix.");
+  writeText(file, text);
   return entry;
 }
 
 function reply(f, entry, vaultFolder) {
-  const configFile = toPosix(vaultPath('vault.config.json'));
-  const local = toPosix(vaultPath('vault.local.json'));
+  const local = toPosix(vaultPath(LOCAL_CONFIG));
   const head = `**New domain** ${f.name}, "${f.title}": `;
   const reach = f.vaultOnly ? 'it holds pages only, which sessions in the vault folder read.'
     : f.path ? `${f.path} is in it, on this machine only.`
@@ -138,16 +124,14 @@ function reply(f, entry, vaultFolder) {
     : `a project holding ${f.marker} is in it, such as ${f.root}.`;
   const sharing = f.marker ? Object.entries(config().domains).filter(([d, c]) => d !== f.name && Array.isArray(c?.markers) && c.markers.includes(f.marker)).map(([d]) => d) : [];
   const shared = sharing.length ? ` ${joinList(sharing, 'and')} also ${sharing.length === 1 ? 'has' : 'have'} ${f.marker} as a marker, so a project holding it is in both.` : '';
-  const files = f.path ? `its entries in ${configFile} and ${local}; both files are yours` : `its entry in ${configFile}, which is yours`;
-  const where = f.marker ? ' Other machines get it once the vault is committed and pulled there.' : '';
   const lines = [
     `${head}${reach}${shared}`,
-    `\`"${f.name}": ${JSON.stringify(entry)}\`. To change or remove it, edit or delete ${files}.${where}`,
+    `\`"${f.name}": ${JSON.stringify(entry)}\`. To change or remove it, edit or delete its entry in ${local}, which is yours and stays on this machine.`,
   ];
   // A vault-folder session proposes for every domain already, and /ingest tells it how.
   const notes = vaultFolder ? [] : [proposeNote([f.name]), pickNote()];
   return [
-    `Added ${f.name} to vault.config.json${f.path ? ', and its folder to vault.local.json' : ''}. It reaches the rest of this session.`,
+    `Added ${f.name} to vault.local.json. It reaches the rest of this session.`,
     ...notes,
     'End your reply with these two lines as they are:',
     '',
@@ -191,7 +175,7 @@ export function addDomain(sid, p, { kept = null, mainWorktree, queued = null, qu
     return queueAs.reply(id);
   }
   if (!kept) {
-    if (consentOf(session) === 'code' && !typedFor(session)) refuse("the vault has no transcript for this session, so it can't check the user agreed. Ask the user to add the domain to vault.config.json.");
+    if (consentOf(session) === 'code' && !typedFor(session)) refuse("the vault has no transcript for this session, so it can't check the user agreed. Ask the user to add the domain to vault.local.json.");
     if (consentOf(session) === 'prompt' && declined(sid, offerText(offer, null))) refuse("the user denied starting this domain at the prompt in this session. Don't offer it again unless they ask.");
     return makeOffer({ kind: 'domain', sid, entry: session, key: f.name, fields: queued ? { queued: queued.id } : p, lines: offer }).reply;
   }

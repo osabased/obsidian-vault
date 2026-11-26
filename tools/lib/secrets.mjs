@@ -96,7 +96,7 @@ function headLines(text) {
   return end === -1 ? 0 : end + 1;
 }
 
-// What secretsIn finds that privacy.allow in vault.config.json doesn't let through, past derived text's frontmatter.
+// What secretsIn finds that privacy.allow in vault.local.json doesn't let through, past derived text's frontmatter.
 export function unallowedSecrets(text, { derived = false } = {}) {
   const allow = config().privacy?.allow;
   const allowed = new Set(Array.isArray(allow) ? allow : []);

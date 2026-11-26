@@ -20,7 +20,7 @@ function errorsNote() {
 }
 
 // Notes go live without a commit, so a note an error keeps from delivery would otherwise go unnoticed until /lint.
-// A session in this folder also hears of notes outside any domain in vault.config.json.
+// A session in this folder also hears of notes outside any domain the config declares.
 function undeliveredNote(scope, vaultFolder, notes) {
   const broken = notes.filter(n => !isRetired(n) && (scope.includes(n.domain) || (vaultFolder && !knownDomain(n.domain))))
     .flatMap(n => {

@@ -1,6 +1,8 @@
 # How rules and pages reach the agent
 
-Each domain in `vault.config.json` says which sessions it reaches:
+The config is two files. `vault.config.json` ships with the repo, which may be public, and holds the defaults every machine shares. The untracked `vault.local.json` holds the user's own settings, such as their domains, `proposals` mode and `privacy.allow` ids, and this machine's folders; a key it sets wins over the shared file's, object by object. The `domain` and `proposals` tools write only `vault.local.json`, once the user agrees.
+
+Each domain says which sessions it reaches:
 
 - `markers`: file names, such as a manifest every project of the domain's kind has. A folder holding one is the root of a project in the domain. An edit takes the domains of the nearest marker folder at or above its file. A session takes those at or above its folder, and those of markers up to `reach.markerDepth` (3 by default) folders below it, so a session at a monorepo root is in each package's domain.
 - `paths`: this machine's project folders, kept in the untracked `vault.local.json` as `{ "domains": { "<domain>": { "paths": ["<absolute folder>"] } } }`, since folders differ per machine. Lint reports a path that doesn't exist here as an error. The file is the user's; the `domain` tool adds a session's folder to it only after the user agrees.

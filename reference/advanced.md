@@ -10,7 +10,7 @@ Each new or resumed session starts with one line, such as `vault: roblox · 12 r
 
 ## Domains
 
-A domain reaches projects by the `markers` in `vault.config.json`, or by this machine's folders, which go in the untracked `vault.local.json` as `{ "domains": { "<domain>": { "paths": ["<absolute folder>"] } } }`. A session in a project no domain reaches can keep a preference in `global`, or suggest a domain to you; once you agree, as to a rule, the `domain` tool adds it to `vault.config.json`, and for a folder alone to `vault.local.json` too. Both files stay yours to edit.
+A domain reaches projects by its `markers`, or by this machine's folders, which go in the untracked `vault.local.json` as `{ "domains": { "<domain>": { "paths": ["<absolute folder>"] } } }`. A session in a project no domain reaches can keep a preference in `global`, or suggest a domain to you; once you agree, as to a rule, the `domain` tool adds it to the untracked `vault.local.json`, which stays on this machine and out of the repo. A domain you want every clone to have goes in `vault.config.json` by hand. Both files stay yours to edit.
 
 For folders where the domain offer is noise, such as an app's scratch folders, list globs over their absolute paths under `quiet` in `vault.local.json`: sessions there can still keep a rule in `global`, and hear no domain offer.
 
@@ -76,7 +76,7 @@ What Codex doesn't give the vault, and the vault doesn't work around:
 
 ## Projects without the hooks
 
-For a project where the vault's hooks don't run, such as a machine without them or a repo other people's agents read, add `"compile": ["codex"]` to its domain in `vault.config.json` and run:
+For a project where the vault's hooks don't run, such as a machine without them or a repo other people's agents read, add `"compile": ["codex"]` to its domain in `vault.local.json`, or in `vault.config.json` for a domain the repo ships, and run:
 
 ```
 node tools/compile.mjs <project>

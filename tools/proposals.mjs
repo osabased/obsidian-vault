@@ -10,7 +10,7 @@ const FIELDS = [
   { name: 'domain', type: 'string', help: ['optional, a domain to give a mode of its own; without it, or with global, the mode for global and', 'every domain without one of its own'] },
 ];
 
-const help = () => renderHelp([RUN, '', 'Sets when agents propose rules, in vault.config.json. mode.json is an object with these fields:'], FIELDS, [
+const help = () => renderHelp([RUN, '', 'Sets when agents propose rules, in vault.local.json. mode.json is an object with these fields:'], FIELDS, [
   '',
   'A session in the vault folder offers as in ask whatever the mode, and without the off gate, since /ingest and /lint go',
   'through each change with the user.',

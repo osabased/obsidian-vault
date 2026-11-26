@@ -355,7 +355,7 @@ export const knownDomain = d => d === 'global' || Object.hasOwn(config().domains
 // Why a note never reaches a session, or null when it does. A superseded note says so on its own.
 export function undelivered(n) {
   if (n.depth < 2) return 'it is not in a domain folder, wiki/<domain>/';
-  if (!knownDomain(n.domain)) return `${n.domain} isn't a domain in vault.config.json`;
+  if (!knownDomain(n.domain)) return `${n.domain} isn't a domain in vault.config.json or vault.local.json`;
   return noteErrors(n)[0] ?? null;
 }
 
@@ -639,7 +639,7 @@ export function domainOrder(domains) {
   return [...new Set(domains)].sort((a, b) => rank(a) - rank(b) || cmp(a, b));
 }
 
-export const domainTitle = d => (d === 'global' ? 'Every project' : config().domains[d]?.title ?? 'not in vault.config.json');
+export const domainTitle = d => (d === 'global' ? 'Every project' : config().domains[d]?.title ?? 'not in the config');
 
 const isRule = line => line.startsWith('- ');
 const alwaysEntries = rules => Object.entries(rules).filter(([, r]) => r.always).sort((a, b) => byFit(a[1], b[1]) || byKey(a, b));

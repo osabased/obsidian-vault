@@ -6,7 +6,7 @@ argument-hint: "[status|corrections|ask|off] [domain]"
 
 # Vault
 
-The `proposals` setting in the vault's `vault.config.json` says when agents propose rules:
+The `proposals` setting in the vault's untracked `vault.local.json`, over the default in `vault.config.json`, says when agents propose rules:
 
 - `corrections`: an agent writes a rule as soon as the user corrects it or says how they want things.
 - `ask`: an agent offers each rule, and writes it once the user agrees. This is the default when `proposals` is unset.

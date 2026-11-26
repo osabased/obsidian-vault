@@ -37,18 +37,53 @@ export const DOMAIN_SETTINGS = { suggestAfterProjects: 2 };
 export const domainEntries = ds => Object.entries(ds && typeof ds === 'object' && !Array.isArray(ds) ? ds : {}).filter(([d]) => !Object.hasOwn(DOMAIN_SETTINGS, d));
 
 const strings = xs => (Array.isArray(xs) ? xs.filter(x => typeof x === 'string' && x.trim()) : []);
-const local = () => readJsonSafe(vaultPath('vault.local.json')) ?? {};
+
+// vault.config.json ships with the repo, which may be public, and every machine shares it. vault.local.json is untracked:
+// the user's own settings (their domains, proposals mode and privacy allow ids) and this machine's (paths, quiet).
+export const SHARED_CONFIG = 'vault.config.json';
+export const LOCAL_CONFIG = 'vault.local.json';
+const plain = x => x !== null && typeof x === 'object' && !Array.isArray(x);
+// Objects merge key by key; any other value the second gives replaces the first's.
+const merge = (a, b) => (!plain(a) || !plain(b) ? (b === undefined ? a : b)
+  : Object.fromEntries([...new Set([...Object.keys(a), ...Object.keys(b)])].map(k => [k, merge(a[k], b[k])])));
+
+// The config as its files give it, before defaults, with vault.local.json winning. A local file, or a local domains, that
+// isn't a JSON object gives nothing, and lint reports it. fileOf names the file that gives the value at keys, for a
+// message about it: vault.local.json when it holds them all, else vault.config.json.
+export function configView() {
+  const shared = readJson(vaultPath(SHARED_CONFIG), {});
+  const mine = readJsonSafe(vaultPath(LOCAL_CONFIG));
+  const local = plain(mine) ? { ...mine } : {};
+  if (Object.hasOwn(local, 'domains') && !plain(local.domains)) delete local.domains;
+  const fileOf = (...keys) => {
+    let x = local;
+    for (const k of keys) {
+      if (!plain(x) || !Object.hasOwn(x, k)) return SHARED_CONFIG;
+      x = x[k];
+    }
+    return keys.length ? LOCAL_CONFIG : SHARED_CONFIG;
+  };
+  const sharedFile = plain(shared) ? shared : {};
+  return { shared: sharedFile, local, merged: merge(sharedFile, local), fileOf };
+}
+
+// A local entry with only paths places a domain declared elsewhere on this machine, so a misspelt name there is an error
+// lint reports rather than a new domain.
+export function declaredDomains({ shared, local, merged }) {
+  const own = (file, d) => plain(file.domains) && Object.hasOwn(file.domains, d);
+  return domainEntries(merged.domains).filter(([d]) => own(shared, d) || (own(local, d) && Object.keys(local.domains[d] ?? {}).some(k => k !== 'paths')));
+}
 
 export const aboveZero = (x, whole = false) => typeof x === 'number' && (whole ? Number.isInteger(x) : Number.isFinite(x)) && x > 0;
 export const POSITIVE = [['queue', 'sweepAfterHours', false], ['pages', 'maxOfferChars', true], ['pages', 'entityAfterRules', true], ['pages', 'rollupAfterRules', true]];
 
-// Paths differ per machine, so they come from the untracked vault.local.json; a file lint finds broken gives none.
+// Paths differ per machine, so only vault.local.json's count.
 let loaded;
 export function config() {
   if (!loaded) {
-    const c = readJson(vaultPath('vault.config.json'), {});
-    const mine = local();
-    const domains = Object.fromEntries(domainEntries(c.domains).map(([d, x]) => [d, { ...x, paths: strings(mine.domains?.[d]?.paths) }]));
+    const view = configView();
+    const { merged: c, local: mine } = view;
+    const domains = Object.fromEntries(declaredDomains(view).map(([d, x]) => [d, { ...x, paths: strings(mine.domains?.[d]?.paths) }]));
     const extractors = Array.isArray(c.extractors) ? c.extractors : [];
     // The agents whose tool names lint checks, in the order a script looks for its own session, each a folder in tools/adapters/.
     const agents = Array.isArray(c.agents) ? c.agents : ['claude-code'];
@@ -222,8 +257,8 @@ export function isQuiet(cwd) {
   return config().quiet.some(g => globToRegExp(g).test(p));
 }
 
-// A vault-only domain holds pages only, which sessions read from the vault folder. It is set in vault.config.json rather
-// than read from missing paths, so a domain is vault-only on every machine or none.
+// A vault-only domain holds pages only, which sessions read from the vault folder. It is set on the domain rather than
+// read from missing paths, so it doesn't change with the folders a machine has.
 export const isVaultOnly = d => d !== 'global' && config().domains[d]?.vaultOnly === true;
 export const everywhereDomains = () => Object.keys(config().domains).filter(d => config().domains[d].everywhere === true && !isVaultOnly(d));
 

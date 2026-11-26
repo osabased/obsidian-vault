@@ -4,7 +4,7 @@ import { reachOf, compileFor } from './lib/compile.mjs';
 import { UsageError, failure } from './lib/input.mjs';
 
 const USAGE = `usage: node tools/compile.mjs <project>...
-Writes the project's rules into a marked section of the instruction file of each agent its domain lists under "compile" in vault.config.json.`;
+Writes the project's rules into a marked section of the instruction file of each agent its domain lists under "compile" in vault.config.json or vault.local.json.`;
 
 // Every project is checked before any file is written, so a mistyped path in the list leaves the others as they were.
 function plan(args) {
@@ -14,7 +14,7 @@ function plan(args) {
     if (!fs.statSync(project, { throwIfNoEntry: false })?.isDirectory()) throw new UsageError(`${arg} is not a folder.`);
     if (inVaultFolder(project)) throw new UsageError(`${arg} is in the vault, which holds no project to compile for.`);
     const reach = reachOf(project);
-    if (!reach) throw new UsageError(`${arg} is in no domain that lists an agent under "compile" in vault.config.json.`);
+    if (!reach) throw new UsageError(`${arg} is in no domain that lists an agent under "compile" in vault.config.json or vault.local.json.`);
     return { project, reach };
   });
 }

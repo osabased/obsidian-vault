@@ -83,7 +83,7 @@ test('scan prints each value with its allow id, and exits 1', t => {
   assert.deepEqual(r.stdout.trimEnd().split('\n'), [
     `raw/refs/notes.md:4 assignment api_key=ab…78 · allow ${allowOf('ab12cd34ef56gh78')}`,
     `raw/refs/notes.md:8 token Zq…jS · allow ${allowOf(TOKEN)}`,
-    "2 key- or token-shaped values in 1 file. Remove them, or add an allow id to privacy.allow in vault.config.json if it isn't a secret.",
+    "2 key- or token-shaped values in 1 file. Remove them, or add an allow id to privacy.allow in vault.local.json if it isn't a secret.",
   ]);
   assert.doesNotMatch(r.stdout, /ab12cd34|Zq3xV9/, 'scan never repeats a value');
 });
@@ -108,7 +108,7 @@ test('scan reads a binary through its derived text, under its own name, and skip
   assert.deepEqual(r.stdout.trimEnd().split('\n'), [
     `raw/refs/keys.pdf:10 assignment secret=Zq…jS · allow ${allowOf(TOKEN)}`,
     "skipped raw/refs/talk.mp4: it isn't UTF-8 and has no derived text. Run node tools/extract.mjs raw/refs/talk.mp4, then scan again.",
-    "1 key- or token-shaped value in 1 file. Remove them, or add an allow id to privacy.allow in vault.config.json if it isn't a secret.",
+    "1 key- or token-shaped value in 1 file. Remove them, or add an allow id to privacy.allow in vault.local.json if it isn't a secret.",
   ]);
 });
 
@@ -233,7 +233,7 @@ test('scan takes a bundle folder and scans each file in it, a binary through its
   assert.deepEqual(r.stdout.trimEnd().split('\n'), [
     `raw/refs/kit/a.txt:1 assignment api_key=ab…78 · allow ${allowOf('ab12cd34ef56gh78')}`,
     "skipped raw/refs/kit/talk.mp4: it isn't UTF-8 and has no derived text. Run node tools/extract.mjs raw/refs/kit/talk.mp4, then scan again.",
-    "1 key- or token-shaped value in 1 file. Remove them, or add an allow id to privacy.allow in vault.config.json if it isn't a secret.",
+    "1 key- or token-shaped value in 1 file. Remove them, or add an allow id to privacy.allow in vault.local.json if it isn't a secret.",
   ]);
   v.write('raw/refs/kit/a.txt', 'a\n');
   assert.equal(v.run('scan.mjs', ['raw/refs/kit/']).stdout, 'skipped raw/refs/kit/talk.mp4: it isn\'t UTF-8 and has no derived text. Run node tools/extract.mjs raw/refs/kit/talk.mp4, then scan again.\nNo key- or token-shaped values in 4 files.\n');
@@ -266,7 +266,7 @@ test('scan takes a doc set folder, which review.mjs sources lists, and scans eac
   assert.equal(r.code, 1, r.stdout + r.stderr);
   assert.deepEqual(r.stdout.trimEnd().split('\n'), [
     `raw/refs/docs/a.md:1 assignment api_key=ab…78 · allow ${allowOf('ab12cd34ef56gh78')}`,
-    "1 key- or token-shaped value in 1 file. Remove them, or add an allow id to privacy.allow in vault.config.json if it isn't a secret.",
+    "1 key- or token-shaped value in 1 file. Remove them, or add an allow id to privacy.allow in vault.local.json if it isn't a secret.",
   ]);
   assert.equal(v.run('scan.mjs', ['raw/refs/docs/sub']).code, 2, 'a folder inside a doc set is not the source');
 });

@@ -200,29 +200,29 @@ test('a new domain is offered in every mode, the vault folder too, and written o
   const dir = fs.mkdtempSync(`${v.root}-quill-`);
   t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
   fs.writeFileSync(`${dir}/quill.project`, '');
-  const before = v.read('vault.config.json');
+  const before = v.read('vault.local.json');
   const sid = started(v, null, { cwd: dir });
   const r = v.run('domain.mjs', [sid], { input: QUILL });
   const o = offered(r);
   assert.match(o.text, /^\*\*Start this domain\?\*\* quill, "Quill": a project holding quill\.project is in it, such as .+\. Topics: code\.$/);
-  assert.equal(v.read('vault.config.json'), before);
+  assert.equal(v.read('vault.local.json'), before);
   const k = keepAllowed(v, sid, o.id, o.text);
   assert.equal(k.code, 0, k.stderr);
-  assert.match(k.stdout, /^Added quill to vault\.config\.json\./);
-  assert.ok(JSON.parse(v.read('vault.config.json')).domains.quill);
+  assert.match(k.stdout, /^Added quill to vault\.local\.json\./);
+  assert.ok(JSON.parse(v.read('vault.local.json')).domains.quill);
 
   const home = started(v, null, { cwd: v.root });
   const pages = offered(v.run('domain.mjs', [home], { input: { ...QUILL, name: 'brook', title: 'Brook', marker: undefined, vaultOnly: true } }));
   assert.equal(pages.text, '**Start this domain?** brook, "Brook": it holds pages only. Topics: code.');
-  assert.equal(JSON.parse(v.read('vault.config.json')).domains.brook, undefined);
+  assert.equal(JSON.parse(v.read('vault.local.json')).domains?.brook, undefined);
   assert.equal(keepAllowed(v, home, pages.id, pages.text).code, 0);
-  assert.equal(JSON.parse(v.read('vault.config.json')).domains.brook.vaultOnly, true);
+  assert.equal(JSON.parse(v.read('vault.local.json')).domains.brook.vaultOnly, true);
 });
 
 test('proposals sets the mode only with an allowed call for it', t => {
   const v = makeVault(t, { config: { proposals: 'ask' } });
   const sid = started(v, null);
-  const before = v.read('vault.config.json');
+  const before = v.read('vault.local.json');
   const bare = v.run('proposals.mjs', [sid], { input: { mode: 'off' } });
   assert.equal(bare.code, 1);
   assert.equal(bare.stderr, "Not set: proposals changes the mode only from the vault's `proposals` tool, once the user allows it at the prompt.\n");
@@ -230,11 +230,11 @@ test('proposals sets the mode only with an allowed call for it', t => {
   assert.equal(denied.code, 1);
   const wrongTool = v.run('proposals.mjs', [sid, recordedCall(v, sid, { tool: 'keep' })], { input: { mode: 'off' } });
   assert.equal(wrongTool.code, 1);
-  assert.equal(v.read('vault.config.json'), before);
+  assert.equal(v.read('vault.local.json'), before);
   const call = recordedCall(v, sid, { tool: 'proposals', input: { mode: 'off' } });
   const r = v.run('proposals.mjs', [sid, call], { input: { mode: 'off' } });
   assert.equal(r.code, 0, r.stderr);
-  assert.equal(JSON.parse(v.read('vault.config.json')).proposals, 'off');
+  assert.equal(JSON.parse(v.read('vault.local.json')).proposals, 'off');
   assert.equal(v.run('proposals.mjs', [sid, call], { input: { mode: 'ask' } }).code, 1, 'a call is used once');
 });
 
@@ -325,10 +325,10 @@ test('Codex: proposals and domain go offer then code', t => {
   const s = codexStarted(v, ['switch rules to off']);
   const m = offered(v.run('proposals.mjs', [s.sid], { input: { mode: 'off' } }));
   assert.match(m.text, /^\*\*Set proposals\?\*\* off: agents propose a rule only when you ask for one\.\nReply "keep [A-Z2-9]{4}" to keep it, or say how to word it otherwise\.$/);
-  assert.equal(JSON.parse(v.read('vault.config.json')).proposals, 'ask');
+  assert.equal(JSON.parse(v.read('vault.local.json')).proposals, undefined);
   s.said(['switch rules to off', agentSays(m.text), codeOf(m.text)]);
   assert.equal(keep(v, s.sid, null, { id: m.id, offer: m.text }).code, 0);
-  assert.equal(JSON.parse(v.read('vault.config.json')).proposals, 'off');
+  assert.equal(JSON.parse(v.read('vault.local.json')).proposals, 'off');
 
   const dir = fs.mkdtempSync(`${v.root}-quill-`);
   t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
@@ -338,7 +338,7 @@ test('Codex: proposals and domain go offer then code', t => {
   d.said(['start a quill domain', agentSays(o.text), `go ${codeOf(o.text)}`]);
   const k = keep(v, d.sid, null, { id: o.id, offer: o.text });
   assert.equal(k.code, 0, k.stderr);
-  assert.ok(JSON.parse(v.read('vault.config.json')).domains.quill);
+  assert.ok(JSON.parse(v.read('vault.local.json')).domains.quill);
 });
 
 test('Codex: lines that are not the offer leave it pending, so a keep with the right lines then writes it', t => {

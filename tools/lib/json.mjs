@@ -1,4 +1,4 @@
-// Edits to a JSON file the user also edits by hand, such as vault.config.json, that leave every byte outside the edit
+// Edits to a JSON file the user also edits by hand, such as vault.local.json, that leave every byte outside the edit
 // as it was.
 
 // Scalars and lists of scalars stay on one line, as the vault's config writes them; an object takes a line per key.
@@ -77,4 +77,18 @@ export function setMember(text, open, depth, key, value) {
   if (at === undefined) return addMember(text, open, depth, key, value);
   const { eol, unit } = layout(text);
   return text.slice(0, at) + jsonText(value, unit, eol, depth) + text.slice(valueEnd(text, at));
+}
+
+// The text with the value at keys set as setMember sets it, adding each object on the way that the file lacks; null when
+// the file holds no object, or a key on the way holds something else.
+export function setIn(text, keys, value) {
+  let open = text.indexOf('{');
+  if (open < 0) return null;
+  for (let i = 0; i < keys.length - 1; i++) {
+    const at = valuesOf(text, open).get(keys[i]);
+    if (at === undefined) return addMember(text, open, i + 1, keys[i], keys.slice(i + 1).reduceRight((v, k) => ({ [k]: v }), value));
+    if (text[at] !== '{') return null;
+    open = at;
+  }
+  return setMember(text, open, keys.length, keys.at(-1), value);
 }

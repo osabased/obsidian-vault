@@ -7,7 +7,7 @@ import { unallowedSecrets, secretLine } from './lib/secrets.mjs';
 
 const USAGE = `usage: node tools/scan.mjs <file, bundle or doc set folder>...
 Lists the key- and token-shaped values in each file in the vault, or in every file of a bundle or doc set, reading a
-binary through its derived text. Exits 1 when it finds one that privacy.allow in vault.config.json doesn't allow.`;
+binary through its derived text. Exits 1 when it finds one that privacy.allow in vault.local.json doesn't allow.`;
 
 // The text a file's quotes come from: its own, or a binary's derived text, whose lines the line numbers count.
 function textOf(rel) {
@@ -75,7 +75,7 @@ function main(args) {
     }
   }
   lines.push(count
-    ? `${plural(count, 'key- or token-shaped value')} in ${plural(hit.size, 'file')}. Remove them, or add an allow id to privacy.allow in vault.config.json if it isn't a secret.`
+    ? `${plural(count, 'key- or token-shaped value')} in ${plural(hit.size, 'file')}. Remove them, or add an allow id to privacy.allow in vault.local.json if it isn't a secret.`
     : `No key- or token-shaped values in ${plural(texts.filter(([, { text }]) => text !== null).length, 'file')}.`);
   console.log(lines.join('\n'));
   return count ? 1 : 0;
