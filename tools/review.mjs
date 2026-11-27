@@ -1,7 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import {
-  config, plural, toPosix, pathKey, guarded, hookErrors, errorsLog, localDay, appendLog, proposalRows, isVaultOnly, sessionReach, cwdOf, queueRows, isMarkerName, domainsFor, isFileAt,
+  config, plural, toPosix, pathKey, guarded, errorsLog, localDay, appendLog, proposalRows, isVaultOnly, sessionReach, cwdOf, queueRows, isMarkerName, domainsFor, isFileAt,
 } from './lib/vault.mjs';
 import {
   clip, normTopic, topicNotes, loadNotes, liveRules, evidenceSessions, validDay, byKey, cmp, sharedFiles, resolver, linkedKeys, evidenceSources, isSourcePage, joinList,
@@ -9,12 +9,12 @@ import {
   namesPackage, checkedWithOnly, hasRequires, pastVersions, filled,
 } from './lib/rules.mjs';
 import { lint, tally } from './lib/lint.mjs';
-import { lintRan, lintDone, tidy, trackedSessions, sessionDomains, sessionName, sessionHits } from './lib/sessions.mjs';
+import { lintRan, lintDone, errorsSinceLint, tidy, trackedSessions, sessionDomains, sessionName, sessionHits } from './lib/sessions.mjs';
 import { anyReaders, liveRoots, projectVersions, rootOutside } from './lib/versions.mjs';
 import { retirementsAsked } from './lib/queue.mjs';
 import { subjectRows, liveRows, newestFirst, projectName } from './lib/picks.mjs';
 import { UsageError } from './lib/input.mjs';
-import { refSources, sourceVersion, sourceChains, noteCitations, newerCopies } from './lib/sources.mjs';
+import { refSources, sourceIds, sourceChains, noteCitations, newerCopies } from './lib/sources.mjs';
 
 // Each section reads these once a run; a read that fails is tried again by the next section, which reports it too.
 const once = f => {
@@ -35,11 +35,13 @@ const linted = once(() => {
 
 const lintLine = () => `Lint: ${linted().counts ?? `failed: ${linted().failed}`}`;
 
+// Only the errors since the last /lint, as session start counts them: the log rotates only once it is large, so the
+// whole log would repeat errors the user has already seen, and fixed, on every run.
 function hookHealth() {
-  const errors = hookErrors();
-  if (!errors.length) return ['No hook errors.'];
+  const errors = errorsSinceLint();
+  if (!errors.length) return ['No hook errors since /lint last ran.'];
   const { at, message } = errors.at(-1);
-  return [`${plural(errors.length, 'hook error')} in ${toPosix(errorsLog())}`, `  newest: ${clip(`${at} ${message}`, 300)}`];
+  return [`${plural(errors.length, 'hook error')} in ${toPosix(errorsLog())} since /lint last ran`, `  newest: ${clip(`${at} ${message}`, 300)}`];
 }
 
 function section(title, lines) {
@@ -77,14 +79,18 @@ const firstRows = once(() => {
 
 // Sessions are known only by the prefix an Evidence line gives; one whose markers were pruned, or that ran before
 // the hooks recorded deliveries, is unknown. A reword's Evidence line is the remedy rather than a correction, so its
-// session isn't one.
+// session isn't one, and nor is a session that only backed the rule with a source or the agent's reading of one. The
+// session the rule came from is taken before those are left out, so a rule born from a source still counts the first
+// correction after it.
+const BACKING = new Set(['source', "agent's reading"]);
 function correctedAgain() {
   const seen = (s, n) => {
     const t = tracked().find(x => x.id.startsWith(s));
     return !t ? 'unknown' : shownTo(t, n) ? 'shown' : 'not shown';
   };
   return liveNotes().flatMap(([k, , n]) => {
-    const later = evidenceSessions(n, rewords()).slice(1);
+    const [first] = evidenceSessions(n, rewords());
+    const later = evidenceSessions(n, rewords(), BACKING).filter(s => s !== first);
     return later.length ? [`- ${k}: ${later.map(s => `session ${s} ${seen(s, n)}`).join(', ')}`] : [];
   });
 }
@@ -177,44 +183,21 @@ function failedChecks() {
 // A browser saves a whole web page as <name>.html, or .htm, and the files it shows in <name>_files/ beside it.
 const savedPages = f => [...f.matchAll(/_files\//g)].flatMap(m => ['html', 'htm'].map(ext => `${f.slice(0, m.index)}.${ext}`));
 
-// /ingest gives each file it takes in a source page, so a file a footnote cites but no source page names is still to do.
-// A file saved from a URL is done once a source page names that URL, or a file saved from it with the same hash, and a
-// file a saved page shows goes with that page. A copy with a sha256 is done only when a page names that file or a copy
-// with the same URL and sha256, so a page on the bare URL names only the copies that have none. A copy with another hash
-// is a new version of the source, still to do.
-// A folder with a source.md is one source however many files it holds, named by the folder or a path in it.
+// /ingest gives each source one source page, so a source no source page is on is still to do, though a footnote cites
+// it. The newest copy of a source stands for it. A newer copy of a source that has a page is not listed: build marks
+// that page unverified, as it does every note that cites the older copy. A file a saved page shows goes with that page.
 // Only a file a source page could name is listed, which leaves out links to folders.
 const unnamedSources = () => {
   const { loose, bundles } = refSources();
   const all = new Set(loose);
-  const versions = new Map([...loose, ...bundles].map(f => [f, sourceVersion(f)]));
-  const versionKey = v => `${v.url}\n${v.version}`;
-  const hashKey = v => `${v.url}\n${v.sha256}`;
-  const named = new Set();
-  const urls = new Set();
-  const pinned = new Set();
-  const pinnedUrls = new Set();
-  const hashes = new Set();
-  for (const n of sourcePages()) {
-    const item = sourceItem(n.data.source).rel;
-    const v = item && versions.get(item);
-    if (item) named.add(item);
-    else if (n.data.source) urls.add(n.data.source);
-    if (v?.sha256) hashes.add(hashKey(v));
-    if (v?.version) {
-      pinned.add(versionKey(v));
-      pinnedUrls.add(v.url);
-    } else if (v) {
-      urls.add(v.url);
-    }
+  const ids = sourceIds(chains());
+  const paged = new Set(sourcePages().map(ids.ofPage));
+  const newest = new Map([...loose, ...bundles].map(f => [ids.of(f), f]));
+  for (const [id, chain] of chains().chains) {
+    const last = chain.findLast(f => all.has(f));
+    if (last) newest.set(id, last);
   }
-  return [...loose, ...bundles].filter(f => {
-    const v = versions.get(f);
-    const done = named.has(f) || (v?.sha256
-      ? hashes.has(hashKey(v))
-      : v && (urls.has(v.url) || (v.version ? pinned.has(versionKey(v)) : pinnedUrls.has(v.url))));
-    return !done && !savedPages(f).some(p => all.has(p));
-  }).sort();
+  return [...newest].filter(([id, f]) => !paged.has(id) && !savedPages(f).some(p => all.has(p))).map(([, f]) => f).sort();
 };
 
 function uncheckedQuotes() {

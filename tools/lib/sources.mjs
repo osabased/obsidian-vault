@@ -7,7 +7,7 @@ import { cachedFiles } from './cache.mjs';
 import { checkDeadline } from './deadline.mjs';
 import {
   isUrl, validDay, rawFile, bundleOf, bundleAbove, folderNames, isDocSet, manifestNames, filled, parsedFile, normUrl, evidenceSources, footnotes, locate, linkedKeys,
-  isSourcePage, undelivered, resolver, cmp, isMap, joinList, clip, isRetired,
+  isSourcePage, undelivered, resolver, cmp, isMap, joinList, clip, isRetired, sourceItem,
 } from './rules.mjs';
 
 export const KINDS = ['pdf', 'video', 'audio', 'image'];
@@ -366,6 +366,7 @@ export function noteCitations(notes, chains) {
       ...evidenceSources(n),
       ...footnotes(n).defs.flatMap(d => (d.target ? [locate(d, fileOf).base] : [])),
       ...linkedKeys(n, resolve).flatMap(k => (typeof pages.get(k)?.data.source === 'string' ? [pages.get(k).data.source] : [])),
+      ...(isSourcePage(n) && typeof n.data.source === 'string' ? [n.data.source] : []),
     ];
     const ids = new Set();
     const latest = new Map();
@@ -387,6 +388,25 @@ export function noteCitations(notes, chains) {
     }
     return { ids, latest };
   };
+}
+
+// Which source a file or folder under raw/refs/, or a source page's source, is: every copy saved from one URL or one
+// file of a repo is one source, the chain it is in. A bundle is saved by hand and nothing orders two of one URL, so one
+// is its URL at its commit; anything else is itself.
+export function sourceIds(chains) {
+  const ofItem = memo(rel => {
+    const id = chains.files.get(rel)?.id;
+    if (id) return id;
+    const v = isDocSet(rel) ? null : sourceVersion(rel);
+    return v ? `${normUrl(v.url)}${v.version ? `\n${v.version}` : ''}` : rel;
+  });
+  const of = ref => {
+    if (typeof ref !== 'string' || !ref) return null;
+    if (isUrl(ref)) return normUrl(ref);
+    const { rel } = sourceItem(ref);
+    return rel ? ofItem(rel) : null;
+  };
+  return { of, ofPage: n => of(n.data.source) };
 }
 
 // The copies later in a source's chain than place i that aren't a baseline, so a note citing copy i hasn't seen them.

@@ -273,6 +273,28 @@ test('a source saved with no sha256 gets a baseline copy, which marks nothing un
   assert.equal(derived(v).unverified['glim/notes-fact'].since, today());
 });
 
+test('a web page served again with only its markup changed is unchanged, and one whose visible text changed gets a copy', async t => {
+  const page = (ver, ray, word) => `<!doctype html>\n<html><head><link rel='stylesheet' href='/app.css?ver=${ver}'>`
+    + `<script src="/runtime~main.${ray}.js"></script></head>\n<body><p>Assume <em>variability</em>; ${word} options.</p>`
+    + `<script>window.__CF$cv$params={r:'${ray}'};</script></body></html>\n`;
+  const first = page('1795594014', 'a5ff4cd759e88544', 'preserve');
+  const server = await serve(t, { '/sbd': { body: `\n${page('1795763394', 'a6101f814882db5c', 'preserve')}` } });
+  const v = makeVault(t);
+  const url = server.url('/sbd');
+  saved(v, 'raw/refs/sbd.md', { url, fetched: '2026-10-01', sha256: sha256(first) }, first);
+  v.write('wiki/glim/rules/sbd-fact.md', knowledgeRule('glim', 'raw/refs/sbd.md', 'preserve options'));
+  const before = filesUnder(v, 'raw');
+  let r = await refresh(v);
+  assert.ok(lines(r).includes(`unchanged ${url} (same text)`), r.stdout);
+  assert.deepEqual(filesUnder(v, 'raw'), before, 'a markup-only change saved a copy');
+  assert.deepEqual(derived(v).unverified, {});
+  const changed = page('1795763394', 'a6101f814882db5c', 'drop');
+  server.set('/sbd', { body: changed });
+  r = await refresh(v);
+  assert.ok(lines(r).includes(`changed ${url}: raw/refs/sbd.${sha256(changed).slice(0, 8)}.md`), r.stdout);
+  assert.deepEqual(derived(v).unverified['glim/sbd-fact'].sources, [url]);
+});
+
 test('copies from one day go in the order their replaces gives, whatever their names', async t => {
   const server = await serve(t, { '/guide': { body: 'Third.\n' } });
   const v = makeVault(t);

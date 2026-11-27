@@ -141,6 +141,23 @@ test('a newer source repeating a knowledge rule moves its as_of up, and an older
   assert.match(v.read('wiki/glim/old-api.md'), /^as_of: 2026-09-01$/m);
 });
 
+test("a knowledge rule's because that gives its own As of date is refused, new or reworded, since delivery adds the date", t => {
+  const { v, sid } = setup(t);
+  v.write('raw/refs/notes.md', 'The solver is on by default.\n');
+  const knowledge = { kind: 'knowledge', basis: 'source', source: 'raw/refs/notes.md', source_date: '2026-09-01', quote: 'The solver is on by default' };
+  const why = /because gives an 'As of' date\. A knowledge rule's as_of follows its Because wherever it is shown, so leave the date out of because\./;
+  const fresh = v.propose(sid, proposal({ ...knowledge, because: 'The 2026 docs say so. As of 2026-09-01.' }));
+  assert.equal(fresh.code, 1);
+  assert.match(fresh.stderr, why);
+  assert.equal(v.exists('wiki/glim/rules/new-rule.md'), false);
+  const taste = v.propose(sid, proposal({ because: 'As of 2026-09-01 the team agreed.' }));
+  assert.equal(taste.code, 0, taste.stderr);
+  v.write('wiki/glim/old-api.md', ruleNote({ kind: 'knowledge', basis: 'source', applies_to: ['src/**'], extra: ['as_of: 2026-01-01'] }));
+  const reword = v.propose(sid, { change: 'reword', key: 'glim/old-api', ...knowledge, because: 'The docs say so. As of 2026-09-01.' });
+  assert.equal(reword.code, 1);
+  assert.match(reword.stderr, why);
+});
+
 const oldApi = (v, extra = ['as_of: 2026-01-01'], examples = []) => {
   v.write('wiki/glim/old-api.md', ruleNote({ kind: 'knowledge', basis: 'source', applies_to: ['src/**'], extra }).replace('## Examples\n', ['## Examples', ...examples, ''].join('\n')));
   v.write('raw/refs/notes.md', 'The solver is on by default.\n');

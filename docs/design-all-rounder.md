@@ -202,7 +202,7 @@ Phase-3 notes then need no migration, even where the tooling lands later.
 - *Design.*
   - A saved source in `raw/refs/` starts with `url`, `fetched`, `etag`, `last_modified` and `sha256` (of the body). A git source gives `repo`, `path` and `commit` instead.
   - Refresh (6.2a) uses these fields.
-  - A re-fetched file with the same URL but a new hash counts as a new version, not an already-named source. `review.mjs:124-162` already matches a saved copy by URL and hash (`sources.mjs:153-165`).
+  - Every copy saved from one URL, or one file of a repo, is one source (`sourceIds` in `sources.mjs`): a re-fetched file with a new hash is that source changed, and the page already on it is updated, not joined by a second.
 
 **e. Locators.**
 - *Problem.* Lint warns on footnotes such as `real.pdf#page=3` and `talk.mp4 @ 00:12:31` (`lint.mjs:208`).
@@ -744,7 +744,7 @@ The phases build mechanism only. Adding real knowledge and taste is the user's c
      - A note keeps citing the copy it cites. That copy stays its evidence, and its quotes are still checked against it, as in phase 1. Only refresh runs `git show`.
      - A note is unverified while a source it cites has a copy, not a baseline, later in the chain than the latest copy the note cites. Citations are the Evidence lines (`evidenceSources`, `rules.mjs:609`) and the footnotes (`citedSources`, `rules.mjs:750`). `since` is the `fetched` day of the earliest such copy.
      - A note clears once it cites the newer copy: propose again with `repeats` and a quote from the new copy, which adds the Evidence line and moves `as_of` up. A note that no longer holds is retired with `superseded_by`.
-     - `review.mjs sources` already lists a new copy no source page names, since it has a new hash (`review.mjs:124-162`, `sources.mjs:153-165`). So `/ingest` takes it in.
+     - A source page counts as citing its own `source`, so it is unverified like any note once a newer copy lands, and `review.mjs sources` doesn't list that copy: the page is updated, not joined by a second.
      - `newerSources` (`review.mjs:106-119`) also takes the source pages, in any domain and on any topic, whose `source` is a later copy in a chain the rule cites.
    - **`.state/derived.json`.**
 

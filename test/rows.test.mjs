@@ -344,6 +344,20 @@ test("review status leaves a reword's Evidence line out of the rules corrected a
   assert.deepEqual(sectionOf(v.run('review.mjs', ['status']).stdout, 'Rules corrected again in later sessions'), ['- glim/roomy-cards: session 3c4d5e6f unknown']);
 });
 
+test('review status leaves sessions that only backed a rule with a source or a reading out of the rules corrected again', t => {
+  const v = makeVault(t);
+  v.write('wiki/glim/rules/roomy-cards.md', ruleNote({ applies_to: ['src/**'], evidence: [
+    '- 2026-10-01 · stated · session 1a2b3c4d · "do the thing" (a-00000001)',
+    '- 2026-10-02 · source · session 2b3c4d5e · raw/refs/guide.md · dated 2026-09-01 · "the thing" (a-00000002)',
+    "- 2026-10-03 · agent's reading · session 2b3c4d5e · The guide makes the same case (a-00000003)",
+  ] }));
+  v.write('wiki/glim/rules/sourced-cards.md', ruleNote({ applies_to: ['src/**'], evidence: [
+    '- 2026-10-01 · source · session 4d5e6f70 · raw/refs/guide.md · dated 2026-09-01 · "the thing" (a-00000004)',
+    '- 2026-10-04 · stated · session 5e6f7081 · "do the thing, I said" (a-00000005)',
+  ] }));
+  assert.deepEqual(sectionOf(v.run('review.mjs', ['status']).stdout, 'Rules corrected again in later sessions'), ['- glim/sourced-cards: session 5e6f7081 unknown']);
+});
+
 test('review status counts a rule as not shown only to the sessions seen after it was written', t => {
   const v = makeVault(t);
   // An Evidence line names its session by the id's first part, so the three differ there.

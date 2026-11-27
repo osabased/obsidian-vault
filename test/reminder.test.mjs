@@ -55,3 +55,11 @@ test("the reminder counts the whole vault's notes, not only the session's domain
   for (let i = 0; i < 10; i++) v.write(`wiki/other/rules/r${i}.md`, ruleNote({ domain: 'other', topic: 'x', doLine: `Do thing ${i} again.` }));
   assert.equal(reminder(v), remind(v, 'last ran 1 day ago, and 10 notes changed since'));
 });
+
+test("review status's hook health counts only the errors since /lint last ran, as session start does", t => {
+  const v = makeVault(t);
+  v.write('.state/errors.log', '2026-10-01T10:00:00.000Z vault mcp: pick.mjs --schema prompt failed: Cannot find module\n');
+  const health = () => v.run('review.mjs', ['status']).stdout.split('\n\n')[1].split('\n');
+  assert.deepEqual(health(), ['Hook health', `1 hook error in ${v.at('.state', 'errors.log').replace(/\\/g, '/')} since /lint last ran`, '  newest: 2026-10-01T10:00:00.000Z vault mcp: pick.mjs --schema prompt failed: Cannot find module']);
+  assert.deepEqual(health(), ['Hook health', 'No hook errors since /lint last ran.']);
+});

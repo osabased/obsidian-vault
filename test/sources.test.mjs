@@ -4,7 +4,7 @@ import path from 'node:path';
 import { execFileSync } from 'node:child_process';
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { makeVault, cleanEnv, ruleNote, pageNote as page, sourcePage, userTurn, sessionId, sectionOf, withFields } from './fixture.mjs';
+import { makeVault, cleanEnv, ruleNote, pageNote as page, sourcePage, userTurn, sessionId, sectionOf, withFields, sha256 } from './fixture.mjs';
 
 
 test('review sources lists the files in raw/refs/ no source page names, and status lists them too', t => {
@@ -137,21 +137,110 @@ test('a bundle at a new commit of the same URL is a new version, not a source al
   assert.equal(v.run('review.mjs', ['sources']).stdout, 'raw/refs/lib-2\n');
 });
 
-test('a file re-fetched from the same URL with a new sha256 is a new version, and one with the same sha256 is not', t => {
+const url = 'https://example.com/guide';
+const copy = (fields, body) => withFields({ url, ...fields, sha256: sha256(body) }, body);
+const EVERY = 'Every file in raw/refs/ has a source page.\n';
+const UNVERIFIED = 'Notes a changed source has left unverified';
+const sources = v => v.run('review.mjs', ['sources']).stdout;
+const unverified = v => {
+  v.run('build.mjs');
+  return sectionOf(v.run('review.mjs', ['status']).stdout, UNVERIFIED);
+};
+
+test('the first hashed copy of a source that has a page is not a source to ingest, and marks nothing unverified', t => {
   const v = makeVault(t);
-  const hex = c => c.repeat(64);
-  const saved = (url, sha256) => `---\nurl: ${url}\nfetched: 2026-10-01\n${sha256 ? `sha256: ${sha256}\n` : ''}---\nThe page.\n`;
-  v.write('raw/refs/page-v1.md', saved('https://example.com/page', hex('a')));
-  v.write('raw/refs/page-v1-again.md', saved('https://example.com/page', hex('a')));
-  v.write('raw/refs/page-v2.md', saved('https://example.com/page', hex('b')));
-  v.write('raw/refs/old-v1.md', saved('https://example.com/old', hex('c')));
-  v.write('raw/refs/old-v2.md', saved('https://example.com/old', hex('d')));
-  v.write('raw/refs/plain-1.md', saved('https://example.com/plain'));
-  v.write('raw/refs/plain-2.md', saved('https://example.com/plain'));
+  v.write('raw/refs/guide.md', withFields({ url, fetched: '2026-10-01' }, 'One.\n'));
+  v.write('raw/refs/guide.aaaaaaaa.md', copy({ fetched: '2026-10-02', replaces: 'raw/refs/guide.md', baseline: true }, 'One, whole page.\n'));
+  v.write('wiki/glim/sources/source-guide.md', sourcePage({ source: 'raw/refs/guide.md' }));
+  assert.equal(sources(v), EVERY);
+  assert.deepEqual(unverified(v), ['None.']);
+});
+
+test('a changed copy of a source that has a page is not listed; the page is unverified until it names that copy', t => {
+  const v = makeVault(t);
+  v.write('raw/refs/guide.md', withFields({ url, fetched: '2026-10-01' }, 'One.\n'));
+  v.write('wiki/glim/sources/source-guide.md', sourcePage({ source: 'raw/refs/guide.md' }));
+  v.write('raw/refs/guide.aaaaaaaa.md', copy({ fetched: '2026-10-02', replaces: 'raw/refs/guide.md', baseline: true }, 'One, whole page.\n'));
+  v.write('raw/refs/guide.bbbbbbbb.md', copy({ fetched: '2026-10-03', replaces: 'raw/refs/guide.aaaaaaaa.md' }, 'Two, whole page.\n'));
+  assert.equal(sources(v), EVERY);
+  assert.deepEqual(unverified(v), ['- glim/source-guide: since 2026-10-03 · https://example.com/guide, newer copy raw/refs/guide.bbbbbbbb.md']);
+  v.write('wiki/glim/sources/source-guide.md', sourcePage({ source: 'raw/refs/guide.bbbbbbbb.md' }));
+  assert.equal(sources(v), EVERY);
+  assert.deepEqual(unverified(v), ['None.']);
+});
+
+test('a page that links a source page left behind its source is unverified with it', t => {
+  const v = makeVault(t);
+  v.write('raw/refs/guide.md', withFields({ url, fetched: '2026-10-01', sha256: 'a'.repeat(64) }, 'One.\n'));
+  v.write('raw/refs/guide.bbbbbbbb.md', withFields({ url, fetched: '2026-10-03', sha256: 'b'.repeat(64), replaces: 'raw/refs/guide.md' }, 'Two.\n'));
+  v.write('wiki/glim/sources/source-guide.md', sourcePage({ source: 'raw/refs/guide.md' }));
+  v.write('wiki/glim/concepts/linker.md', page({ kind: 'concept', keywords: ['linker'], body: ['See [[wiki/glim/sources/source-guide|source-guide]].'] }));
+  assert.deepEqual(unverified(v).map(l => l.split(':')[0]), ['- glim/linker', '- glim/source-guide']);
+});
+
+test('a source with no page is listed once, as its newest copy, however its copies were saved', t => {
+  const v = makeVault(t);
+  v.write('raw/refs/guide.md', withFields({ url, fetched: '2026-10-01' }, 'One.\n'));
+  v.write('raw/refs/guide.aaaaaaaa.md', copy({ fetched: '2026-10-02', replaces: 'raw/refs/guide.md', baseline: true }, 'One, whole page.\n'));
+  v.write('raw/refs/guide.bbbbbbbb.md', copy({ fetched: '2026-10-03', replaces: 'raw/refs/guide.aaaaaaaa.md' }, 'Two, whole page.\n'));
+  const other = b => withFields({ url: 'https://example.com/hand', fetched: b === 'One.\n' ? '2026-10-01' : '2026-10-02', sha256: sha256(b) }, b);
+  v.write('raw/refs/hand-1.md', other('One.\n'));
+  v.write('raw/refs/hand-2.md', other('Two.\n'));
+  v.write('raw/refs/note.md', 'No url.\n');
+  assert.equal(sources(v), 'raw/refs/guide.bbbbbbbb.md\nraw/refs/hand-2.md\nraw/refs/note.md\n');
+  v.write('wiki/glim/sources/source-hand.md', sourcePage({ source: 'raw/refs/hand-1.md' }));
+  v.write('wiki/glim/sources/source-guide.md', sourcePage({ source: `${url}/` }));
+  assert.equal(sources(v), 'raw/refs/note.md\n');
+});
+
+test('a file of a git repo saved again at a new commit is its source changed, not a new source', t => {
+  const v = makeVault(t);
+  const git = (c, extra = {}) => withFields({ repo: 'https://github.com/o/r', path: 'README.md', commit: c.repeat(40), fetched: '2026-10-01', ...extra }, `Text ${c}.\n`);
+  v.write('raw/refs/readme.md', git('a'));
+  v.write('wiki/glim/sources/source-readme.md', sourcePage({ source: 'raw/refs/readme.md' }));
+  v.write('raw/refs/readme.bbbbbbbb.md', git('b', { fetched: '2026-10-05', replaces: 'raw/refs/readme.md' }));
+  assert.equal(sources(v), EVERY);
+  assert.deepEqual(unverified(v), ['- glim/source-readme: since 2026-10-05 · https://github.com/o/r README.md, newer copy raw/refs/readme.bbbbbbbb.md']);
+});
+
+test('lint warns on each of two source pages on one source, named by a copy, another copy or its URL', async t => {
+  const v = makeVault(t);
+  v.write('raw/refs/guide.md', withFields({ url, fetched: '2026-10-01' }, 'One.\n'));
+  v.write('raw/refs/guide.aaaaaaaa.md', copy({ fetched: '2026-10-02', replaces: 'raw/refs/guide.md', baseline: true }, 'One, whole page.\n'));
+  v.write('raw/refs/lone.md', withFields({ url: 'https://example.com/lone', fetched: '2026-10-01' }, 'Lone.\n'));
+  v.write('wiki/glim/sources/source-guide.md', sourcePage({ source: 'raw/refs/guide.md' }));
+  v.write('wiki/glim/sources/source-guide-full.md', sourcePage({ source: 'raw/refs/guide.aaaaaaaa.md' }));
+  v.write('wiki/glim/sources/source-guide-url.md', sourcePage({ source: `${url}/#top` }));
+  v.write('wiki/glim/sources/source-lone.md', sourcePage({ source: 'raw/refs/lone.md' }));
+  const found = (await v.import('lib/lint.mjs')).lint().filter(f => /another source page/.test(f.msg));
+  assert.deepEqual(found.map(f => `${f.level} ${f.file}`).sort(), [
+    'warn wiki/glim/sources/source-guide-full.md', 'warn wiki/glim/sources/source-guide-url.md', 'warn wiki/glim/sources/source-guide.md',
+  ]);
+  assert.match(found.find(f => f.file.endsWith('source-guide.md')).msg, /glim\/source-guide-full, glim\/source-guide-url\. Merge them into one/);
+});
+
+test('lint warns on a source page on a bare URL that raw/refs/ holds a copy of, since no copy pins it', async t => {
+  const v = makeVault(t);
+  v.write('raw/refs/guide.md', copy({ fetched: '2026-10-01' }, 'One.\n'));
+  v.write('wiki/glim/sources/source-guide.md', sourcePage({ source: url }));
+  v.write('wiki/glim/sources/source-web.md', sourcePage({ source: 'https://example.com/never-saved' }));
+  const found = (await v.import('lib/lint.mjs')).lint().filter(f => /source is a URL/.test(f.msg));
+  assert.deepEqual(found.map(f => `${f.level} ${f.file}`), ['warn wiki/glim/sources/source-guide.md']);
+  assert.match(found[0].msg, /raw\/refs\/guide\.md$/);
+});
+
+test('copies saved from one URL are one source, named by a page on any of them or on the URL', t => {
+  const v = makeVault(t);
+  const saved = (u, hash) => `---\nurl: ${u}\nfetched: 2026-10-01\nsha256: ${hash.repeat(64)}\n---\nThe page.\n`;
+  v.write('raw/refs/page-v1.md', saved('https://example.com/page', 'a'));
+  v.write('raw/refs/page-v2.md', saved('https://example.com/page', 'b'));
+  v.write('raw/refs/old-v1.md', saved('https://example.com/old', 'c'));
+  v.write('raw/refs/old-v2.md', saved('https://example.com/old', 'd'));
+  v.write('raw/refs/new-v1.md', saved('https://example.com/new', 'e'));
+  v.write('raw/refs/new-v2.md', saved('https://example.com/new', 'f'));
   v.write('wiki/glim/source-page.md', sourcePage({ source: 'raw/refs/page-v1.md' }));
   v.write('wiki/glim/source-old.md', sourcePage({ source: 'https://example.com/old' }));
-  v.write('wiki/glim/source-plain.md', sourcePage({ source: 'raw/refs/plain-1.md' }));
-  assert.equal(v.run('review.mjs', ['sources']).stdout, 'raw/refs/old-v1.md\nraw/refs/old-v2.md\nraw/refs/page-v2.md\n', 'a page on the bare URL names only copies with no sha256; a page on a file names it and copies with its sha256');
+  assert.equal(v.run('review.mjs', ['sources']).stdout, 'raw/refs/new-v2.md\n');
 });
 
 test('a fresh checkout with core.autocrlf=true leaves the files in raw/ as they were saved', t => {

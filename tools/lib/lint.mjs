@@ -24,7 +24,7 @@ import { loadExtractor } from './extractors.mjs';
 import { CLOSING, kindsThat } from './queue.mjs';
 import {
   KINDS, LOCATORS, hashFile, lineCount, clockTime, parseLocator, anchorsIn, derivedAnchors, manifestLine, sourceProblems, refSources,
-  sourceChains, noteCitations, knowledgeDays, newerCopies, copyStem,
+  sourceChains, noteCitations, knowledgeDays, newerCopies, copyStem, sourceIds,
 } from './sources.mjs';
 
 export const tally = found => {
@@ -140,6 +140,7 @@ export function lint(notes = loadNotes(), chains = sourceChains()) {
   lintReaders(notes, add);
   lintTopics(notes, domains, add);
   lintTopicPages(notes, add);
+  lintSourcePages(notes, chains, add);
   lintOrphans(notes, resolve, add);
   lintPicks(add);
   lintPackages(notes, resolve, add);
@@ -432,6 +433,22 @@ function lintTopicPages(notes, add) {
       if (pages.length < 2) continue;
       for (const p of pages) add('warn', p.rel, `another topic page is on ${t}: ${pages.filter(x => x !== p).map(x => x.key).join(', ')}. Merge them into one`);
     }
+  }
+}
+
+// What the user said of a source, and what it says, would split between two source pages on it.
+function lintSourcePages(notes, chains, add) {
+  const ids = sourceIds(chains);
+  const by = new Map();
+  for (const n of notes.filter(isSourcePage)) {
+    const id = ids.ofPage(n);
+    if (id) by.set(id, [...(by.get(id) ?? []), n]);
+    // A URL names no copy, so nothing can tell that the page is behind a changed one.
+    if (isUrl(n.data.source) && chains.chains.has(id)) add('warn', n.rel, `source is a URL raw/refs/ holds a copy of. Name the copy this page was read from, so a changed copy marks it: the newest is ${chains.chains.get(id).at(-1)}`);
+  }
+  for (const pages of by.values()) {
+    if (pages.length < 2) continue;
+    for (const p of pages) add('warn', p.rel, `another source page is on this source: ${pages.filter(x => x !== p).map(x => x.key).join(', ')}. Merge them into one`);
   }
 }
 

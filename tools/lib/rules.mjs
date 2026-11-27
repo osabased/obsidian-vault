@@ -820,8 +820,9 @@ export function fitIn(hits, cwd) {
   return n => noteFit(n, () => (versions ??= projectVersions(hits, cwd, fallback)));
 }
 
-// The session prefixes the Evidence lines give, first seen first, leaving out the lines of the proposals in skip.
-export const evidenceSessions = (n, skip) => [...new Set(evidenceLines(n).flatMap(e => (skip?.has(e.id) ? [] : e.session ?? [])))];
+// The session prefixes the Evidence lines give, first seen first, leaving out the lines of the proposals in skip and the
+// lines of the kinds in skipKinds.
+export const evidenceSessions = (n, skip, skipKinds) => [...new Set(evidenceLines(n).flatMap(e => (skip?.has(e.id) || skipKinds?.has(e.kind) ? [] : e.session ?? [])))];
 export const evidenceSources = n => evidenceLines(n).filter(e => e.kind === 'source').flatMap(e => e.cite.match(/^(.+?) · dated /)?.[1] ?? []);
 
 const PREFERENCE_RANK = ['stated', 'pick', 'inferred', 'reading'];

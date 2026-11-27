@@ -733,6 +733,13 @@ function move(sid, session, p, opts) {
   });
 }
 
+// Delivery puts a knowledge rule's as_of after its Because, so a date the Because gives itself would show twice.
+function becauseLine(p, kind) {
+  const text = line(p, 'because', false);
+  if (kind === 'knowledge' && /\bas of \d{4}-\d\d-\d\d\b/i.test(text)) refuse("because gives an 'As of' date. A knowledge rule's as_of follows its Because wherever it is shown, so leave the date out of because.");
+  return text;
+}
+
 // A reword replaces what it gives of the rule's Do, Not, Because, applies_to, keywords, kind and topic, and backs the
 // change with evidence as a new rule is backed. The note keeps its other lines, its Evidence among them.
 function reword(sid, session, p, opts) {
@@ -749,7 +756,7 @@ function reword(sid, session, p, opts) {
   const given = (name, read = line) => (Object.hasOwn(p, name) ? read(p, name) : old[name]);
   const f = {
     ...base, domain: old.domain, slug: old.slug, kind, topic: Object.hasOwn(p, 'topic') ? line(p, 'topic') : old.data.topic, basis,
-    do: given('do'), not: given('not'), because: given('because', (q, k) => line(q, k, false)),
+    do: given('do'), not: given('not'), because: given('because', q => becauseLine(q, kind)),
     applies_to: given('applies_to', lines), keywords: given('keywords', lines), checked_with: given('checked_with'),
     tools: old.tools, always: old.always, day: kept?.day || today(), id: newId('a'),
   };
@@ -869,7 +876,7 @@ export function proposeRule(sid, p, { kept = null, queueAs = null, mainWorktree 
   f.basis = line(p, 'basis');
   if (['reading', 'inferred'].includes(f.basis)) refuse(ON_A_PAGE);
   if (!BASES[f.kind].includes(f.basis)) refuse(`${wrongBasis(f.kind, f.basis)}.`);
-  Object.assign(f, { do: line(p, 'do'), not: line(p, 'not'), because: line(p, 'because', false) });
+  Object.assign(f, { do: line(p, 'do'), not: line(p, 'not'), because: becauseLine(p, f.kind) });
   Object.assign(f, { applies_to: lines(p, 'applies_to'), triggers: lines(p, 'triggers'), keywords: lines(p, 'keywords') });
   const always = p.always ?? false;
   if (typeof always !== 'boolean') refuse('always must be true or false.');

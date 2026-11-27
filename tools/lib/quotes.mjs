@@ -53,7 +53,7 @@ function decodeEntity(m, name) {
   return code > 0 && code <= 0x10ffff ? String.fromCodePoint(code) : m;
 }
 
-const htmlText = html => html.replace(/<(script|style)\b[\s\S]*?<\/\1\s*>/gi, ' ').replace(INLINE_TAGS, '').replace(/<[^>]*>/g, ' ')
+export const htmlText = html => html.replace(/<(script|style)\b[\s\S]*?<\/\1\s*>/gi, ' ').replace(INLINE_TAGS, '').replace(/<[^>]*>/g, ' ')
   .replace(/&(#\d+|#x[0-9a-f]+|[a-z][a-z0-9]*);/gi, decodeEntity);
 
 // Link text without its target, and words without their emphasis or code marks. An underscore inside a word is kept.

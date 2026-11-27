@@ -6,6 +6,7 @@ import { yamlQuote } from './lib/frontmatter.mjs';
 import { sourceChains, copyStem, sourceProblems, sha256 } from './lib/sources.mjs';
 import { clone, hasOrigin, fetchOrigin, hasCommit, remoteHead, lastChange, sizeAt, showAt } from './lib/git.mjs';
 import { build } from './lib/build.mjs';
+import { htmlText } from './lib/quotes.mjs';
 
 const USAGE = 'usage: node tools/refresh.mjs';
 // Set in main, so a config that can't be read fails the run as any other error does.
@@ -78,6 +79,13 @@ const cloneDir = repo => {
   return vaultPath('.sources', `${name}-${shortHash(repo).slice(0, 8)}`);
 };
 
+// A web page served again with new cache-busting query strings, Cloudflare ray IDs or hashed bundle names reads the
+// same, and a copy of it would mark every note citing it unverified for nothing. Only HTML is read this way: stripping
+// tags from Markdown or plain text would hide a real change such as Vec<String> to Vec<u8>.
+const isHtml = text => /^\s*<(?:!doctype html|html)[\s>]/i.test(text);
+const visibleText = html => htmlText(html).replace(/\s+/g, ' ').trim();
+const sameVisibleText = (a, b) => isHtml(a) && isHtml(b) && visibleText(a) === visibleText(b);
+
 const linksIn = (text, base) => new Set([...text.matchAll(/\]\(\s*<?([^)\s>]+)|(?<![(<\w])(https?:\/\/[^\s)>\]]+)/g)].flatMap(m => {
   try { return [normUrl(new URL(m[1] ?? m[2], base).href)]; } catch { return []; }
 }));
@@ -109,6 +117,7 @@ async function checkUrl(id, chain, chains, was, { data, body }) {
   const headers = { etag: got.etag, lastModified: got.lastModified };
   if (data.sha256 && hash === data.sha256) return { result: 'unchanged', ...headers };
   const manifest = chains.files.get(latest).manifest;
+  if (data.sha256 && !manifest && sameVisibleText(got.text, body)) return { result: 'unchanged', note: ' (same text)', ...headers };
   const result = data.sha256 ? 'changed' : 'baseline';
   const ext = manifest ? path.posix.extname(latest) : '.md';
   const copy = {
